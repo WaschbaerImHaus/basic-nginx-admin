@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Entität Vhost.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-17 22:59
  */
 
 namespace Tests;
@@ -118,6 +118,22 @@ final class VhostTest extends TestCase
 		$this->expectExceptionMessage('../secret');
 		Vhost::fromRow([
 			'id' => '7', 'name' => 'a.de', 'kind' => 'domain', 'port' => null, 'subdir' => '../secret',
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+	}
+
+	/**
+	 * Befund 4: ein unbekannter Wert in der Spalte "kind" soll eine \RuntimeException
+	 * auslösen (wie die übrigen Revalidierungsprüfungen), nicht den \ValueError von
+	 * VhostKind::from() – den fängt das CLI zwar über \Throwable ab, die Oberfläche
+	 * aber nicht, sodass ein defekter Datensatz dort zu HTTP 500 führen würde.
+	 */
+	public function testFromRowRejectsUnknownKind(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('unbekannt');
+		Vhost::fromRow([
+			'id' => '7', 'name' => 'a.de', 'kind' => 'ftp', 'port' => null, 'subdir' => null,
 			'protect' => '1', 'ssl' => '0', 'created_at' => null,
 		]);
 	}

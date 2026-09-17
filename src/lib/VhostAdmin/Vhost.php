@@ -15,7 +15,7 @@ declare(strict_types=1);
  * führen, egal wie sie entstanden ist.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-17 22:59
  */
 
 namespace VhostAdmin;
@@ -113,10 +113,11 @@ final class Vhost
 	 */
 	public static function fromRow(array $row): self
 	{
+		$kind = (string)$row['kind'];
 		return new self(
 			(int)$row['id'],
 			(string)$row['name'],
-			VhostKind::from((string)$row['kind']),
+			VhostKind::tryFrom($kind) ?? throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: unbekannte Art \"$kind\""),
 			$row['port'] === null ? null : (int)$row['port'],
 			$row['subdir'] === null || $row['subdir'] === '' ? null : (string)$row['subdir'],
 			(bool)$row['protect'],

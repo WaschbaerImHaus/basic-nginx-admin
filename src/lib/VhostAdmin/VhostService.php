@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-17 22:59
  */
 
 namespace VhostAdmin;
@@ -105,18 +105,37 @@ final class VhostService
 	 * Löscht den Basisordner eines vHosts rekursiv, aber nur, wenn er sich nach
 	 * Auflösung aller Symlinks/".." wirklich unterhalb der Web-Wurzel befindet.
 	 *
+	 * Ist der Basisordner selbst ein Symlink (z.B. weil ein Admin ihn auf einen anderen
+	 * vHost umgehängt hat), wird nichts gelöscht: "rm -rf" auf den aufgelösten Pfad
+	 * würde sonst das Ziel des Symlinks treffen – etwa den Docroot eines fremden
+	 * vHosts oder, zeigt der Symlink auf die Web-Wurzel selbst, die Web-Wurzel
+	 * komplett – und den Symlink selbst stehen lassen. Deshalb auch die eigene
+	 * Ausnahme dafür, unabhängig vom folgenden Präfixvergleich.
+	 *
 	 * Ein reiner Präfixvergleich auf dem unaufgelösten Pfad wäre für
 	 * "/var/www/../../etc" ebenfalls wahr; deshalb wird hier mit realpath()
 	 * aufgelöst. Lässt sich der Basisordner nicht auflösen (existiert nicht),
-	 * wird nichts gelöscht.
+	 * wird nichts gelöscht. Ebenso wird nicht gelöscht, wenn der aufgelöste
+	 * Basisordner mit der aufgelösten Web-Wurzel übereinstimmt statt echt darunter
+	 * zu liegen ("$realBase === $realRoot" bestünde den Präfixvergleich sonst auch).
 	 *
-	 * @throws \RuntimeException wenn "rm -rf" fehlschlägt
+	 * @throws \RuntimeException wenn der Basisordner ein Symlink ist, oder wenn
+	 *         "rm -rf" fehlschlägt
 	 */
 	private function purgeBaseDir(Vhost $vhost): void
 	{
+		$base = $vhost->baseDir($this->config);
+		if (is_link($base)) {
+			throw new \RuntimeException("Basisordner ist ein Symlink und wird nicht automatisch gelöscht: $base");
+		}
 		$realRoot = realpath($this->config->wwwRoot);
-		$realBase = realpath($vhost->baseDir($this->config));
-		if ($realRoot === false || $realBase === false || !str_starts_with($realBase . '/', $realRoot . '/')) {
+		$realBase = realpath($base);
+		if (
+			$realRoot === false
+			|| $realBase === false
+			|| $realBase === $realRoot
+			|| !str_starts_with($realBase . '/', $realRoot . '/')
+		) {
 			return;
 		}
 		exec('rm -rf ' . escapeshellarg($realBase) . ' 2>&1', $output, $exitCode);
@@ -243,7 +262,10 @@ final class VhostService
 	 * Dateien und der Symlink auf ihren Stand vor diesem Aufruf zurückgesetzt,
 	 * bevor die Ausnahme weitergeworfen wird. Ohne das bliebe eine kaputte
 	 * Datei liegen, und weil "nginx -t" global prüft, würde jeder spätere
-	 * Reload scheitern – auch der certbot-Deploy-Hook.
+	 * Reload scheitern – auch der certbot-Deploy-Hook. Die Rücknahme entfernt
+	 * dabei nur, was dieser Aufruf selbst neu angelegt hat: lag an der Stelle von
+	 * $enabled vorher schon irgendetwas (Symlink oder reguläre Datei), bleibt es
+	 * unangetastet, statt einer fremden Datei zum Opfer zu fallen.
 	 *
 	 * @throws \RuntimeException wenn der Reloader scheitert (nach Rücknahme)
 	 */
@@ -262,6 +284,7 @@ final class VhostService
 		$previousAuthSnippet = $this->readIfExists($authSnippet);
 		$previousAvailable = $this->readIfExists($available);
 		$symlinkExistedBefore = is_link($enabled);
+		$enabledExistedBefore = $symlinkExistedBefore || file_exists($enabled);
 
 		file_put_contents($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
 		$this->group($htpasswd);
@@ -283,7 +306,7 @@ final class VhostService
 			$this->restoreFile($htpasswd, $previousHtpasswd);
 			$this->restoreFile($authSnippet, $previousAuthSnippet);
 			$this->restoreFile($available, $previousAvailable);
-			if (!$symlinkExistedBefore) {
+			if (!$enabledExistedBefore) {
 				@unlink($enabled);
 			}
 			throw $e;

@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-17 22:55
  */
 
 namespace Tests;
@@ -22,6 +22,8 @@ use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
+use VhostAdmin\Vhost;
+use VhostAdmin\VhostKind;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
 
@@ -310,25 +312,110 @@ final class VhostServiceTest extends TestCase
 	}
 
 	/**
-	 * Befund 3 (Eindämmung von --purge): ein Basisverzeichnis, das über ".." aus der
-	 * Web-Wurzel zeigen würde, kann seit Befund 2 gar nicht mehr als Vhost-Objekt
-	 * entstehen – Vhost::fromRow() (aufgerufen aus jedem Repository-Zugriff) weist einen
-	 * solchen Namen schon beim Laden ab. remove(purge: true) kann also nie mit einem
-	 * Vhost aufgerufen werden, dessen baseDir() außerhalb von wwwRoot liegt; die
-	 * realpath()-Prüfung in VhostService::purgeBaseDir() ist damit reine Verteidigung in
-	 * der Tiefe für den Fall, dass diese erste Sperre einmal umgangen wird.
+	 * Ruft die private Methode VhostService::purgeBaseDir() per Reflection auf,
+	 * damit die Eindämmungslogik selbst geprüft werden kann und nicht nur ihre
+	 * Vorbedingungen.
 	 */
-	public function testPurgeCannotEscapeWwwRootBecauseRevalidationBlocksItFirst(): void
+	private function invokePurgeBaseDir(Vhost $vhost): void
 	{
-		mkdir($this->dir . '/db-dir', 0700, true);
-		$db = new \VhostAdmin\Database(\VhostAdmin\Config::fromArray([
-			'dbPath' => $this->dir . '/db-dir/raw.sqlite',
-		]));
-		$db->initSchema();
-		$db->pdo()->prepare('INSERT INTO vhosts (name, kind, port, subdir, protect) VALUES (?, ?, ?, ?, ?)')
-			->execute(['../../etc', 'domain', null, null, 1]);
-		$rawRepo = new VhostRepository($db);
+		$method = new \ReflectionMethod(VhostService::class, 'purgeBaseDir');
+		$method->invoke($this->service, $vhost);
+	}
+
+	/**
+	 * Befund 1 (Regression): ist der Basisordner selbst ein Symlink, das auf ein
+	 * Verzeichnis außerhalb der Web-Wurzel zeigt, darf "--purge" dessen Ziel nicht
+	 * löschen – vorher hätte "rm -rf" auf den unaufgelösten Pfad nur den Symlink
+	 * entfernt.
+	 */
+	public function testPurgeBaseDirRefusesSymlinkPointingOutsideWwwRoot(): void
+	{
+		mkdir($this->dir . '/outside', 0770, true);
+		file_put_contents($this->dir . '/outside/geheim.txt', 'bleibt');
+		mkdir($this->dir . '/www', 0775, true);
+		symlink($this->dir . '/outside', $this->dir . '/www/symlink.example');
+		$vhost = new Vhost(1, 'symlink.example', VhostKind::Domain, null, null, true, false);
+
 		$this->expectException(\RuntimeException::class);
-		$rawRepo->byName('../../etc');
+		try {
+			$this->invokePurgeBaseDir($vhost);
+		} finally {
+			self::assertFileExists($this->dir . '/outside/geheim.txt');
+		}
+	}
+
+	/**
+	 * Befund 1 (Regression): zeigt der Symlink auf ein Verzeichnis innerhalb der
+	 * Web-Wurzel (z.B. den Docroot eines anderen vHosts), darf dessen Inhalt ebenfalls
+	 * nicht gelöscht werden.
+	 */
+	public function testPurgeBaseDirRefusesSymlinkPointingInsideWwwRoot(): void
+	{
+		mkdir($this->dir . '/www/other.example', 0775, true);
+		file_put_contents($this->dir . '/www/other.example/index.html', 'inhalt');
+		symlink($this->dir . '/www/other.example', $this->dir . '/www/symlink.example');
+		$vhost = new Vhost(1, 'symlink.example', VhostKind::Domain, null, null, true, false);
+
+		$this->expectException(\RuntimeException::class);
+		try {
+			$this->invokePurgeBaseDir($vhost);
+		} finally {
+			self::assertDirectoryExists($this->dir . '/www/other.example');
+			self::assertFileExists($this->dir . '/www/other.example/index.html');
+			self::assertTrue(is_link($this->dir . '/www/symlink.example'));
+		}
+	}
+
+	/**
+	 * Befund 1 (Regression): zeigt der Symlink auf die Web-Wurzel selbst, besteht der
+	 * Präfixvergleich auf dem aufgelösten Pfad ("$realBase === $realRoot") ebenfalls –
+	 * ohne Gleichheitsprüfung würde "/var/www" komplett gelöscht.
+	 */
+	public function testPurgeBaseDirRefusesSymlinkPointingToWwwRootItself(): void
+	{
+		mkdir($this->dir . '/www', 0775, true);
+		file_put_contents($this->dir . '/www/marker.txt', 'bleibt');
+		symlink($this->dir . '/www', $this->dir . '/www/symlink.example');
+		$vhost = new Vhost(1, 'symlink.example', VhostKind::Domain, null, null, true, false);
+
+		$this->expectException(\RuntimeException::class);
+		try {
+			$this->invokePurgeBaseDir($vhost);
+		} finally {
+			self::assertDirectoryExists($this->dir . '/www');
+			self::assertFileExists($this->dir . '/www/marker.txt');
+		}
+	}
+
+	/**
+	 * Normalfall: ein echtes Verzeichnis unterhalb der Web-Wurzel wird gelöscht, die
+	 * Web-Wurzel und eine Nachbardatei bleiben erhalten.
+	 */
+	public function testPurgeBaseDirDeletesRealDirectoryUnderWwwRoot(): void
+	{
+		mkdir($this->dir . '/www/purge.example', 0775, true);
+		file_put_contents($this->dir . '/www/purge.example/index.html', 'inhalt');
+		file_put_contents($this->dir . '/www/nachbar.txt', 'bleibt');
+		$vhost = new Vhost(1, 'purge.example', VhostKind::Domain, null, null, true, false);
+
+		$this->invokePurgeBaseDir($vhost);
+
+		self::assertDirectoryDoesNotExist($this->dir . '/www/purge.example');
+		self::assertDirectoryExists($this->dir . '/www');
+		self::assertFileExists($this->dir . '/www/nachbar.txt');
+	}
+
+	/**
+	 * Nicht vorhandener Pfad: kein Fehler, nichts gelöscht.
+	 */
+	public function testPurgeBaseDirDoesNothingForMissingPath(): void
+	{
+		mkdir($this->dir . '/www', 0775, true);
+		$vhost = new Vhost(1, 'fehlt.example', VhostKind::Domain, null, null, true, false);
+
+		$this->invokePurgeBaseDir($vhost);
+
+		self::assertDirectoryDoesNotExist($this->dir . '/www/fehlt.example');
+		self::assertDirectoryExists($this->dir . '/www');
 	}
 }
