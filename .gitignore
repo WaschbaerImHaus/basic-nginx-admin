@@ -1,0 +1,4 @@
+build/
+*.sqlite
+tests/.phpunit.cache/
+.superpowers/
