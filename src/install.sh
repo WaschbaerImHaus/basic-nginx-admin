@@ -13,10 +13,10 @@ APP=/opt/vhost-admin
 OWNER="${SUDO_USER:-root}"
 
 while [ $# -gt 0 ]; do
-    case "$1" in
-        --owner) OWNER="$2"; shift 2 ;;
-        *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
-    esac
+	case "$1" in
+		--owner) OWNER="$2"; shift 2 ;;
+		*) echo "Unbekannte Option: $1" >&2; exit 2 ;;
+	esac
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "Bitte als root bzw. mit sudo ausführen." >&2; exit 1; }
@@ -25,16 +25,19 @@ id "$OWNER" >/dev/null 2>&1 || { echo "Benutzer '$OWNER' existiert nicht." >&2; 
 echo "== Pakete installieren"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q nginx php-fpm php-cli php-sqlite3 certbot
+apt-get install -y -q nginx php-fpm php-cli php-sqlite3 certbot phpunit
 
 echo "== Anwendung nach $APP (Besitzer von /var/www/*: $OWNER)"
-install -d -m 755 "$APP" "$APP/lib" "$APP/bin" "$APP/templates"
-install -m 644 "$SRC"/lib/*.php "$APP/lib/"
+install -d -m 755 "$APP" "$APP/bin" "$APP/templates"
+rm -rf "$APP/lib" "$APP/public"
+cp -r "$SRC/lib" "$APP/lib"
+find "$APP/lib" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+install -m 644 "$SRC/bootstrap.php" "$APP/bootstrap.php"
 install -m 644 "$SRC"/templates/index.html "$APP/templates/"
 install -m 755 "$SRC"/bin/vhost.php "$APP/bin/"
 install -m 755 "$SRC"/bin/vhost /usr/local/sbin/vhost
-sed -i "s|'www_owner' *=> *'[^']*'|'www_owner'     => '$OWNER'|" "$APP/lib/config.php"
-rm -rf "$APP/public"
+sed -i "s|'wwwOwner' => '[^']*'|'wwwOwner' => '$OWNER'|" "$APP/lib/VhostAdmin/Config.php"
+grep -q "'wwwOwner' => '$OWNER'" "$APP/lib/VhostAdmin/Config.php" || { echo "Besitzer konnte nicht gesetzt werden" >&2; exit 1; }
 
 echo "== Oberfläche nach /var/www/localhost-8080"
 install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080
@@ -49,7 +52,7 @@ install -d -m 750 -g www-data /etc/nginx/auth
 install -m 644 "$SRC/etc/nginx-admin.conf"   /etc/nginx/sites-available/vhost-admin.conf
 install -m 644 "$SRC/etc/nginx-default.conf" /etc/nginx/sites-available/00-default.conf
 if [ ! -s /proc/net/if_inet6 ]; then
-    sed -i '/listen \[::/d' /etc/nginx/sites-available/vhost-admin.conf /etc/nginx/sites-available/00-default.conf
+	sed -i '/listen \[::/d' /etc/nginx/sites-available/vhost-admin.conf /etc/nginx/sites-available/00-default.conf
 fi
 ln -sfn /etc/nginx/sites-available/vhost-admin.conf /etc/nginx/sites-enabled/vhost-admin.conf
 ln -sfn /etc/nginx/sites-available/00-default.conf  /etc/nginx/sites-enabled/00-default.conf
@@ -61,7 +64,7 @@ install -m 755 "$SRC/etc/certbot-deploy-nginx.sh" /etc/letsencrypt/renewal-hooks
 
 echo "== Dienste"
 for unit in /usr/lib/systemd/system/php*-fpm.service; do
-    systemctl enable --now "$(basename "$unit")" >/dev/null
+	systemctl enable --now "$(basename "$unit")" >/dev/null
 done
 systemctl enable --now nginx >/dev/null
 
