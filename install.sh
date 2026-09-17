@@ -28,13 +28,17 @@ apt-get update -q
 apt-get install -y -q nginx php-fpm php-cli php-sqlite3 certbot
 
 echo "== Anwendung nach $APP (Besitzer von /var/www/*: $OWNER)"
-install -d -m 755 "$APP" "$APP/lib" "$APP/bin" "$APP/public" "$APP/templates"
+install -d -m 755 "$APP" "$APP/lib" "$APP/bin" "$APP/templates"
 install -m 644 "$SRC"/lib/*.php "$APP/lib/"
-install -m 644 "$SRC"/public/*.php "$APP/public/"
 install -m 644 "$SRC"/templates/index.html "$APP/templates/"
 install -m 755 "$SRC"/bin/vhost.php "$APP/bin/"
 install -m 755 "$SRC"/bin/vhost /usr/local/sbin/vhost
 sed -i "s|'www_owner' *=> *'[^']*'|'www_owner'     => '$OWNER'|" "$APP/lib/config.php"
+rm -rf "$APP/public"
+
+echo "== Oberfläche nach /var/www/localhost-8080"
+install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080
+install -m 644 -o "$OWNER" -g www-data "$SRC"/public/*.php /var/www/localhost-8080/
 
 echo "== sudo-Regel für www-data"
 install -m 440 "$SRC/etc/sudoers-vhost-admin" /etc/sudoers.d/vhost-admin

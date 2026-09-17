@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/../lib/db.php';
+require '/opt/vhost-admin/lib/db.php';
 
 session_start();
 $_SESSION['csrf'] ??= bin2hex(random_bytes(16));
@@ -250,12 +250,15 @@ function badge(bool $on, string $yes, string $no): string
 <?php else: ?>
   <div class="card">
     <h2>vHosts</h2>
-    <?php $all = vhost_all(); if (!$all): ?>
-      <p class="muted">Noch keine vHosts angelegt.</p>
-    <?php else: ?>
     <table>
       <tr><th>Name</th><th>Docroot</th><th>Schutz</th><th>HTTPS</th></tr>
-      <?php foreach ($all as $v): ?>
+      <tr>
+        <td>localhost:<?= h(cfg()['admin_port']) ?> <span class="badge local">lokal</span> <span class="muted">diese Oberfläche</span></td>
+        <td><code><?= h(__DIR__) ?></code></td>
+        <td><span class="muted">–</span></td>
+        <td><span class="muted">–</span></td>
+      </tr>
+      <?php foreach (vhost_all() as $v): ?>
       <tr>
         <td><a href="/?v=<?= h(rawurlencode($v['name'])) ?>"><?= h($v['name']) ?></a>
             <?php if ($v['kind'] === 'localhost'): ?> <span class="badge local">lokal</span><?php endif ?></td>
@@ -265,7 +268,6 @@ function badge(bool $on, string $yes, string $no): string
       </tr>
       <?php endforeach ?>
     </table>
-    <?php endif ?>
   </div>
 
   <div class="grid">
