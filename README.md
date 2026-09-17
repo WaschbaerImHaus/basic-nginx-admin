@@ -70,7 +70,7 @@ localhost-Hosts lassen sich nur über die Kommandozeile anlegen; die Oberfläche
 
 ## Entwicklung
 
-- Tests: `phpunit` (126 Tests, Stand des Umbaus vom 2026-09-17)
+- Tests: `phpunit` (147 Tests, Stand nach den Sicherheits-Fix-Wellen vom 2026-09-17)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`

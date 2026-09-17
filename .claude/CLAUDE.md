@@ -18,7 +18,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080`)
 - `src/etc/` – nginx-, sudoers-, certbot-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (126 Tests); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (147 Tests); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)

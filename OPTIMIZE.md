@@ -8,7 +8,6 @@
 
 ## Kleinbefunde aus den Reviews
 
-- `VhostService::remove()` löscht den Docroot mit `exec('rm -rf ' . escapeshellarg($base))`, wertet den Exit-Status aber nicht aus – ein Fehlschlag (z. B. Rechteproblem) bleibt unbemerkt, `--purge` meldet trotzdem Erfolg.
 - `VhostService::own()` versucht `chown` auf den konfigurierten Besitzer und fängt einen Fehlschlag mit `@`-Unterdrückung still ab (Fallback auf die Gruppe) – ein falsch konfigurierter `wwwOwner` fällt dadurch nicht auf, sondern wird nur stillschweigend anders behandelt.
 - `Database::pdo()` legt das Datenbankverzeichnis mit `mkdir($dir, 0770, true)` an, prüft den Rückgabewert aber nicht; schlägt `mkdir` fehl (z. B. Rechte), scheitert erst die nachfolgende `PDO`-Verbindung mit einer weniger aussagekräftigen Fehlermeldung.
 - `VhostRepository::insert()` prüft Namenskollisionen per vorherigem `SELECT` (`byName()`) statt den `UNIQUE`-Constraint-Fehler der Datenbank abzufangen – ein theoretisches Race zwischen Prüfung und `INSERT` bleibt offen (in der Praxis unkritisch, da nur das root-CLI schreibt und nicht parallel läuft).
