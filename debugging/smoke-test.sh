@@ -4,6 +4,8 @@
 # Aufruf: sudo ./debugging/smoke-test.sh
 set -euo pipefail
 
+JAR=""
+
 fail() { echo "FEHLER: $*" >&2; exit 1; }
 expect() { # expect <erwartet> <beschreibung> <curl-args...>
 	local want="$1" what="$2"; shift 2
@@ -13,6 +15,25 @@ expect() { # expect <erwartet> <beschreibung> <curl-args...>
 	local got; got=$(curl -s -o /dev/null -w '%{http_code}' "$@") || true
 	[ "$got" = "$want" ] && echo "ok   $what -> $got" || fail "$what: erwartet $want, bekommen $got"
 }
+
+# Entfernt alle Test-vHosts, ihre Docroots und das Cookie-Tempfile – egal ob
+# der Lauf erfolgreich war, fehlgeschlagen ist oder per Signal abgebrochen
+# wurde (trap ... EXIT). Muss deshalb idempotent sein: Fehler einzelner
+# Befehle (z.B. weil ein vHost gar nicht existiert) dürfen das Aufräumen
+# selbst nicht abbrechen.
+cleanup() {
+	set +e
+	vhost remove smoke-test.example --purge >/dev/null 2>&1
+	vhost remove localhost:3999 --purge >/dev/null 2>&1
+	vhost remove smoke-ui.example --purge >/dev/null 2>&1
+	rm -rf /var/www/smoke-test.example /var/www/smoke-ui.example /var/www/localhost-3999
+	[ -n "$JAR" ] && rm -f "$JAR"
+	set -e
+}
+trap cleanup EXIT
+
+# Reste eines vorherigen, abgebrochenen Laufs dürfen diesen Lauf nicht blockieren.
+cleanup
 
 echo "== CLI"
 vhost add smoke-test.example --subdir public >/dev/null
@@ -53,11 +74,11 @@ grep -q 'flash err' <<<"$(curl -s -c "$JAR" -b "$JAR" http://127.0.0.1:8080/)" &
 curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF" -d 'action=user_add&name=smoke-ui.example&username=bob' --data-urlencode 'password=p@ss wörd!' http://127.0.0.1:8080/
 expect 200 "UI-Benutzer" -u 'bob:p@ss wörd!' -H 'Host: smoke-ui.example' http://127.0.0.1/
 curl -s -o /dev/null -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=remove&name=smoke-ui.example" http://127.0.0.1:8080/
-rm -f "$JAR"
 
 echo "== Aufräumen"
-vhost remove smoke-test.example --purge >/dev/null
-vhost remove localhost:3999 --purge >/dev/null
-rm -rf /var/www/smoke-ui.example
+# Die eigentliche Entfernung übernimmt cleanup() (auch schon über den trap
+# beim Skriptende zuständig); hier nur vorgezogen, damit die folgende Prüfung
+# auf einen bereits sauberen Zustand trifft, bevor die Erfolgsmeldung fällt.
+cleanup
 vhost list | grep -q smoke && fail "Reste in der Datenbank" || echo "ok   sauber"
 echo "ALLE PRÜFUNGEN BESTANDEN"
