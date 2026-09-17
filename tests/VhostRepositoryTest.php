@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für das Repository (temporäre SQLite-Datei).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:40
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests;
@@ -20,14 +20,15 @@ use VhostAdmin\VhostRepository;
 final class VhostRepositoryTest extends TestCase
 {
 	private string $dir;
+	private Database $db;
 	private VhostRepository $repo;
 
 	protected function setUp(): void
 	{
 		$this->dir = TempDir::create();
-		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/test.sqlite']));
-		$db->initSchema();
-		$this->repo = new VhostRepository($db);
+		$this->db = new Database(Config::fromArray(['dbPath' => $this->dir . '/test.sqlite']));
+		$this->db->initSchema();
+		$this->repo = new VhostRepository($this->db);
 	}
 
 	protected function tearDown(): void
@@ -122,5 +123,20 @@ final class VhostRepositoryTest extends TestCase
 		self::assertSame('c@d.de', $this->repo->setting('le_email'));
 		$this->repo->setSetting('le_email', '');
 		self::assertNull($this->repo->setting('le_email'));
+	}
+
+	/**
+	 * Simuliert eine Zeile, die (vor der Rechteänderung aus Befund 1) direkt in der
+	 * Datenbank manipuliert worden wäre – z.B. durch www-data. Das Repository liefert
+	 * dafür nie ein Vhost-Objekt: Vhost::fromRow() (aufgerufen aus byName()) prüft den
+	 * Namen erneut und lehnt einen Pfadausbruch ab, bevor er irgendwo verwendet werden kann.
+	 */
+	public function testByNameRejectsManipulatedRow(): void
+	{
+		$this->db->pdo()->prepare('INSERT INTO vhosts (name, kind, port, subdir, protect) VALUES (?, ?, ?, ?, ?)')
+			->execute(['../ausbruch', VhostKind::Domain->value, null, null, 1]);
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('../ausbruch');
+		$this->repo->byName('../ausbruch');
 	}
 }

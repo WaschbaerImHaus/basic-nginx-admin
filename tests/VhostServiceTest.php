@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 11:10
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests;
@@ -271,5 +271,64 @@ final class VhostServiceTest extends TestCase
 		$this->expectException(\RuntimeException::class);
 		$this->expectExceptionMessage('nginx -t');
 		$this->service->createDomain(DomainName::fromString('example.com'), null);
+	}
+
+	public function testRenderFailureRestoresPreviousServerConfig(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->enableSsl($v);
+		$before = (string)file_get_contents($this->dir . '/avail/example.com.conf');
+		self::assertStringContainsString('listen 443 ssl;', $before);
+		$beforeAuthSnippet = (string)file_get_contents($this->dir . '/auth/example.com.conf');
+		$beforeHtpasswd = (string)file_get_contents($this->dir . '/auth/example.com.htpasswd');
+
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen';
+		try {
+			$this->service->disableSsl($this->service->load('example.com'));
+			self::fail('Exception erwartet');
+		} catch (\RuntimeException) {
+		}
+
+		self::assertSame($before, (string)file_get_contents($this->dir . '/avail/example.com.conf'));
+		self::assertSame($beforeAuthSnippet, (string)file_get_contents($this->dir . '/auth/example.com.conf'));
+		self::assertSame($beforeHtpasswd, (string)file_get_contents($this->dir . '/auth/example.com.htpasswd'));
+		self::assertTrue(is_link($this->dir . '/enabled/example.com.conf'));
+	}
+
+	public function testRenderFailureRemovesNewlyCreatedFilesAndSymlink(): void
+	{
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen';
+		try {
+			$this->service->createDomain(DomainName::fromString('example.com'), null);
+			self::fail('Exception erwartet');
+		} catch (\RuntimeException) {
+		}
+		self::assertFileDoesNotExist($this->dir . '/avail/example.com.conf');
+		self::assertFileDoesNotExist($this->dir . '/auth/example.com.conf');
+		self::assertFalse(is_link($this->dir . '/enabled/example.com.conf'));
+	}
+
+	/**
+	 * Befund 3 (Eindämmung von --purge): ein Basisverzeichnis, das über ".." aus der
+	 * Web-Wurzel zeigen würde, kann seit Befund 2 gar nicht mehr als Vhost-Objekt
+	 * entstehen – Vhost::fromRow() (aufgerufen aus jedem Repository-Zugriff) weist einen
+	 * solchen Namen schon beim Laden ab. remove(purge: true) kann also nie mit einem
+	 * Vhost aufgerufen werden, dessen baseDir() außerhalb von wwwRoot liegt; die
+	 * realpath()-Prüfung in VhostService::purgeBaseDir() ist damit reine Verteidigung in
+	 * der Tiefe für den Fall, dass diese erste Sperre einmal umgangen wird.
+	 */
+	public function testPurgeCannotEscapeWwwRootBecauseRevalidationBlocksItFirst(): void
+	{
+		mkdir($this->dir . '/db-dir', 0700, true);
+		$db = new \VhostAdmin\Database(\VhostAdmin\Config::fromArray([
+			'dbPath' => $this->dir . '/db-dir/raw.sqlite',
+		]));
+		$db->initSchema();
+		$db->pdo()->prepare('INSERT INTO vhosts (name, kind, port, subdir, protect) VALUES (?, ?, ?, ?, ?)')
+			->execute(['../../etc', 'domain', null, null, 1]);
+		$rawRepo = new VhostRepository($db);
+		$this->expectException(\RuntimeException::class);
+		$rawRepo->byName('../../etc');
 	}
 }

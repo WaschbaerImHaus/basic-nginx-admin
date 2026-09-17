@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 11:20
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace VhostAdmin\Cli;
@@ -165,6 +165,14 @@ TXT;
 				return 0;
 
 			case 'remove':
+				// Die sudoers-Regel erlaubt www-data beliebige Argumente für dieses CLI (siehe
+				// src/etc/sudoers-vhost-admin); die Oberfläche selbst ruft "--purge" nie auf
+				// (AdminPage::commandFor() kennt die Option nicht). Trotzdem sperren wir sie hier
+				// zusätzlich, falls www-data den Aufruf direkt absetzt (z.B. über eine spätere
+				// Lücke in der Oberfläche): sudo setzt SUDO_USER auf den ursprünglichen Aufrufer.
+				if (isset($options['purge']) && getenv('SUDO_USER') === 'www-data') {
+					throw new \RuntimeException('--purge ist aus der Oberfläche nicht erlaubt');
+				}
 				$this->service->remove($this->service->load($arg(0, 'Name')), isset($options['purge']));
 				$this->out("Entfernt.\n");
 				return 0;

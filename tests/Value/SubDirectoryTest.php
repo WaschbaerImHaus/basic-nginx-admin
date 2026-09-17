@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für das Wertobjekt SubDirectory.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests\Value;
@@ -54,5 +54,16 @@ final class SubDirectoryTest extends TestCase
 	{
 		$this->expectException(\InvalidArgumentException::class);
 		SubDirectory::fromString($raw);
+	}
+
+	/**
+	 * Nagelt den "D"-Modifier im Muster fest: ohne ihn würde "$" auch vor einem
+	 * abschließenden Zeilenumbruch matchen, und "pub\n" wäre fälschlich gültig.
+	 * trim() entfernt nur "/", " " und Tab, keinen Zeilenumbruch.
+	 */
+	public function testRejectsTrailingNewline(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		SubDirectory::fromString("pub\n");
 	}
 }

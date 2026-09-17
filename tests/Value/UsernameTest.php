@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für das Wertobjekt Username.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests\Value;
@@ -39,5 +39,15 @@ final class UsernameTest extends TestCase
 	{
 		$this->expectException(\InvalidArgumentException::class);
 		Username::fromString($raw);
+	}
+
+	/**
+	 * Nagelt den "D"-Modifier im Muster fest: ohne ihn würde "$" auch vor einem
+	 * abschließenden Zeilenumbruch matchen, und "alice\n" wäre fälschlich gültig.
+	 */
+	public function testRejectsTrailingNewline(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		Username::fromString("alice\n");
 	}
 }

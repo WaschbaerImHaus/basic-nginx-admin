@@ -69,7 +69,11 @@ done
 systemctl enable --now nginx >/dev/null
 
 echo "== Datenbank und nginx-Configs"
-install -d -m 770 -o www-data -g www-data /var/lib/vhost-admin
+# Verzeichnis und Datei gehören root; www-data (die Oberfläche) bekommt per Gruppe nur
+# Leserechte (0750/0640) – geschrieben wird ausschließlich über "vhost" als root. Die
+# endgültigen Rechte setzt VhostService::fixDatabasePermissions(), das jeder CLI-Lauf
+# aufruft; hier nur, damit "vhost init" gleich in ein passendes Verzeichnis schreibt.
+install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
 /usr/local/sbin/vhost render
 

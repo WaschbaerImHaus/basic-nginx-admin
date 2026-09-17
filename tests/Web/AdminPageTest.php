@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Web-Logik: Aktionen → CLI-Argumente, Flash, Redirects, CSRF.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 13:05
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests\Web;
@@ -70,6 +70,17 @@ final class AdminPageTest extends TestCase
 		self::assertSame(['args' => ['set', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
 		self::assertNull(AdminPage::commandFor('hack', []));
 		self::assertNull(AdminPage::commandFor('', []));
+	}
+
+	/**
+	 * Befund 8: das "name"-Feld landet ungefiltert als Positionsargument; ein Wert wie
+	 * "--purge" erzeugt deshalb ["remove", "--purge"], nicht ["remove", "--purge", ...].
+	 * Das CLI selbst fängt das ab (Application::parse() liest "--purge" als Option, nicht
+	 * als Name), siehe ApplicationTest::testPurgeAsNameIsNotTreatedAsPositionalArgument().
+	 */
+	public function testCommandForPassesPurgeLikeNameThrough(): void
+	{
+		self::assertSame(['args' => ['remove', '--purge'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => '--purge']));
 	}
 
 	public function testRedirectTargets(): void

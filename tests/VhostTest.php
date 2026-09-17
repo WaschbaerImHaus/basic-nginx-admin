@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Entität Vhost.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:44
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests;
@@ -72,5 +72,62 @@ final class VhostTest extends TestCase
 		self::assertFalse($v->protect);
 		self::assertTrue($v->ssl);
 		self::assertSame('/srv/www/a.de', $v->docroot(Config::fromArray(['wwwRoot' => '/srv/www'])));
+	}
+
+	public function testFromRowRejectsPathEscapeInName(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('../ausbruch');
+		Vhost::fromRow([
+			'id' => '7', 'name' => '../ausbruch', 'kind' => 'domain', 'port' => null, 'subdir' => null,
+			'protect' => '1', 'ssl' => '0', 'created_at' => '2026-09-17 08:00:00',
+		]);
+	}
+
+	public function testFromRowRejectsDomainWithPort(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('Domain mit Port');
+		Vhost::fromRow([
+			'id' => '7', 'name' => 'a.de', 'kind' => 'domain', 'port' => 3000, 'subdir' => null,
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+	}
+
+	public function testFromRowRejectsLocalhostWithoutMatchingPort(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		Vhost::fromRow([
+			'id' => '7', 'name' => 'localhost-', 'kind' => 'localhost', 'port' => null, 'subdir' => null,
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+	}
+
+	public function testFromRowRejectsLocalhostNameMismatch(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		Vhost::fromRow([
+			'id' => '7', 'name' => 'localhost:3000', 'kind' => 'localhost', 'port' => 3001, 'subdir' => null,
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+	}
+
+	public function testFromRowRejectsInvalidSubdir(): void
+	{
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('../secret');
+		Vhost::fromRow([
+			'id' => '7', 'name' => 'a.de', 'kind' => 'domain', 'port' => null, 'subdir' => '../secret',
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+	}
+
+	public function testFromRowAcceptsValidLocalhostRow(): void
+	{
+		$v = Vhost::fromRow([
+			'id' => '9', 'name' => 'localhost:3000', 'kind' => 'localhost', 'port' => 3000, 'subdir' => null,
+			'protect' => '1', 'ssl' => '0', 'created_at' => null,
+		]);
+		self::assertSame('localhost:3000', $v->name);
 	}
 }

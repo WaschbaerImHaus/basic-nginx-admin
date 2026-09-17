@@ -1,1 +1,6 @@
+# Erlaubt www-data (der Oberfläche) ausschließlich den Aufruf von /usr/local/sbin/vhost,
+# dafür aber bewusst mit beliebigen Unterbefehlen und Argumenten – das CLI validiert selbst
+# über Wertobjekte (src/lib/VhostAdmin/Value/). "remove ... --purge" ist die einzige
+# Ausnahme: die Oberfläche braucht es nie, deshalb sperrt Cli\Application::dispatch() diese
+# Option, wenn der Aufruf laut SUDO_USER von www-data stammt (nicht diese sudoers-Regel).
 www-data ALL=(root) NOPASSWD: /usr/local/sbin/vhost

@@ -7,11 +7,21 @@ declare(strict_types=1);
  * Unveränderlich; Zustandsänderungen laufen über das Repository und werden
  * danach neu geladen.
  *
+ * Der Konstruktor revalidiert Name, Port und Unterverzeichnis mit denselben
+ * Wertobjekten wie bei der Eingabe. Die Oberfläche (www-data) kann die
+ * Datenbank nicht mehr beschreiben (siehe VhostService::fixDatabasePermissions()),
+ * aber diese Prüfung bleibt als zweite Verteidigungslinie bestehen: eine
+ * manipulierte Zeile kann so nie zu unkontrollierten Pfaden oder nginx-Text
+ * führen, egal wie sie entstanden ist.
+ *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:30
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace VhostAdmin;
+
+use VhostAdmin\Value\DomainName;
+use VhostAdmin\Value\SubDirectory;
 
 final class Vhost
 {
@@ -35,6 +45,65 @@ final class Vhost
 		public readonly bool $ssl,
 		public readonly ?string $createdAt = null,
 	) {
+		$this->assertConsistent();
+	}
+
+	/**
+	 * Prüft Name, Port und Unterverzeichnis erneut, unabhängig davon, ob sie
+	 * gerade eingegeben oder aus der Datenbank gelesen wurden.
+	 *
+	 * Der Admin-Port der Oberfläche (8080) ist beim erneuten Prüfen eines
+	 * bestehenden Datensatzes kein Ausschlussgrund mehr – anders als bei der
+	 * Eingabe über Port::fromString() – deshalb prüft diese Methode den
+	 * Bereich 1–65535 direkt.
+	 *
+	 * @throws \RuntimeException wenn ein Wert nicht (mehr) gültig ist
+	 */
+	private function assertConsistent(): void
+	{
+		if ($this->kind === VhostKind::Domain) {
+			if ($this->port !== null) {
+				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: Domain mit Port ({$this->port})");
+			}
+			if (!$this->isValidDomainName($this->name)) {
+				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: ungültiger Domainname \"{$this->name}\"");
+			}
+		} else {
+			if ($this->port === null || $this->port < 1 || $this->port > 65535) {
+				$port = $this->port === null ? 'null' : (string)$this->port;
+				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: ungültiger Port ($port)");
+			}
+			if ($this->name !== 'localhost:' . $this->port) {
+				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: Name \"{$this->name}\" passt nicht zum Port {$this->port}");
+			}
+		}
+		if ($this->subdir !== null && !$this->isValidSubdir($this->subdir)) {
+			throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: ungültiges Unterverzeichnis \"{$this->subdir}\"");
+		}
+	}
+
+	/**
+	 * Prüft, ob $name unverändert aus DomainName::fromString() hervorgeht.
+	 */
+	private function isValidDomainName(string $name): bool
+	{
+		try {
+			return DomainName::fromString($name)->value === $name;
+		} catch (\InvalidArgumentException) {
+			return false;
+		}
+	}
+
+	/**
+	 * Prüft, ob $subdir unverändert aus SubDirectory::fromString() hervorgeht.
+	 */
+	private function isValidSubdir(string $subdir): bool
+	{
+		try {
+			return SubDirectory::fromString($subdir)?->value === $subdir;
+		} catch (\InvalidArgumentException) {
+			return false;
+		}
 	}
 
 	/**

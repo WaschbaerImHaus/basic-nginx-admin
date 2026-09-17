@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 11:10
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace VhostAdmin;
@@ -96,12 +96,33 @@ final class VhostService
 		}
 		$this->repository->delete($vhost->id);
 		if ($purge) {
-			$base = $vhost->baseDir($this->config);
-			if (str_starts_with($base, $this->config->wwwRoot . '/') && is_dir($base)) {
-				exec('rm -rf ' . escapeshellarg($base));
-			}
+			$this->purgeBaseDir($vhost);
 		}
 		$this->reloader->reload();
+	}
+
+	/**
+	 * Löscht den Basisordner eines vHosts rekursiv, aber nur, wenn er sich nach
+	 * Auflösung aller Symlinks/".." wirklich unterhalb der Web-Wurzel befindet.
+	 *
+	 * Ein reiner Präfixvergleich auf dem unaufgelösten Pfad wäre für
+	 * "/var/www/../../etc" ebenfalls wahr; deshalb wird hier mit realpath()
+	 * aufgelöst. Lässt sich der Basisordner nicht auflösen (existiert nicht),
+	 * wird nichts gelöscht.
+	 *
+	 * @throws \RuntimeException wenn "rm -rf" fehlschlägt
+	 */
+	private function purgeBaseDir(Vhost $vhost): void
+	{
+		$realRoot = realpath($this->config->wwwRoot);
+		$realBase = realpath($vhost->baseDir($this->config));
+		if ($realRoot === false || $realBase === false || !str_starts_with($realBase . '/', $realRoot . '/')) {
+			return;
+		}
+		exec('rm -rf ' . escapeshellarg($realBase) . ' 2>&1', $output, $exitCode);
+		if ($exitCode !== 0) {
+			throw new \RuntimeException("Löschen von $realBase fehlgeschlagen:\n" . implode("\n", $output));
+		}
 	}
 
 	/**
@@ -217,6 +238,14 @@ final class VhostService
 
 	/**
 	 * htpasswd, Auth-Snippet und Server-Konfiguration schreiben, Symlink setzen, optional neu laden.
+	 *
+	 * Scheitert der Reload (fehlerhafte Konfiguration), werden die drei
+	 * Dateien und der Symlink auf ihren Stand vor diesem Aufruf zurückgesetzt,
+	 * bevor die Ausnahme weitergeworfen wird. Ohne das bliebe eine kaputte
+	 * Datei liegen, und weil "nginx -t" global prüft, würde jeder spätere
+	 * Reload scheitern – auch der certbot-Deploy-Hook.
+	 *
+	 * @throws \RuntimeException wenn der Reloader scheitert (nach Rücknahme)
 	 */
 	public function render(Vhost $vhost, bool $reload = true): void
 	{
@@ -225,21 +254,61 @@ final class VhostService
 			$this->group($this->config->authDir);
 		}
 		$htpasswd = $this->renderer->htpasswdPath($vhost);
+		$authSnippet = $this->renderer->authSnippetPath($vhost);
+		$available = $this->renderer->serverConfigPath($vhost);
+		$enabled = $this->config->sitesEnabled . '/' . $vhost->slug() . '.conf';
+
+		$previousHtpasswd = $this->readIfExists($htpasswd);
+		$previousAuthSnippet = $this->readIfExists($authSnippet);
+		$previousAvailable = $this->readIfExists($available);
+		$symlinkExistedBefore = is_link($enabled);
+
 		file_put_contents($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
 		$this->group($htpasswd);
 		chmod($htpasswd, 0640);
 
-		file_put_contents($this->renderer->authSnippetPath($vhost), $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
+		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
 
-		$available = $this->renderer->serverConfigPath($vhost);
 		file_put_contents($available, $this->renderer->serverConfig($vhost));
-		$enabled = $this->config->sitesEnabled . '/' . $vhost->slug() . '.conf';
-		if (!is_link($enabled)) {
+		if (!$symlinkExistedBefore) {
 			symlink($available, $enabled);
 		}
-		if ($reload) {
-			$this->reloader->reload();
+
+		if (!$reload) {
+			return;
 		}
+		try {
+			$this->reloader->reload();
+		} catch (\Throwable $e) {
+			$this->restoreFile($htpasswd, $previousHtpasswd);
+			$this->restoreFile($authSnippet, $previousAuthSnippet);
+			$this->restoreFile($available, $previousAvailable);
+			if (!$symlinkExistedBefore) {
+				@unlink($enabled);
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Inhalt einer Datei, falls sie existiert, sonst null.
+	 */
+	private function readIfExists(string $path): ?string
+	{
+		return file_exists($path) ? (string)file_get_contents($path) : null;
+	}
+
+	/**
+	 * Stellt den vorherigen Inhalt einer Datei wieder her, bzw. löscht sie,
+	 * wenn es vorher keine Datei gab.
+	 */
+	private function restoreFile(string $path, ?string $previousContent): void
+	{
+		if ($previousContent === null) {
+			@unlink($path);
+			return;
+		}
+		file_put_contents($path, $previousContent);
 	}
 
 	/**
@@ -254,7 +323,9 @@ final class VhostService
 	}
 
 	/**
-	 * Datenbankdatei und -verzeichnis für die Oberfläche (www-data) lesbar machen.
+	 * Datenbankverzeichnis und -dateien so setzen, dass die Oberfläche
+	 * (www-data) nur noch lesen kann: Verzeichnis root:www-data 0750,
+	 * Datenbankdatei (und *-journal/*-wal) root:www-data 0640.
 	 * Wirkt nur als root; das CLI ruft sie nach jedem Befehl.
 	 */
 	public function fixDatabasePermissions(): void
@@ -264,41 +335,69 @@ final class VhostService
 		}
 		$dir = dirname($this->config->dbPath);
 		if (is_dir($dir)) {
-			chown($dir, $this->config->wwwGroup);
+			chown($dir, 'root');
 			chgrp($dir, $this->config->wwwGroup);
-			chmod($dir, 0770);
+			chmod($dir, 0750);
 		}
 		foreach (glob($this->config->dbPath . '*') ?: [] as $file) {
-			chown($file, $this->config->wwwGroup);
+			chown($file, 'root');
 			chgrp($file, $this->config->wwwGroup);
-			chmod($file, 0660);
+			chmod($file, 0640);
 		}
 	}
 
 	/**
 	 * Basisordner und Unterverzeichnisse eines vHosts anlegen und deren Besitzer setzen.
+	 *
+	 * Der Basisordner liegt direkt unterhalb von wwwRoot, das nur root gehört – dort mkdir()
+	 * ruhig rekursiv, falls wwwRoot selbst noch fehlt. Innerhalb des Basisordners (02775,
+	 * also für www-data beschreibbar) kann dagegen ein Segment ein von www-data platzierter
+	 * Symlink sein; deshalb wird jedes Unterverzeichnis einzeln geprüft und angelegt statt
+	 * per rekursivem mkdir() über den ganzen Docroot.
 	 */
 	private function makeDirectories(Vhost $vhost, ?SubDirectory $subdir): void
 	{
-		$docroot = $vhost->docroot($this->config);
-		if (!is_dir($docroot) && !mkdir($docroot, 0775, true)) {
-			throw new \RuntimeException("Kann $docroot nicht anlegen");
+		$base = $vhost->baseDir($this->config);
+		if (is_link($base)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $base");
 		}
-		$path = $vhost->baseDir($this->config);
-		$this->own($path, 02775);
+		if (!is_dir($base) && !mkdir($base, 0775, true)) {
+			throw new \RuntimeException("Kann $base nicht anlegen");
+		}
+		$this->own($base, 02775);
+		$path = $base;
 		foreach ($subdir?->segments() ?? [] as $segment) {
 			$path .= '/' . $segment;
+			$this->makeDirectory($path);
 			$this->own($path, 02775);
 		}
 	}
 
 	/**
+	 * Legt ein einzelnes Unterverzeichnis innerhalb des Basisordners an, falls es fehlt.
+	 *
+	 * @throws \RuntimeException wenn der Pfad ein Symlink ist oder sich nicht anlegen lässt
+	 */
+	private function makeDirectory(string $path): void
+	{
+		if (is_link($path)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $path");
+		}
+		if (!is_dir($path) && !mkdir($path, 0775)) {
+			throw new \RuntimeException("Kann $path nicht anlegen");
+		}
+	}
+
+	/**
 	 * Startseite aus der Vorlage schreiben, falls im Docroot noch keine existiert.
+	 *
+	 * Ein Symlink gilt dabei ebenfalls als "existiert schon" und wird nicht
+	 * überschrieben – file_exists() folgt Symlinks, is_link() nicht.
 	 */
 	private function writeIndex(Vhost $vhost): void
 	{
 		$file = $vhost->docroot($this->config) . '/index.html';
-		if (file_exists($file)) {
+		if (is_link($file) || file_exists($file)) {
 			return;
 		}
 		$html = strtr((string)file_get_contents($this->config->templatePath), [
@@ -311,9 +410,15 @@ final class VhostService
 
 	/**
 	 * Besitzer/Gruppe/Rechte setzen; ohne root nur die Rechte.
+	 *
+	 * @throws \RuntimeException wenn $path ein Symlink ist (gehört dort nicht hin;
+	 *         www-data könnte ihn auf z.B. /etc/cron.d gelegt haben)
 	 */
 	private function own(string $path, int $mode): void
 	{
+		if (is_link($path)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $path");
+		}
 		if ($this->isRoot()) {
 			if (!@chown($path, $this->config->wwwOwner)) {
 				chown($path, $this->config->wwwGroup);

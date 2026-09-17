@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Kommandozeile: Argument-Parsing und Befehle über Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 11:20
+ * @version Letzte Änderung: 2026-09-17 18:20
  */
 
 namespace Tests\Cli;
@@ -187,5 +187,60 @@ final class ApplicationTest extends TestCase
 		[$code, $out] = $this->runCli(['init']);
 		self::assertSame(0, $code);
 		self::assertSame("Datenbank bereit.\n", $out);
+	}
+
+	/**
+	 * Befund 5: die sudoers-Regel erlaubt www-data beliebige Argumente, "--purge" soll
+	 * die Oberfläche trotzdem nie auslösen können. Erkennung über SUDO_USER (sudo setzt
+	 * das beim Aufruf durch die Oberfläche).
+	 */
+	public function testPurgeIsRejectedWhenSudoUserIsWwwData(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		$original = getenv('SUDO_USER');
+		putenv('SUDO_USER=www-data');
+		try {
+			[$code, , $err] = $this->runCli(['remove', 'a.example', '--purge']);
+		} finally {
+			$original === false ? putenv('SUDO_USER') : putenv("SUDO_USER=$original");
+		}
+		self::assertSame(1, $code);
+		self::assertStringContainsString('--purge ist aus der Oberfläche nicht erlaubt', $err);
+		self::assertDirectoryExists($this->dir . '/www/a.example');
+		[, $out] = $this->runCli(['list']);
+		self::assertStringContainsString('a.example', $out);
+	}
+
+	/**
+	 * Ohne SUDO_USER=www-data (z.B. ein root-Aufruf per direktem sudo) bleibt "--purge"
+	 * erlaubt – die Sperre gilt nur für den Weg über die Oberfläche.
+	 */
+	public function testPurgeStillWorksWithoutSudoUserWwwData(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		$original = getenv('SUDO_USER');
+		putenv('SUDO_USER=der-owner');
+		try {
+			[$code] = $this->runCli(['remove', 'a.example', '--purge']);
+		} finally {
+			$original === false ? putenv('SUDO_USER') : putenv("SUDO_USER=$original");
+		}
+		self::assertSame(0, $code);
+		self::assertDirectoryDoesNotExist($this->dir . '/www/a.example');
+	}
+
+	/**
+	 * Befund 8: AdminPage::commandFor('remove', ['name' => '--purge']) erzeugt
+	 * ["remove", "--purge"] (siehe AdminPageTest::testCommandForPassesPurgeLikeNameThrough()).
+	 * Application::parse() liest "--purge" dabei als Option, nicht als Positionsargument,
+	 * daher fehlt der Name und "remove" schlägt fehl, statt irgendetwas zu löschen.
+	 */
+	public function testPurgeAsNameIsNotTreatedAsPositionalArgument(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		[$code, , $err] = $this->runCli(['remove', '--purge']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('Name fehlt', $err);
+		self::assertDirectoryExists($this->dir . '/www/a.example');
 	}
 }
