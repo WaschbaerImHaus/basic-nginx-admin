@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Entität Vhost.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:30
+ * @version Letzte Änderung: 2026-09-17 10:44
  */
 
 namespace Tests;
@@ -60,5 +60,17 @@ final class VhostTest extends TestCase
 		self::assertTrue($v->protect);
 		self::assertFalse($v->ssl);
 		self::assertSame('2026-09-17 08:00:00', $v->createdAt);
+	}
+
+	public function testFromRowTreatsEmptySubdirAsNull(): void
+	{
+		$v = Vhost::fromRow([
+			'id' => '7', 'name' => 'a.de', 'kind' => 'domain', 'port' => null, 'subdir' => '',
+			'protect' => '0', 'ssl' => '1', 'created_at' => '2026-09-17 08:00:00',
+		]);
+		self::assertNull($v->subdir);
+		self::assertFalse($v->protect);
+		self::assertTrue($v->ssl);
+		self::assertSame('/srv/www/a.de', $v->docroot(Config::fromArray(['wwwRoot' => '/srv/www'])));
 	}
 }
