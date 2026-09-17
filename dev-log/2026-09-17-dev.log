@@ -1,0 +1,8 @@
+2026-09-17 08:48  nginx, PHP-FPM 8.5, certbot installiert; Paket vhost-admin geschrieben (CLI, Oberfläche, Installer).
+2026-09-17 08:53  Ende-zu-Ende-Test: Reloads griffen verzögert – Ursache asynchroner nginx-Reload, Warten auf alte Worker eingebaut.
+2026-09-17 09:14  Oberfläche nach /var/www/localhost-8080 verschoben; Repo auf GitHub angelegt.
+2026-09-17 09:45  Globale CLAUDE.md auf das Projekt angewandt: Spec und Plan geschrieben, Entscheidungen des Nutzers eingeholt.
+2026-09-17 10:24  Umbau begonnen (Subagent-Driven Development, 13 Aufgaben): src/-Struktur, Namespace VhostAdmin, Autoloader, PHPUnit eingerichtet.
+2026-09-17 13:07  Umbau fortgesetzt: Wertobjekte, Vhost/VhostKind, VhostRepository, Nginx\ConfigRenderer, Reloader-/Certbot-Schnittstellen, VhostService, Cli\Application, Web\CommandRunner/AdminPage – jeweils mit Tests; PHPUnit-Tests grün (126 Tests).
+2026-09-17 13:25  Installer auf die neue Klassenstruktur umgestellt, debugging/smoke-test.sh geschrieben; dabei zwei Bugs im Skript gefunden und behoben (curl-Exit 52 bei HTTP 444 unter set -e; curl | grep -q mit SIGPIPE unter pipefail) sowie fehlendes Aufräumen bei Fehlschlag per trap cleanup EXIT behoben.
+2026-09-17 13:32  build.sh, .claude/CLAUDE.md und Pflichtdokumentation geschrieben (README, BUGS, FEATURES, OPTIMIZE, MEMORY, research/); erster Build läuft aus der Hauptsitzung.

@@ -1,0 +1,13 @@
+# Sitzungsgedächtnis
+
+## 2026-09-17
+- Projekt in einer Sitzung aufgesetzt: nginx + PHP 8.5/SQLite-Verwaltung, CLI `vhost`, Oberfläche auf 127.0.0.1:8080, Let's-Encrypt-Schalter, Verzeichnisschutz „IP oder Login“.
+- Nutzerentscheidungen: Oberfläche nur lokal; Rechte über ein einziges CLI + sudoers; Schutzlogik `satisfy any`; LE-E-Mail als Einstellung; Domains binden öffentlich (Abweichung von der globalen CLAUDE.md); Arbeit direkt auf `main`; PHPUnit aus dem Ubuntu-Paket; Build = Tarball.
+- Bug gefunden und behoben: asynchroner nginx-Reload (siehe BUGS.md).
+- Oberfläche vom `/opt`-Pfad nach `/var/www/localhost-8080` verschoben, damit sie derselben Konvention folgt wie alle Hosts.
+- Repo: `git@github.com:WaschbaerImHaus/basic-nginx-admin.git`, Identität `WaschbaerImHaus <mf-public-github@proton.me>`, SSH-Key `~/.ssh/bitbucket` repo-lokal in `core.sshCommand`.
+- Umbau auf OOP/Tests/Build nach globaler CLAUDE.md (Spec `docs/superpowers/specs/2026-09-17-restructure-design.md`, Plan `docs/superpowers/plans/2026-09-17-restructure.md`), umgesetzt per Subagent-Driven Development in 13 Einzelaufgaben (je ein Subagent pro Task: Projektstruktur, Config/Database, Wertobjekte, Vhost/VhostKind, VhostRepository, ConfigRenderer, Reloader/Certbot, VhostService, Cli\Application, Web\CommandRunner/AdminPage, Installer/Smoke-Test, dieses Dokumentations-Task, Build).
+- Dabei drei Planungsfehler im Ausführungsplan gefunden und während der Umsetzung korrigiert:
+  1. Ein Test erwartete den ACME-Challenge-Block in der gerenderten nginx-Konfiguration zweimal statt einmal – Plan korrigiert, Test und `ConfigRenderer` erzeugen den Block nur einmal.
+  2. Die geplante Testhilfsmethode `run()` in den CLI-Tests kollidierte mit `PHPUnit\Framework\TestCase::run()`, das in PHPUnit 13 `final` ist – umbenannt zu `runCli()`.
+  3. `bin/vhost.php` baute laut Plan für jeden Aufruf (auch `help`) zuerst die Datenbankverbindung auf – für `vhost help`/ohne root unnötig und fehleranfällig; Reihenfolge geändert, sodass die Hilfe vor dem root-Check und vor jedem Datenbankzugriff ausgegeben wird.
