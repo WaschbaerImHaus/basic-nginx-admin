@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Kein Doppelpunkt (Trenner in htpasswd), keine Leerzeichen, 1–64 Zeichen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 10:39
  */
 
 namespace VhostAdmin\Value;
@@ -33,6 +33,9 @@ final class Username
 		return new self($raw);
 	}
 
+	/**
+	 * Der validierte Wert als Zeichenkette (z. B. für Konfigurationstexte).
+	 */
 	public function __toString(): string
 	{
 		return $this->value;

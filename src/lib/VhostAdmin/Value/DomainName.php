@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Buchstaben. localhost-Varianten sind ausgeschlossen, dafür gibt es Port.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 10:39
  */
 
 namespace VhostAdmin\Value;
@@ -38,6 +38,9 @@ final class DomainName
 		return new self($name);
 	}
 
+	/**
+	 * Der validierte Wert als Zeichenkette (z. B. für Konfigurationstexte).
+	 */
 	public function __toString(): string
 	{
 		return $this->value;

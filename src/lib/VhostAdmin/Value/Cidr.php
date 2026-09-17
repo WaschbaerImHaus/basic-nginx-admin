@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Die Maske wird als Ganzzahl normalisiert (10.0.0.0/08 → 10.0.0.0/8).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 10:39
  */
 
 namespace VhostAdmin\Value;
@@ -47,6 +47,9 @@ final class Cidr
 		return new self($ip . '/' . (int)$bits);
 	}
 
+	/**
+	 * Der validierte Wert als Zeichenkette (z. B. für Konfigurationstexte).
+	 */
 	public function __toString(): string
 	{
 		return $this->value;

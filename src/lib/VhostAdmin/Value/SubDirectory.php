@@ -8,7 +8,7 @@ declare(strict_types=1);
  * ".", ".." und versteckte Verzeichnisse ausgeschlossen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:33
+ * @version Letzte Änderung: 2026-09-17 10:39
  */
 
 namespace VhostAdmin\Value;
@@ -48,6 +48,9 @@ final class SubDirectory
 		return explode('/', $this->value);
 	}
 
+	/**
+	 * Der validierte Wert als Zeichenkette (z. B. für Konfigurationstexte).
+	 */
 	public function __toString(): string
 	{
 		return $this->value;
