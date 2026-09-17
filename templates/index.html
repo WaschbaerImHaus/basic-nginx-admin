@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP 200 – {{NAME}}</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff;
+    background: linear-gradient(-45deg, #ff6b6b, #feca57, #48dbfb, #1dd1a1, #5f27cd, #ff9ff3);
+    background-size: 400% 400%; animation: flow 14s ease infinite;
+  }
+  @keyframes flow {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  h1 { font-size: clamp(5rem, 20vw, 14rem); margin: 0; line-height: 1; text-shadow: 0 8px 30px rgba(0,0,0,.35); }
+  p  { font-size: 1.4rem; margin: .6rem 0; text-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  code { background: rgba(0,0,0,.28); padding: .2em .6em; border-radius: .5em; font-size: 1.1rem; }
+  .small { font-size: 1rem; opacity: .85; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>200</h1>
+    <p>🎉 OK – alles läuft! 🎈</p>
+    <p><code>{{NAME}}</code></p>
+    <p class="small">{{DOCROOT}}</p>
+  </div>
+</body>
+</html>

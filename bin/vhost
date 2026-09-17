@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /usr/bin/php /opt/vhost-admin/bin/vhost.php "$@"
