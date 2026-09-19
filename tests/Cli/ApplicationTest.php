@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Kommandozeile: Argument-Parsing und Befehle über Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 14:18
  */
 
 namespace Tests\Cli;
