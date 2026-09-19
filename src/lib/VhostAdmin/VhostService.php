@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:20
+ * @version Letzte Änderung: 2026-09-19 14:28
  */
 
 namespace VhostAdmin;
@@ -269,7 +269,13 @@ final class VhostService
 	 * Direktive), wird die Datei auf den vorherigen Stand zurückgesetzt und die
 	 * Ausnahme weitergeworfen – die Oberfläche zeigt dann die nginx-Meldung an.
 	 *
-	 * Ein leeres Snippet entfernt die Datei.
+	 * Ein leeres Snippet entfernt die Datei. Gab es vorher schon keine (leerer
+	 * Aufruf auf einem vHost ohne Snippet), passiert nichts – insbesondere kein
+	 * Reload, denn der würde einen fremden nginx-Fehler fälschlich diesem Aufruf
+	 * zurechnen, obwohl er nichts verändert hat.
+	 *
+	 * @throws \RuntimeException wenn an der Zielstelle ein Symlink liegt, oder wenn
+	 *         der Reloader scheitert (nach Rücknahme der Datei)
 	 */
 	public function setSnippet(Vhost $vhost, NginxSnippet $snippet): void
 	{
@@ -278,10 +284,13 @@ final class VhostService
 			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $file");
 		}
 		$previous = is_file($file) ? (string)file_get_contents($file) : null;
+		if ($snippet->isEmpty() && $previous === null) {
+			// Nichts zu tun: leeres Snippet auf einem vHost, der keines hat. Ein Reload
+			// würde hier nur einen fremden nginx-Fehler als Fehlschlag dieses Aufrufs melden.
+			return;
+		}
 		if ($snippet->isEmpty()) {
-			if ($previous !== null) {
-				unlink($file);
-			}
+			unlink($file);
 		} else {
 			file_put_contents($file, $snippet->value);
 			if ($this->isRoot()) {
@@ -293,12 +302,8 @@ final class VhostService
 		try {
 			$this->render($this->load($vhost->name));
 		} catch (\Throwable $e) {
-			if ($previous === null) {
-				if (is_file($file)) {
-					unlink($file);
-				}
-			} else {
-				file_put_contents($file, $previous);
+			$this->restoreFile($file, $previous);
+			if ($previous !== null) {
 				chmod($file, 0640);
 			}
 			throw $e;

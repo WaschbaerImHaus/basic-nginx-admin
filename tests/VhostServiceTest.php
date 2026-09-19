@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:20
+ * @version Letzte Änderung: 2026-09-19 14:28
  */
 
 namespace Tests;
@@ -534,5 +534,46 @@ final class VhostServiceTest extends TestCase
 		} catch (\RuntimeException) {
 		}
 		self::assertFileDoesNotExist($file, 'neu angelegte Datei muss wieder weg sein');
+	}
+
+	/**
+	 * Leeres Snippet auf einem vHost ohne vorhandene Datei ändert nichts und löst
+	 * keinen Reload aus – auch nicht, wenn der Reloader gerade auf Fehlschlag steht.
+	 */
+	public function testSetSnippetEmptyOnFreshVhostIsNoOp(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		$before = $this->reloader->calls;
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen: ganz woanders';
+
+		$this->service->setSnippet($v, NginxSnippet::fromString(''));
+
+		self::assertSame($before, $this->reloader->calls, 'wirkungsloser Aufruf darf keinen Reload auslösen');
+		self::assertFileDoesNotExist($file);
+	}
+
+	/**
+	 * Liegt an der Zielstelle ein Symlink (z.B. auf eine fremde Datei außerhalb des
+	 * vHosts), wird er nicht angefasst: Ausnahme statt Schreiben, kein Reload.
+	 */
+	public function testSetSnippetRefusesSymlink(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		$target = $this->dir . '/ausserhalb.conf';
+		file_put_contents($target, "unverändert;\n");
+		symlink($target, $file);
+		$before = $this->reloader->calls;
+
+		try {
+			$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('Symlink', $e->getMessage());
+		}
+
+		self::assertSame("unverändert;\n", file_get_contents($target), 'Ziel des Symlinks darf nicht verändert werden');
+		self::assertSame($before, $this->reloader->calls, 'kein Reload bei verweigertem Schreiben');
 	}
 }
