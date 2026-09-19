@@ -26,7 +26,9 @@ cleanup() {
 	vhost remove smoke-test.example --purge >/dev/null 2>&1
 	vhost remove localhost:3999 --purge >/dev/null 2>&1
 	vhost remove smoke-ui.example --purge >/dev/null 2>&1
+	vhost remove smoke-conf.example --purge >/dev/null 2>&1
 	rm -rf /var/www/smoke-test.example /var/www/smoke-ui.example /var/www/localhost-3999
+	rm -rf /var/www/smoke-conf.example
 	[ -n "$JAR" ] && rm -f "$JAR"
 	set -e
 }
@@ -74,6 +76,22 @@ grep -q 'flash err' <<<"$(curl -s -c "$JAR" -b "$JAR" http://127.0.0.1:8080/)" &
 curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF" -d 'action=user_add&name=smoke-ui.example&username=bob' --data-urlencode 'password=p@ss wörd!' http://127.0.0.1:8080/
 expect 200 "UI-Benutzer" -u 'bob:p@ss wörd!' -H 'Host: smoke-ui.example' http://127.0.0.1/
 curl -s -o /dev/null -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=remove&name=smoke-ui.example" http://127.0.0.1:8080/
+
+echo "== Eigene Direktiven"
+vhost add smoke-conf.example >/dev/null
+vhost protect smoke-conf.example off >/dev/null
+CSRF2=$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-conf.example' | grep -o 'name="csrf" value="[a-f0-9]*"' | head -1 | cut -d'"' -f4)
+[ -n "$CSRF2" ] || fail "kein CSRF-Token auf der Detailseite"
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF2" -d 'action=conf&name=smoke-conf.example' --data-urlencode 'snippet=add_header X-Smoke-Test bestanden;' http://127.0.0.1:8080/
+grep -q 'X-Smoke-Test' /var/www/smoke-conf.example/conf/custom.conf && echo "ok   Snippet gespeichert" || fail "Snippet nicht gespeichert"
+curl -s -D - -o /dev/null -H 'Host: smoke-conf.example' http://127.0.0.1/ | grep -qi 'X-Smoke-Test: bestanden' && echo "ok   Snippet wirkt" || fail "Header aus dem Snippet fehlt"
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF2" -d 'action=conf&name=smoke-conf.example' --data-urlencode 'snippet=root /etc;' http://127.0.0.1:8080/
+grep -q 'X-Smoke-Test' /var/www/smoke-conf.example/conf/custom.conf && echo "ok   verbotene Direktive abgelehnt, alte Fassung aktiv" || fail "verbotene Direktive hat das Snippet überschrieben"
+curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-conf.example' | grep -q 'flash err' && echo "ok   Fehlermeldung angezeigt" || fail "keine Fehlermeldung in der Oberfläche"
+for sub in web conf cert private logs; do
+	[ -d "/var/www/smoke-conf.example/$sub" ] || fail "Ordner $sub fehlt"
+done
+echo "ok   Struktur vollständig"
 
 echo "== Aufräumen"
 # Die eigentliche Entfernung übernimmt cleanup() (auch schon über den trap

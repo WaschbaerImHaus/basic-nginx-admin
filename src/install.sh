@@ -39,9 +39,16 @@ install -m 755 "$SRC"/bin/vhost /usr/local/sbin/vhost
 sed -i "s|'wwwOwner' => '[^']*'|'wwwOwner' => '$OWNER'|" "$APP/lib/VhostAdmin/Config.php"
 grep -q "'wwwOwner' => '$OWNER'" "$APP/lib/VhostAdmin/Config.php" || { echo "Besitzer konnte nicht gesetzt werden" >&2; exit 1; }
 
-echo "== Oberfläche nach /var/www/localhost-8080"
-install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080
-install -m 644 -o "$OWNER" -g www-data "$SRC"/public/*.php /var/www/localhost-8080/
+echo "== Oberfläche nach /var/www/localhost-8080/web"
+install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080 /var/www/localhost-8080/web
+install -d -m 750 -o root -g www-data /var/www/localhost-8080/conf
+install -d -m 750 -o root -g "$OWNER" /var/www/localhost-8080/cert /var/www/localhost-8080/logs
+install -d -m 750 -o "$OWNER" -g "$OWNER" /var/www/localhost-8080/private
+# Aus einer früheren Fassung liegt index.php eventuell noch flach im Basisordner.
+if [ -f /var/www/localhost-8080/index.php ]; then
+	mv /var/www/localhost-8080/index.php /var/www/localhost-8080/web/index.php
+fi
+install -m 644 -o "$OWNER" -g www-data "$SRC"/public/*.php /var/www/localhost-8080/web/
 
 echo "== sudo-Regel für www-data"
 install -m 440 "$SRC/etc/sudoers-vhost-admin" /etc/sudoers.d/vhost-admin
@@ -62,6 +69,11 @@ echo "== certbot: nginx nach Zertifikatsverlängerung neu laden"
 install -d /etc/letsencrypt/renewal-hooks/deploy
 install -m 755 "$SRC/etc/certbot-deploy-nginx.sh" /etc/letsencrypt/renewal-hooks/deploy/nginx-reload.sh
 
+echo "== logrotate"
+sed "s/create 0640 root root/create 0640 root $OWNER/" "$SRC/etc/logrotate-vhost-admin" > /etc/logrotate.d/vhost-admin
+chmod 644 /etc/logrotate.d/vhost-admin
+logrotate -d /etc/logrotate.d/vhost-admin >/dev/null 2>&1 || { echo "logrotate-Konfiguration ist fehlerhaft" >&2; exit 1; }
+
 echo "== Dienste"
 for unit in /usr/lib/systemd/system/php*-fpm.service; do
 	systemctl enable --now "$(basename "$unit")" >/dev/null
@@ -75,6 +87,7 @@ echo "== Datenbank und nginx-Configs"
 # aufruft; hier nur, damit "vhost init" gleich in ein passendes Verzeichnis schreibt.
 install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
+/usr/local/sbin/vhost migrate-layout
 /usr/local/sbin/vhost render
 
 echo

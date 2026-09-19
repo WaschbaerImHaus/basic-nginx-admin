@@ -1,0 +1,15 @@
+# Logdateien der einzelnen vHosts (siehe vhost-admin).
+# Rotation läuft als root; nginx öffnet die Dateien danach neu.
+/var/www/*/logs/*.log {
+	daily
+	rotate 14
+	missingok
+	notifempty
+	compress
+	delaycompress
+	create 0640 root root
+	sharedscripts
+	postrotate
+		[ -f /run/nginx.pid ] && nginx -s reopen > /dev/null 2>&1 || true
+	endscript
+}
