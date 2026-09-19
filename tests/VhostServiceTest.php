@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 22:55
+ * @version Letzte Änderung: 2026-09-19 09:51
  */
 
 namespace Tests;
@@ -35,6 +35,7 @@ final class VhostServiceTest extends TestCase
 	private VhostRepository $repo;
 	private FakeReloader $reloader;
 	private FakeCertbot $certbot;
+	private VhostLayout $layout;
 	private VhostService $service;
 
 	protected function setUp(): void
@@ -45,6 +46,7 @@ final class VhostServiceTest extends TestCase
 		$this->config = Config::fromArray([
 			'dbPath' => $this->dir . '/db.sqlite',
 			'wwwRoot' => $this->dir . '/www',
+			'wwwOwner' => 'user',
 			'sitesAvailable' => $this->dir . '/avail',
 			'sitesEnabled' => $this->dir . '/enabled',
 			'authDir' => $this->dir . '/auth',
@@ -56,7 +58,11 @@ final class VhostServiceTest extends TestCase
 		$this->repo = new VhostRepository($db);
 		$this->reloader = new FakeReloader();
 		$this->certbot = new FakeCertbot($this->dir . '/le');
-		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config, new VhostLayout($this->config)), $this->reloader, $this->certbot);
+		$this->layout = new VhostLayout($this->config);
+		$this->service = new VhostService(
+			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
+			$this->reloader, $this->certbot, $this->layout
+		);
 	}
 
 	protected function tearDown(): void
@@ -64,22 +70,66 @@ final class VhostServiceTest extends TestCase
 		TempDir::remove($this->dir);
 	}
 
-	public function testCreateDomainWithSubdirectoryCreatesFilesAndReloadsOnce(): void
+	public function testCreateDomainCreatesFullLayout(): void
 	{
-		$v = $this->service->createDomain(DomainName::fromString('Example.com'), SubDirectory::fromString('public/html'));
-		self::assertSame('example.com', $v->name);
-		self::assertDirectoryExists($this->dir . '/www/example.com/public/html');
-		$index = $this->dir . '/www/example.com/public/html/index.html';
-		self::assertFileExists($index);
-		self::assertStringContainsString('example.com', (string)file_get_contents($index));
-		self::assertStringContainsString('<h1>200</h1>', (string)file_get_contents($index));
-		self::assertFileExists($this->dir . '/avail/example.com.conf');
-		self::assertTrue(is_link($this->dir . '/enabled/example.com.conf'));
-		self::assertFileExists($this->dir . '/auth/example.com.conf');
-		self::assertFileExists($this->dir . '/auth/example.com.htpasswd');
-		self::assertStringContainsString('deny all;', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
-		self::assertSame('', file_get_contents($this->dir . '/auth/example.com.htpasswd'));
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), SubDirectory::fromString('public/html'));
+		$base = $this->dir . '/www/example.com';
+		self::assertDirectoryExists($base . '/web/public/html');
+		self::assertDirectoryExists($base . '/conf');
+		self::assertDirectoryExists($base . '/cert');
+		self::assertDirectoryExists($base . '/private');
+		self::assertDirectoryExists($base . '/logs');
+		self::assertFileExists($base . '/web/public/html/index.html');
+		self::assertStringContainsString('<h1>200</h1>', (string)file_get_contents($base . '/web/public/html/index.html'));
+		self::assertStringContainsString('example.com', (string)file_get_contents($base . '/web/public/html/index.html'));
 		self::assertSame(1, $this->reloader->calls);
+	}
+
+	public function testCreateAppliesModesFromLayout(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$expected = [];
+		foreach ($this->layout->directories($v) as $spec) {
+			$expected[$spec->path] = $spec->mode;
+		}
+		foreach ($expected as $path => $mode) {
+			self::assertDirectoryExists($path);
+			// Ohne root werden Besitzer und Gruppe nicht gesetzt, die Rechte aber schon.
+			self::assertSame(
+				sprintf('%04o', $mode & 07777),
+				sprintf('%04o', (fileperms($path) ?: 0) & 07777),
+				"Modus von $path"
+			);
+		}
+	}
+
+	public function testLocalhostAlsoGetsLayout(): void
+	{
+		$v = $this->service->createLocal(Port::fromString('3000'), null, false);
+		$base = $this->dir . '/www/localhost-3000';
+		foreach (['web', 'conf', 'cert', 'private', 'logs'] as $sub) {
+			self::assertDirectoryExists($base . '/' . $sub);
+		}
+		self::assertStringContainsString('root ' . $base . '/web;', (string)file_get_contents($this->dir . '/avail/localhost-3000.conf'));
+	}
+
+	public function testEnableSslCreatesCertificateSymlinks(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->enableSsl($v);
+		$certDir = $this->dir . '/www/example.com/cert';
+		self::assertTrue(is_link($certDir . '/fullchain.pem'));
+		self::assertTrue(is_link($certDir . '/privkey.pem'));
+		self::assertSame($this->dir . '/le/example.com/fullchain.pem', readlink($certDir . '/fullchain.pem'));
+	}
+
+	public function testApplyPermissionsRepairsModes(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		chmod($this->dir . '/www/example.com/conf', 0777);
+		$this->service->applyPermissions($v);
+		self::assertSame('0750', sprintf('%04o', (fileperms($this->dir . '/www/example.com/conf') ?: 0) & 07777));
 	}
 
 	public function testCreateLocalBindsLoopback(): void
@@ -95,10 +145,10 @@ final class VhostServiceTest extends TestCase
 
 	public function testCreateKeepsExistingIndex(): void
 	{
-		mkdir($this->dir . '/www/example.com', 0777, true);
-		file_put_contents($this->dir . '/www/example.com/index.html', 'eigene Seite');
+		mkdir($this->dir . '/www/example.com/web', 0777, true);
+		file_put_contents($this->dir . '/www/example.com/web/index.html', 'eigene Seite');
 		$this->service->createDomain(DomainName::fromString('example.com'), null);
-		self::assertSame('eigene Seite', file_get_contents($this->dir . '/www/example.com/index.html'));
+		self::assertSame('eigene Seite', file_get_contents($this->dir . '/www/example.com/web/index.html'));
 	}
 
 	public function testCreateDuplicateThrowsWithoutReload(): void

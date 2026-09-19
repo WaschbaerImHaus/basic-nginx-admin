@@ -27,6 +27,7 @@ final class ApplicationTest extends TestCase
 	private string $dir;
 	private Config $config;
 	private VhostRepository $repo;
+	private VhostLayout $layout;
 	private VhostService $service;
 
 	protected function setUp(): void
@@ -42,7 +43,11 @@ final class ApplicationTest extends TestCase
 		$db = new Database($this->config);
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
-		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config, new VhostLayout($this->config)), new FakeReloader(), new FakeCertbot($this->dir . '/le'));
+		$this->layout = new VhostLayout($this->config);
+		$this->service = new VhostService(
+			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
+			new FakeReloader(), new FakeCertbot($this->dir . '/le'), $this->layout
+		);
 	}
 
 	protected function tearDown(): void
@@ -65,7 +70,7 @@ final class ApplicationTest extends TestCase
 		rewind($in);
 		$out = fopen('php://memory', 'w+');
 		$err = fopen('php://memory', 'w+');
-		$app = new Application($this->service, $this->repo, $this->config, new VhostLayout($this->config), $in, $out, $err);
+		$app = new Application($this->service, $this->repo, $this->config, $this->layout, $in, $out, $err);
 		$code = $app->run(array_merge(['vhost'], $args));
 		rewind($out);
 		rewind($err);
@@ -104,11 +109,8 @@ final class ApplicationTest extends TestCase
 	{
 		[$code, $out] = $this->runCli(['add', 'Test.example', '--subdir', 'public']);
 		self::assertSame(0, $code);
-		// VhostLayout::docroot() liegt bereits unter web/; VhostService legt die
-		// Verzeichnisse bis Task 3/4 aber noch ohne web/ an (siehe Kommentar dort),
-		// daher zeigt die ausgegebene Meldung einen Pfad, den es real erst mit Task 3/4 gibt.
 		self::assertSame("Angelegt: test.example -> {$this->dir}/www/test.example/web/public\n", $out);
-		self::assertDirectoryExists($this->dir . '/www/test.example/public');
+		self::assertDirectoryExists($this->dir . '/www/test.example/web/public');
 
 		[$code, $out] = $this->runCli(['add-local', '3000', '--no-protect']);
 		self::assertSame(0, $code);

@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Erzeugung der nginx-Konfiguration.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 11:15
+ * @version Letzte Änderung: 2026-09-19 14:12
  */
 
 namespace Tests\Nginx;

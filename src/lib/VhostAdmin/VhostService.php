@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:25
+ * @version Letzte Änderung: 2026-09-19 09:51
  */
 
 namespace VhostAdmin;
@@ -28,7 +28,7 @@ final class VhostService
 	private const SETTING_EMAIL = 'le_email';
 
 	/**
-	 * Übernimmt Konfiguration, Repository, Renderer, Reloader und certbot-Client.
+	 * Übernimmt Konfiguration, Repository, Renderer, Reloader, certbot-Client und Layout.
 	 */
 	public function __construct(
 		private readonly Config $config,
@@ -36,6 +36,7 @@ final class VhostService
 		private readonly ConfigRenderer $renderer,
 		private readonly ReloaderInterface $reloader,
 		private readonly CertbotInterface $certbot,
+		private readonly VhostLayout $layout,
 	) {
 	}
 
@@ -72,7 +73,7 @@ final class VhostService
 	private function create(string $name, VhostKind $kind, ?int $port, ?SubDirectory $subdir, bool $protect): Vhost
 	{
 		$vhost = $this->repository->insert($name, $kind, $port, $subdir?->value, $protect);
-		$this->makeDirectories($vhost, $subdir);
+		$this->makeDirectories($vhost);
 		$this->writeIndex($vhost);
 		$this->render($vhost);
 		return $vhost;
@@ -124,8 +125,7 @@ final class VhostService
 	 */
 	private function purgeBaseDir(Vhost $vhost): void
 	{
-		// Vorläufig lokal instanziiert: Task 4 gibt das Layout in den Konstruktor.
-		$base = (new VhostLayout($this->config))->baseDir($vhost);
+		$base = $this->layout->baseDir($vhost);
 		if (is_link($base)) {
 			throw new \RuntimeException("Basisordner ist ein Symlink und wird nicht automatisch gelöscht: $base");
 		}
@@ -218,12 +218,37 @@ final class VhostService
 			?? throw new \RuntimeException("Keine Let's-Encrypt-E-Mail hinterlegt (Einstellungen / \"vhost set le_email ...\")");
 		$output = '';
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
-			// Vorläufig lokal instanziiert statt injiziert: Task 4 räumt das auf.
-			$output = $this->certbot->obtain($vhost->name, (new VhostLayout($this->config))->baseDir($vhost), $email);
+			$output = $this->certbot->obtain($vhost->name, $this->layout->baseDir($vhost), $email);
 		}
 		$this->repository->setSsl($vhost->id, true);
+		$this->linkCertificates($vhost);
 		$this->render($this->load($vhost->name));
 		return $output;
+	}
+
+	/**
+	 * Legt in cert/ Symlinks auf die Zertifikatsdateien der Domain an.
+	 *
+	 * Reine Sichtbarkeit: die ssl_certificate-Direktiven zeigen weiterhin direkt nach
+	 * /etc/letsencrypt/live, damit eine defekte Symlink-Kette den Start von nginx nicht
+	 * verhindern kann.
+	 */
+	private function linkCertificates(Vhost $vhost): void
+	{
+		$live = $this->config->letsEncryptLive . '/' . $vhost->name;
+		$certDir = $this->layout->certDir($vhost);
+		if (!is_dir($certDir)) {
+			return;
+		}
+		foreach (['fullchain.pem', 'privkey.pem'] as $file) {
+			$link = $certDir . '/' . $file;
+			if (is_link($link)) {
+				unlink($link);
+			}
+			if (!file_exists($link)) {
+				symlink($live . '/' . $file, $link);
+			}
+		}
 	}
 
 	/**
@@ -316,6 +341,20 @@ final class VhostService
 	}
 
 	/**
+	 * Soll-Rechte aller Verzeichnisse eines vHosts neu setzen.
+	 *
+	 * Für den CLI-Befehl "fix-permissions" nach manuellen Eingriffen.
+	 */
+	public function applyPermissions(Vhost $vhost): void
+	{
+		foreach ($this->layout->directories($vhost) as $spec) {
+			if (is_dir($spec->path)) {
+				$this->applySpec($spec);
+			}
+		}
+	}
+
+	/**
 	 * Inhalt einer Datei, falls sie existiert, sonst null.
 	 */
 	private function readIfExists(string $path): ?string
@@ -372,35 +411,23 @@ final class VhostService
 	}
 
 	/**
-	 * Basisordner und Unterverzeichnisse eines vHosts anlegen und deren Besitzer setzen.
+	 * Alle Verzeichnisse des vHosts anlegen und ihre Soll-Rechte setzen.
 	 *
-	 * Der Basisordner liegt direkt unterhalb von wwwRoot, das nur root gehört – dort mkdir()
-	 * ruhig rekursiv, falls wwwRoot selbst noch fehlt. Innerhalb des Basisordners (02775,
-	 * also für www-data beschreibbar) kann dagegen ein Segment ein von www-data platzierter
-	 * Symlink sein; deshalb wird jedes Unterverzeichnis einzeln geprüft und angelegt statt
-	 * per rekursivem mkdir() über den ganzen Docroot.
+	 * Die Liste kommt aus VhostLayout::directories() (Eltern vor Kindern), damit Service,
+	 * Installer und Migration dieselben Rechte anwenden. Jedes Verzeichnis wird einzeln
+	 * geprüft und angelegt: innerhalb des Basisordners (für www-data beschreibbar) könnte
+	 * ein Segment ein untergeschobener Symlink sein.
 	 */
-	private function makeDirectories(Vhost $vhost, ?SubDirectory $subdir): void
+	private function makeDirectories(Vhost $vhost): void
 	{
-		// Noch keine Konstruktor-Injektion: bis Task 4 wird das Layout hier lokal gebaut.
-		$base = (new VhostLayout($this->config))->baseDir($vhost);
-		if (is_link($base)) {
-			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $base");
-		}
-		if (!is_dir($base) && !mkdir($base, 0775, true)) {
-			throw new \RuntimeException("Kann $base nicht anlegen");
-		}
-		$this->own($base, 02775);
-		$path = $base;
-		foreach ($subdir?->segments() ?? [] as $segment) {
-			$path .= '/' . $segment;
-			$this->makeDirectory($path);
-			$this->own($path, 02775);
+		foreach ($this->layout->directories($vhost) as $spec) {
+			$this->makeDirectory($spec->path);
+			$this->applySpec($spec);
 		}
 	}
 
 	/**
-	 * Legt ein einzelnes Unterverzeichnis innerhalb des Basisordners an, falls es fehlt.
+	 * Legt ein einzelnes Verzeichnis an, falls es fehlt.
 	 *
 	 * @throws \RuntimeException wenn der Pfad ein Symlink ist oder sich nicht anlegen lässt
 	 */
@@ -409,9 +436,31 @@ final class VhostService
 		if (is_link($path)) {
 			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $path");
 		}
-		if (!is_dir($path) && !mkdir($path, 0775)) {
+		if (!is_dir($path) && !mkdir($path, 0775, true)) {
 			throw new \RuntimeException("Kann $path nicht anlegen");
 		}
+	}
+
+	/**
+	 * Setzt Besitzer, Gruppe und Rechte eines Verzeichnisses gemäß Vorgabe.
+	 *
+	 * Besitzer und Gruppe nur als root; die Rechte werden immer gesetzt, damit die
+	 * Tests ohne root dieselbe Wirkung prüfen können.
+	 *
+	 * @throws \RuntimeException wenn der Pfad ein Symlink ist
+	 */
+	private function applySpec(DirectorySpec $spec): void
+	{
+		if (is_link($spec->path)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: {$spec->path}");
+		}
+		if ($this->isRoot()) {
+			if (!@chown($spec->path, $spec->owner)) {
+				chown($spec->path, $this->config->wwwGroup);
+			}
+			chgrp($spec->path, $spec->group);
+		}
+		chmod($spec->path, $spec->mode);
 	}
 
 	/**
@@ -422,8 +471,7 @@ final class VhostService
 	 */
 	private function writeIndex(Vhost $vhost): void
 	{
-		// vorläufig ohne web/: stellt Task 3/4 um
-		$docroot = (new VhostLayout($this->config))->baseDir($vhost) . ($vhost->subdir !== null ? '/' . $vhost->subdir : '');
+		$docroot = $this->layout->docroot($vhost);
 		$file = $docroot . '/index.html';
 		if (is_link($file) || file_exists($file)) {
 			return;
