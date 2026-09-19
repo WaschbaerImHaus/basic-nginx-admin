@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:51
+ * @version Letzte Änderung: 2026-09-19 14:20
  */
 
 namespace Tests;
@@ -19,6 +19,7 @@ use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
+use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
@@ -468,5 +469,70 @@ final class VhostServiceTest extends TestCase
 
 		self::assertDirectoryDoesNotExist($this->dir . '/www/fehlt.example');
 		self::assertDirectoryExists($this->dir . '/www');
+	}
+
+	/**
+	 * Snippet setzen schreibt die Datei mit den Soll-Rechten und löst genau einen Reload aus.
+	 */
+	public function testSetSnippetWritesFileAndReloads(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$before = $this->reloader->calls;
+		$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		self::assertFileExists($file);
+		self::assertSame("expires 1d;\n", file_get_contents($file));
+		self::assertSame("expires 1d;\n", $this->service->snippet($v));
+		self::assertSame($before + 1, $this->reloader->calls);
+		self::assertSame('0640', sprintf('%04o', (fileperms($file) ?: 0) & 07777));
+	}
+
+	/**
+	 * Erneutes Setzen ersetzt den Inhalt; ein leeres Snippet löscht die Datei wieder.
+	 */
+	public function testSetSnippetReplacesAndEmptiesFile(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+		$this->service->setSnippet($v, NginxSnippet::fromString("autoindex on;\n"));
+		self::assertSame("autoindex on;\n", file_get_contents($file));
+		$this->service->setSnippet($v, NginxSnippet::fromString(''));
+		self::assertFileDoesNotExist($file);
+		self::assertSame('', $this->service->snippet($v));
+	}
+
+	/**
+	 * Scheitert der Reload, muss der vorherige Dateiinhalt zurückgesetzt werden.
+	 */
+	public function testSetSnippetRestoresPreviousContentWhenReloadFails(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen: kaputt';
+		try {
+			$this->service->setSnippet($v, NginxSnippet::fromString("autoindex on;\n"));
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('nginx -t', $e->getMessage());
+		}
+		self::assertSame("expires 1d;\n", file_get_contents($file), 'alter Stand muss zurück sein');
+	}
+
+	/**
+	 * Existierte vorher keine Datei, muss die neu angelegte bei fehlgeschlagenem Reload wieder verschwinden.
+	 */
+	public function testSetSnippetRemovesNewFileWhenReloadFails(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$file = $this->dir . '/www/example.com/conf/custom.conf';
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen';
+		try {
+			$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException) {
+		}
+		self::assertFileDoesNotExist($file, 'neu angelegte Datei muss wieder weg sein');
 	}
 }

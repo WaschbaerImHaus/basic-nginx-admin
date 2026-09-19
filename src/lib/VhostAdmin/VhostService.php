@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:51
+ * @version Letzte Änderung: 2026-09-19 14:20
  */
 
 namespace VhostAdmin;
@@ -19,6 +19,7 @@ use VhostAdmin\Nginx\ReloaderInterface;
 use VhostAdmin\Ssl\CertbotInterface;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
+use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
@@ -258,6 +259,59 @@ final class VhostService
 	{
 		$this->repository->setSsl($vhost->id, false);
 		$this->render($this->load($vhost->name));
+	}
+
+	/**
+	 * Konfigurations-Snippet des vHosts setzen.
+	 *
+	 * Der Text ist durch NginxSnippet bereits gegen die Positivliste geprüft. Schlägt
+	 * danach "nginx -t" fehl (z.B. wegen einer syntaktisch falschen, aber erlaubten
+	 * Direktive), wird die Datei auf den vorherigen Stand zurückgesetzt und die
+	 * Ausnahme weitergeworfen – die Oberfläche zeigt dann die nginx-Meldung an.
+	 *
+	 * Ein leeres Snippet entfernt die Datei.
+	 */
+	public function setSnippet(Vhost $vhost, NginxSnippet $snippet): void
+	{
+		$file = $this->layout->confFile($vhost);
+		if (is_link($file)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $file");
+		}
+		$previous = is_file($file) ? (string)file_get_contents($file) : null;
+		if ($snippet->isEmpty()) {
+			if ($previous !== null) {
+				unlink($file);
+			}
+		} else {
+			file_put_contents($file, $snippet->value);
+			if ($this->isRoot()) {
+				chown($file, 'root');
+				chgrp($file, $this->config->wwwGroup);
+			}
+			chmod($file, 0640);
+		}
+		try {
+			$this->render($this->load($vhost->name));
+		} catch (\Throwable $e) {
+			if ($previous === null) {
+				if (is_file($file)) {
+					unlink($file);
+				}
+			} else {
+				file_put_contents($file, $previous);
+				chmod($file, 0640);
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Aktueller Inhalt des Konfigurations-Snippets; leer, wenn keines gesetzt ist.
+	 */
+	public function snippet(Vhost $vhost): string
+	{
+		$file = $this->layout->confFile($vhost);
+		return is_file($file) ? (string)file_get_contents($file) : '';
 	}
 
 	/**
