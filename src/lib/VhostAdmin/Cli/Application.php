@@ -8,14 +8,16 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 14:52
  */
 
 namespace VhostAdmin\Cli;
 
 use VhostAdmin\Config;
+use VhostAdmin\Migration\LayoutMigrator;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
+use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
@@ -40,6 +42,9 @@ vhost – nginx-vHosts verwalten
   vhost ip-del <name> <ip|cidr>
   vhost ssl <name> on|off
   vhost set le_email <adresse>
+  vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
+  vhost fix-permissions [name]
+  vhost migrate-layout
   vhost render [name]
   vhost init
 
@@ -48,7 +53,7 @@ TXT;
 	private const VALUE_OPTIONS = ['subdir'];
 
 	/**
-	 * Übernimmt Service, Repository, Konfiguration, Layout und die Ein-/Ausgabe-Streams.
+	 * Übernimmt Service, Repository, Konfiguration, Layout, Migrator und die Ein-/Ausgabe-Streams.
 	 *
 	 * @param resource $stdin
 	 * @param resource $stdout
@@ -59,6 +64,7 @@ TXT;
 		private readonly VhostRepository $repository,
 		private readonly Config $config,
 		private readonly VhostLayout $layout,
+		private readonly LayoutMigrator $migrator,
 		private $stdin,
 		private $stdout,
 		private $stderr,
@@ -230,6 +236,38 @@ TXT;
 				}
 				$this->service->setLetsEncryptEmail($positional[1] ?? '');
 				$this->out("Gespeichert.\n");
+				return 0;
+
+			case 'conf':
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$snippet = NginxSnippet::fromString((string)stream_get_contents($this->stdin));
+				$this->service->setSnippet($vhost, $snippet);
+				$this->out($snippet->isEmpty() ? "Konfiguration entfernt.\n" : "Konfiguration übernommen.\n");
+				return 0;
+
+			case 'fix-permissions':
+				$targets = isset($positional[0]) ? [$this->service->load($positional[0])] : $this->repository->all();
+				foreach ($targets as $vhost) {
+					$this->service->applyPermissions($vhost);
+					$this->out("Rechte gesetzt: {$vhost->name}\n");
+				}
+				$this->out(count($targets) . " vHost(s) bearbeitet.\n");
+				return 0;
+
+			case 'migrate-layout':
+				$pending = $this->migrator->pending();
+				if ($pending === []) {
+					$this->out("Nichts zu migrieren.\n");
+					return 0;
+				}
+				$archive = $this->migrator->backup($pending, $this->config->backupDir);
+				$this->out("Sicherung: $archive\n");
+				foreach ($pending as $vhost) {
+					$this->migrator->migrate($vhost);
+					$this->out("Migriert: {$vhost->name} -> " . $this->layout->docroot($vhost) . "\n");
+				}
+				$this->service->renderAll();
+				$this->out(count($pending) . " vHost(s) migriert.\n");
 				return 0;
 
 			case 'render':

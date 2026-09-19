@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Konfigurationsklasse.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:30
+ * @version Letzte Änderung: 2026-09-19 14:52
  */
 
 namespace Tests;
@@ -28,6 +28,7 @@ final class ConfigTest extends TestCase
 		self::assertSame('/usr/local/sbin/vhost', $c->vhostBinary);
 		self::assertSame(8080, $c->adminPort);
 		self::assertStringEndsWith('/templates/index.html', $c->templatePath);
+		self::assertSame('/var/backups', $c->backupDir);
 	}
 
 	public function testFromArrayOverridesOnlyGivenKeys(): void

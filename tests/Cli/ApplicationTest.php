@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Kommandozeile: Argument-Parsing und Befehle über Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:18
+ * @version Letzte Änderung: 2026-09-19 14:52
  */
 
 namespace Tests\Cli;
@@ -17,7 +17,9 @@ use Tests\Support\TempDir;
 use VhostAdmin\Cli\Application;
 use VhostAdmin\Config;
 use VhostAdmin\Database;
+use VhostAdmin\Migration\LayoutMigrator;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
@@ -35,10 +37,12 @@ final class ApplicationTest extends TestCase
 		$this->dir = TempDir::create();
 		mkdir($this->dir . '/avail');
 		mkdir($this->dir . '/enabled');
+		mkdir($this->dir . '/nginxlogs');
 		$this->config = Config::fromArray([
 			'dbPath' => $this->dir . '/db.sqlite', 'wwwRoot' => $this->dir . '/www',
 			'sitesAvailable' => $this->dir . '/avail', 'sitesEnabled' => $this->dir . '/enabled',
 			'authDir' => $this->dir . '/auth', 'letsEncryptLive' => $this->dir . '/le', 'ipv6' => false,
+			'backupDir' => $this->dir . '/backups',
 		]);
 		$db = new Database($this->config);
 		$db->initSchema();
@@ -70,7 +74,11 @@ final class ApplicationTest extends TestCase
 		rewind($in);
 		$out = fopen('php://memory', 'w+');
 		$err = fopen('php://memory', 'w+');
-		$app = new Application($this->service, $this->repo, $this->config, $this->layout, $in, $out, $err);
+		$app = new Application(
+			$this->service, $this->repo, $this->config, $this->layout,
+			new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs'),
+			$in, $out, $err
+		);
 		$code = $app->run(array_merge(['vhost'], $args));
 		rewind($out);
 		rewind($err);
@@ -248,5 +256,71 @@ final class ApplicationTest extends TestCase
 		self::assertSame(1, $code);
 		self::assertStringContainsString('Name fehlt', $err);
 		self::assertDirectoryExists($this->dir . '/www/a.example');
+	}
+
+	public function testConfReadsSnippetFromStdin(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		[$code, $out] = $this->runCli(['conf', 'a.example'], "expires 1d;\n");
+		self::assertSame(0, $code);
+		self::assertSame("Konfiguration übernommen.\n", $out);
+		self::assertSame("expires 1d;\n", file_get_contents($this->dir . '/www/a.example/conf/custom.conf'));
+	}
+
+	public function testConfRejectsForbiddenDirectiveWithLineNumber(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		[$code, , $err] = $this->runCli(['conf', 'a.example'], "expires 1d;\nroot /etc;\n");
+		self::assertSame(1, $code);
+		self::assertStringContainsString('Zeile 2', $err);
+		self::assertStringContainsString('root', $err);
+		self::assertFileDoesNotExist($this->dir . '/www/a.example/conf/custom.conf');
+	}
+
+	public function testConfWithEmptyInputRemovesSnippet(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		$this->runCli(['conf', 'a.example'], "expires 1d;\n");
+		[$code, $out] = $this->runCli(['conf', 'a.example'], '');
+		self::assertSame(0, $code);
+		self::assertStringContainsString('entfernt', $out);
+		self::assertFileDoesNotExist($this->dir . '/www/a.example/conf/custom.conf');
+	}
+
+	public function testFixPermissionsForOneAndAllHosts(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		chmod($this->dir . '/www/a.example/conf', 0777);
+		[$code, $out] = $this->runCli(['fix-permissions', 'a.example']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('a.example', $out);
+		self::assertSame('0750', sprintf('%04o', (fileperms($this->dir . '/www/a.example/conf') ?: 0) & 07777));
+		[$code, $out] = $this->runCli(['fix-permissions']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('1', $out);
+	}
+
+	public function testMigrateLayoutMovesOldHostAndIsIdempotent(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base, 0775, true);
+		file_put_contents($base . '/index.html', 'Inhalt');
+		[$code, $out] = $this->runCli(['migrate-layout']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('alt.example', $out);
+		self::assertStringContainsString('Sicherung', $out);
+		self::assertSame('Inhalt', file_get_contents($base . '/web/index.html'));
+		[$code, $out] = $this->runCli(['migrate-layout']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Nichts zu migrieren', $out);
+	}
+
+	public function testUsageListsNewCommands(): void
+	{
+		[, $out] = $this->runCli(['help']);
+		foreach (['vhost conf <name>', 'vhost fix-permissions', 'vhost migrate-layout'] as $line) {
+			self::assertStringContainsString($line, $out);
+		}
 	}
 }

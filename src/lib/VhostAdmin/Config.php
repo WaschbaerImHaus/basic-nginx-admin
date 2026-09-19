@@ -8,7 +8,7 @@ declare(strict_types=1);
  * erzeugen per fromArray() eine Konfiguration mit temporären Verzeichnissen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:35
+ * @version Letzte Änderung: 2026-09-19 14:52
  */
 
 namespace VhostAdmin;
@@ -28,6 +28,7 @@ final class Config
 	 * @param string $templatePath    Vorlage der bunten Startseite
 	 * @param int    $adminPort       Port der Verwaltungsoberfläche (reserviert)
 	 * @param bool   $ipv6            ob nginx zusätzlich auf IPv6 lauschen soll
+	 * @param string $backupDir       Ziel der Sicherungsarchive vor "migrate-layout"
 	 */
 	public function __construct(
 		public readonly string $dbPath,
@@ -42,6 +43,7 @@ final class Config
 		public readonly string $templatePath,
 		public readonly int $adminPort,
 		public readonly bool $ipv6,
+		public readonly string $backupDir,
 	) {
 	}
 
@@ -74,6 +76,7 @@ final class Config
 			'templatePath' => dirname(__DIR__, 2) . '/templates/index.html',
 			'adminPort' => 8080,
 			'ipv6' => self::systemHasIpv6(),
+			'backupDir' => '/var/backups',
 		];
 		$unknown = array_diff_key($values, $defaults);
 		if ($unknown !== []) {
