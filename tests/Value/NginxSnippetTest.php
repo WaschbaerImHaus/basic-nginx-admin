@@ -125,4 +125,98 @@ final class NginxSnippetTest extends TestCase
 			self::assertStringContainsString('root', $e->getMessage());
 		}
 	}
+
+	public function testRejectsMultipleDirectivesOnOneLine(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('root');
+		NginxSnippet::fromString("expires 1d; root /etc;");
+	}
+
+	public function testRejectsEscapeWithMultipleDirectives(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('schließende');
+		NginxSnippet::fromString("expires 1d; } server { root /etc; listen 8081;");
+	}
+
+	public function testRejectsClosingBraceWhichWouldNegateDepth(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('schließende');
+		NginxSnippet::fromString("expires 1d; }");
+	}
+
+	public function testRejectsMultipleNegativeClosingBraces(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('schließende');
+		NginxSnippet::fromString("} } server {");
+	}
+
+	public function testAcceptsMultipleStatementsOnOneLineInLocation(): void
+	{
+		$text = "location /a { expires 1d; }\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	public function testRejectsTooDeepNestingOnOneLine(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('verschachtelt');
+		NginxSnippet::fromString("location /a { location /b { location /c { expires 1d; } } }");
+	}
+
+	public function testAcceptsSemicolonInDoubleQuotes(): void
+	{
+		$text = "add_header X-Foo \"a; b\";\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	public function testAcceptsBraceInDoubleQuotes(): void
+	{
+		$text = "add_header X-Foo \"a { b\";\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	public function testAcceptsCommentAfterDirective(): void
+	{
+		$text = "expires 1d; # root /etc;\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	public function testRejectsUnclosedQuotes(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('Anführungszeichen');
+		NginxSnippet::fromString("add_header X-Foo \"unclosed;");
+	}
+
+	public function testRejectsDirectiveWithoutSemicolon(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('Semikolon');
+		NginxSnippet::fromString("expires 1d");
+	}
+
+	public function testAcceptsGzipDirectives(): void
+	{
+		$text1 = "gzip on;\n";
+		$text2 = "gzip_types text/css;\n";
+		self::assertSame($text1, NginxSnippet::fromString($text1)->value);
+		self::assertSame($text2, NginxSnippet::fromString($text2)->value);
+	}
+
+	public function testRejectsGzipPrefixedForbiddenDirective(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('gzipfoo');
+		NginxSnippet::fromString("gzipfoo bar;");
+	}
+
+	public function testAcceptsProxyDirectives(): void
+	{
+		$text = "proxy_set_header Host \$host;\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
 }
