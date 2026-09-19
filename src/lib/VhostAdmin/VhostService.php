@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 22:59
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace VhostAdmin;
@@ -124,7 +124,7 @@ final class VhostService
 	 */
 	private function purgeBaseDir(Vhost $vhost): void
 	{
-		$base = $vhost->baseDir($this->config);
+		$base = (new VhostLayout($this->config))->baseDir($vhost);
 		if (is_link($base)) {
 			throw new \RuntimeException("Basisordner ist ein Symlink und wird nicht automatisch gelöscht: $base");
 		}
@@ -217,7 +217,7 @@ final class VhostService
 			?? throw new \RuntimeException("Keine Let's-Encrypt-E-Mail hinterlegt (Einstellungen / \"vhost set le_email ...\")");
 		$output = '';
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
-			$output = $this->certbot->obtain($vhost->name, $vhost->baseDir($this->config), $email);
+			$output = $this->certbot->obtain($vhost->name, (new VhostLayout($this->config))->baseDir($vhost), $email);
 		}
 		$this->repository->setSsl($vhost->id, true);
 		$this->render($this->load($vhost->name));
@@ -380,7 +380,7 @@ final class VhostService
 	 */
 	private function makeDirectories(Vhost $vhost, ?SubDirectory $subdir): void
 	{
-		$base = $vhost->baseDir($this->config);
+		$base = (new VhostLayout($this->config))->baseDir($vhost);
 		if (is_link($base)) {
 			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $base");
 		}
@@ -419,13 +419,15 @@ final class VhostService
 	 */
 	private function writeIndex(Vhost $vhost): void
 	{
-		$file = $vhost->docroot($this->config) . '/index.html';
+		// vorläufig ohne web/: stellt Task 3/4 um
+		$docroot = (new VhostLayout($this->config))->baseDir($vhost) . ($vhost->subdir !== null ? '/' . $vhost->subdir : '');
+		$file = $docroot . '/index.html';
 		if (is_link($file) || file_exists($file)) {
 			return;
 		}
 		$html = strtr((string)file_get_contents($this->config->templatePath), [
 			'{{NAME}}' => htmlspecialchars($vhost->name, ENT_QUOTES, 'UTF-8'),
-			'{{DOCROOT}}' => htmlspecialchars($vhost->docroot($this->config), ENT_QUOTES, 'UTF-8'),
+			'{{DOCROOT}}' => htmlspecialchars($docroot, ENT_QUOTES, 'UTF-8'),
 		]);
 		file_put_contents($file, $html);
 		$this->own($file, 0664);

@@ -9,7 +9,7 @@ declare(strict_types=1);
  * die Datenbank schreiben und nginx neu laden.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 13:01
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 require __DIR__ . '/../bootstrap.php';
@@ -20,6 +20,7 @@ use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Nginx\SystemdReloader;
 use VhostAdmin\Ssl\CertbotClient;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
 
@@ -42,5 +43,6 @@ $database = new Database($config);
 $database->initSchema();
 $repository = new VhostRepository($database);
 $service = new VhostService($config, $repository, new ConfigRenderer($config), new SystemdReloader(), new CertbotClient());
+$layout = new VhostLayout($config);
 
-exit((new Application($service, $repository, $config, STDIN, STDOUT, STDERR))->run($argv));
+exit((new Application($service, $repository, $config, $layout, STDIN, STDOUT, STDERR))->run($argv));

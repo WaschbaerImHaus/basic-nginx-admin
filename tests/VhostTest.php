@@ -5,49 +5,17 @@ declare(strict_types=1);
  * Tests für die Entität Vhost.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 22:59
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace Tests;
 
 use PHPUnit\Framework\TestCase;
-use VhostAdmin\Config;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
 
 final class VhostTest extends TestCase
 {
-	private Config $config;
-
-	protected function setUp(): void
-	{
-		$this->config = Config::fromArray(['wwwRoot' => '/srv/www']);
-	}
-
-	public function testDomainPaths(): void
-	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
-		self::assertFalse($v->isLocal());
-		self::assertSame('example.com', $v->slug());
-		self::assertSame('/srv/www/example.com', $v->baseDir($this->config));
-		self::assertSame('/srv/www/example.com', $v->docroot($this->config));
-	}
-
-	public function testDomainWithSubdirectory(): void
-	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, 'public/html', true, false);
-		self::assertSame('/srv/www/example.com', $v->baseDir($this->config));
-		self::assertSame('/srv/www/example.com/public/html', $v->docroot($this->config));
-	}
-
-	public function testLocalhostPaths(): void
-	{
-		$v = new Vhost(2, 'localhost:3000', VhostKind::Localhost, 3000, null, false, false);
-		self::assertTrue($v->isLocal());
-		self::assertSame('localhost-3000', $v->slug());
-		self::assertSame('/srv/www/localhost-3000', $v->docroot($this->config));
-	}
-
 	public function testFromRowConvertsTypes(): void
 	{
 		$v = Vhost::fromRow([
@@ -71,7 +39,7 @@ final class VhostTest extends TestCase
 		self::assertNull($v->subdir);
 		self::assertFalse($v->protect);
 		self::assertTrue($v->ssl);
-		self::assertSame('/srv/www/a.de', $v->docroot(Config::fromArray(['wwwRoot' => '/srv/www'])));
+		self::assertSame('a.de', $v->slug());
 	}
 
 	public function testFromRowRejectsPathEscapeInName(): void

@@ -9,13 +9,14 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:50
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace VhostAdmin\Nginx;
 
 use VhostAdmin\Config;
 use VhostAdmin\Vhost;
+use VhostAdmin\VhostLayout;
 
 final class ConfigRenderer
 {
@@ -90,7 +91,8 @@ final class ConfigRenderer
 	public function serverConfig(Vhost $v): string
 	{
 		$slug = $v->slug();
-		$root = $v->docroot($this->config);
+		// vorläufig ohne web/: stellt Task 3/4 um
+		$root = (new VhostLayout($this->config))->baseDir($v) . ($v->subdir !== null ? '/' . $v->subdir : '');
 		$authInclude = $this->authSnippetPath($v);
 		$common = <<<NG
     root $root;
@@ -108,7 +110,7 @@ NG;
 			return self::HEADER . "server {\n$listen    server_name localhost;\n$common\n}\n";
 		}
 
-		$base = $v->baseDir($this->config);
+		$base = (new VhostLayout($this->config))->baseDir($v);
 		$acme = <<<NG
     location ^~ /.well-known/acme-challenge/ {
         auth_basic off;

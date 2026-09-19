@@ -2,10 +2,11 @@
 declare(strict_types=1);
 
 /**
- * Entität: ein virtueller Host mit seinen Pfaden.
+ * Entität: ein virtueller Host.
  *
  * Unveränderlich; Zustandsänderungen laufen über das Repository und werden
- * danach neu geladen.
+ * danach neu geladen. Pfade und Soll-Rechte liefert ausschließlich
+ * VhostLayout – diese Entität kennt nur ihre Stammdaten.
  *
  * Der Konstruktor revalidiert Name, Port und Unterverzeichnis mit denselben
  * Wertobjekten wie bei der Eingabe. Die Oberfläche (www-data) kann die
@@ -15,7 +16,7 @@ declare(strict_types=1);
  * führen, egal wie sie entstanden ist.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 22:59
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace VhostAdmin;
@@ -142,19 +143,4 @@ final class Vhost
 		return $this->isLocal() ? 'localhost-' . $this->port : $this->name;
 	}
 
-	/**
-	 * Basisordner unterhalb der Web-Wurzel (auch Webroot für ACME-Challenges).
-	 */
-	public function baseDir(Config $config): string
-	{
-		return $config->wwwRoot . '/' . $this->slug();
-	}
-
-	/**
-	 * Tatsächlicher Docroot (Basisordner plus optionales Unterverzeichnis).
-	 */
-	public function docroot(Config $config): string
-	{
-		return $this->baseDir($config) . ($this->subdir !== null ? '/' . $this->subdir : '');
-	}
 }

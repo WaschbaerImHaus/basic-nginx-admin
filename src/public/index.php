@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Diese Datei ist das Template; alle Logik liegt in VhostAdmin\Web\AdminPage.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 13:05
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 $bootstrap = is_file('/opt/vhost-admin/bootstrap.php') ? '/opt/vhost-admin/bootstrap.php' : dirname(__DIR__) . '/bootstrap.php';
@@ -15,12 +15,14 @@ require $bootstrap;
 
 use VhostAdmin\Config;
 use VhostAdmin\Database;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\Web\AdminPage;
 use VhostAdmin\Web\CommandRunner;
 
 session_start();
 $config = Config::defaults();
+$layout = new VhostLayout($config);
 $page = new AdminPage(new VhostRepository(new Database($config)), new CommandRunner($config), $config, $_SESSION);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -131,8 +133,8 @@ function badge(bool $on, string $yes, string $no): string
 	<div class="card">
 		<dl>
 			<dt>Typ</dt><dd><?= $isDomain ? 'Domain (öffentlich)' : '<span class="badge local">localhost</span> nur lokal auf 127.0.0.1:' . h($view->port) ?></dd>
-			<dt>Basisordner</dt><dd><code><?= h($view->baseDir($config)) ?></code></dd>
-			<dt>Docroot</dt><dd><code><?= h($view->docroot($config)) ?></code></dd>
+			<dt>Basisordner</dt><dd><code><?= h($layout->baseDir($view)) ?></code></dd>
+			<dt>Docroot</dt><dd><code><?= h($layout->docroot($view)) ?></code></dd>
 			<dt>Aufruf</dt><dd><a href="<?= h($isDomain ? ($view->ssl ? 'https' : 'http') . '://' . $view->name : 'http://localhost:' . $view->port) ?>/" target="_blank"><?= h($isDomain ? $view->name : 'localhost:' . $view->port) ?></a></dd>
 			<dt>Angelegt</dt><dd><?= h($view->createdAt) ?> UTC</dd>
 		</dl>
@@ -196,7 +198,7 @@ function badge(bool $on, string $yes, string $no): string
 
 			<div class="card">
 				<h2>Entfernen</h2>
-				<p class="muted">Entfernt nginx-Konfiguration und Datenbankeintrag. Die Dateien unter <code><?= h($view->baseDir($config)) ?></code> bleiben erhalten.</p>
+				<p class="muted">Entfernt nginx-Konfiguration und Datenbankeintrag. Die Dateien unter <code><?= h($layout->baseDir($view)) ?></code> bleiben erhalten.</p>
 				<?= form('remove', ['name' => $view->name], 'vHost entfernen', 'danger', $view->name . ' wirklich entfernen?') ?>
 			</div>
 		</div>
@@ -217,7 +219,7 @@ function badge(bool $on, string $yes, string $no): string
 			<tr>
 				<td><a href="/?v=<?= h(rawurlencode($v->name)) ?>"><?= h($v->name) ?></a>
 					<?php if ($v->isLocal()): ?> <span class="badge local">lokal</span><?php endif ?></td>
-				<td><code><?= h($v->docroot($config)) ?></code></td>
+				<td><code><?= h($layout->docroot($v)) ?></code></td>
 				<td><?= badge($v->protect, 'aktiv', 'aus') ?></td>
 				<td><?= !$v->isLocal() ? badge($v->ssl, 'aktiv', 'aus') : '<span class="muted">–</span>' ?></td>
 			</tr>

@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Kommandozeile: Argument-Parsing und Befehle über Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace Tests\Cli;
@@ -18,6 +18,7 @@ use VhostAdmin\Cli\Application;
 use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
 
@@ -64,7 +65,7 @@ final class ApplicationTest extends TestCase
 		rewind($in);
 		$out = fopen('php://memory', 'w+');
 		$err = fopen('php://memory', 'w+');
-		$app = new Application($this->service, $this->repo, $this->config, $in, $out, $err);
+		$app = new Application($this->service, $this->repo, $this->config, new VhostLayout($this->config), $in, $out, $err);
 		$code = $app->run(array_merge(['vhost'], $args));
 		rewind($out);
 		rewind($err);
@@ -103,7 +104,10 @@ final class ApplicationTest extends TestCase
 	{
 		[$code, $out] = $this->runCli(['add', 'Test.example', '--subdir', 'public']);
 		self::assertSame(0, $code);
-		self::assertSame("Angelegt: test.example -> {$this->dir}/www/test.example/public\n", $out);
+		// VhostLayout::docroot() liegt bereits unter web/; VhostService legt die
+		// Verzeichnisse bis Task 3/4 aber noch ohne web/ an (siehe Kommentar dort),
+		// daher zeigt die ausgegebene Meldung einen Pfad, den es real erst mit Task 3/4 gibt.
+		self::assertSame("Angelegt: test.example -> {$this->dir}/www/test.example/web/public\n", $out);
 		self::assertDirectoryExists($this->dir . '/www/test.example/public');
 
 		[$code, $out] = $this->runCli(['add-local', '3000', '--no-protect']);

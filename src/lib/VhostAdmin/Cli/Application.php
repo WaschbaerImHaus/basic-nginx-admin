@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-19 09:14
  */
 
 namespace VhostAdmin\Cli;
@@ -20,6 +20,7 @@ use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
 use VhostAdmin\Vhost;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
 
@@ -47,7 +48,7 @@ TXT;
 	private const VALUE_OPTIONS = ['subdir'];
 
 	/**
-	 * Übernimmt Service, Repository, Konfiguration und die Ein-/Ausgabe-Streams.
+	 * Übernimmt Service, Repository, Konfiguration, Layout und die Ein-/Ausgabe-Streams.
 	 *
 	 * @param resource $stdin
 	 * @param resource $stdout
@@ -57,6 +58,7 @@ TXT;
 		private readonly VhostService $service,
 		private readonly VhostRepository $repository,
 		private readonly Config $config,
+		private readonly VhostLayout $layout,
 		private $stdin,
 		private $stdout,
 		private $stderr,
@@ -147,7 +149,7 @@ TXT;
 						"%-32s %-9s %-44s schutz:%-3s ssl:%s\n",
 						$vhost->name,
 						$vhost->kind->value,
-						$vhost->docroot($this->config),
+						$this->layout->docroot($vhost),
 						$vhost->protect ? 'an' : 'aus',
 						$vhost->ssl ? 'an' : 'aus'
 					));
@@ -156,12 +158,12 @@ TXT;
 
 			case 'add':
 				$vhost = $this->service->createDomain(DomainName::fromString($arg(0, 'Domain')), $subdir, $protect);
-				$this->out("Angelegt: {$vhost->name} -> " . $vhost->docroot($this->config) . "\n");
+				$this->out("Angelegt: {$vhost->name} -> " . $this->layout->docroot($vhost) . "\n");
 				return 0;
 
 			case 'add-local':
 				$vhost = $this->service->createLocal(Port::fromString($arg(0, 'Port'), $this->config->adminPort), $subdir, $protect);
-				$this->out("Angelegt: {$vhost->name} -> " . $vhost->docroot($this->config) . "\n");
+				$this->out("Angelegt: {$vhost->name} -> " . $this->layout->docroot($vhost) . "\n");
 				return 0;
 
 			case 'remove':
