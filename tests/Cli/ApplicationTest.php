@@ -42,7 +42,7 @@ final class ApplicationTest extends TestCase
 		$db = new Database($this->config);
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
-		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config), new FakeReloader(), new FakeCertbot($this->dir . '/le'));
+		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config, new VhostLayout($this->config)), new FakeReloader(), new FakeCertbot($this->dir . '/le'));
 	}
 
 	protected function tearDown(): void

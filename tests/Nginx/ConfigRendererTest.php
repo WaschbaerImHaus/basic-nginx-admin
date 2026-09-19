@@ -15,15 +15,18 @@ use VhostAdmin\Config;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
+use VhostAdmin\VhostLayout;
 
 final class ConfigRendererTest extends TestCase
 {
 	private function renderer(bool $ipv6 = true): ConfigRenderer
 	{
-		return new ConfigRenderer(Config::fromArray([
-			'wwwRoot' => '/var/www', 'authDir' => '/etc/nginx/auth', 'sitesAvailable' => '/etc/nginx/sites-available',
-			'letsEncryptLive' => '/etc/letsencrypt/live', 'ipv6' => $ipv6,
-		]));
+		$config = Config::fromArray([
+			'wwwRoot' => '/var/www', 'wwwOwner' => 'user', 'authDir' => '/etc/nginx/auth',
+			'sitesAvailable' => '/etc/nginx/sites-available', 'letsEncryptLive' => '/etc/letsencrypt/live',
+			'ipv6' => $ipv6,
+		]);
+		return new ConfigRenderer($config, new VhostLayout($config));
 	}
 
 	public function testPaths(): void
@@ -77,13 +80,14 @@ server {
     location ^~ /.well-known/acme-challenge/ {
         auth_basic off;
         allow all;
-        root /var/www/example.com;
+        root /var/www/example.com/web;
     }
-    root /var/www/example.com/public;
+    root /var/www/example.com/web/public;
     index index.html index.htm;
-    access_log /var/log/nginx/example.com.access.log;
-    error_log  /var/log/nginx/example.com.error.log;
+    access_log /var/www/example.com/logs/access.log;
+    error_log  /var/www/example.com/logs/error.log;
     include /etc/nginx/auth/example.com.conf;
+    include /var/www/example.com/conf/*.conf;
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -106,6 +110,9 @@ NG;
 		// Der ACME-Pfad gehört nur in den Port-80-Block: http-01 fragt immer über HTTP an, und "location ^~" hat dort Vorrang vor der Weiterleitung.
 		self::assertSame(1, substr_count($out, 'acme-challenge'));
 		self::assertSame(1, substr_count($out, 'include /etc/nginx/auth/example.com.conf;'));
+		self::assertStringContainsString('root /var/www/example.com/web;', $out);
+		self::assertSame(1, substr_count($out, 'include /var/www/example.com/conf/*.conf;'));
+		self::assertStringContainsString('access_log /var/www/example.com/logs/access.log;', $out);
 	}
 
 	public function testLocalhostBindsLoopbackOnly(): void
@@ -117,11 +124,12 @@ server {
     listen 127.0.0.1:3000;
     listen [::1]:3000;
     server_name localhost;
-    root /var/www/localhost-3000;
+    root /var/www/localhost-3000/web;
     index index.html index.htm;
-    access_log /var/log/nginx/localhost-3000.access.log;
-    error_log  /var/log/nginx/localhost-3000.error.log;
+    access_log /var/www/localhost-3000/logs/access.log;
+    error_log  /var/www/localhost-3000/logs/error.log;
     include /etc/nginx/auth/localhost-3000.conf;
+    include /var/www/localhost-3000/conf/*.conf;
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -129,6 +137,14 @@ server {
 
 NG;
 		self::assertSame($expected, $this->renderer()->serverConfig($v));
+	}
+
+	public function testAcmeLocationPointsToWebDirectoryEvenWithSubdirectory(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, 'public', true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringContainsString("        root /var/www/example.com/web;\n", $out);
+		self::assertStringContainsString('    root /var/www/example.com/web/public;', $out);
 	}
 
 	public function testWithoutIpv6NoBracketListens(): void

@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:25
+ * @version Letzte Änderung: 2026-09-19 09:44
  */
 
 namespace VhostAdmin\Nginx;
@@ -23,9 +23,10 @@ final class ConfigRenderer
 	private const HEADER = "# generiert von vhost – nicht manuell bearbeiten\n";
 
 	/**
-	 * Übernimmt die Konfiguration, aus der alle Pfade abgeleitet werden.
+	 * @param Config      $config Pfade der Installation
+	 * @param VhostLayout $layout Quelle für Docroot, Logdateien und Snippet-Ordner
 	 */
-	public function __construct(private readonly Config $config)
+	public function __construct(private readonly Config $config, private readonly VhostLayout $layout)
 	{
 	}
 
@@ -90,16 +91,18 @@ final class ConfigRenderer
 	 */
 	public function serverConfig(Vhost $v): string
 	{
-		$slug = $v->slug();
-		// vorläufig ohne web/: stellt Task 3/4 um
-		$root = (new VhostLayout($this->config))->baseDir($v) . ($v->subdir !== null ? '/' . $v->subdir : '');
+		$root = $this->layout->docroot($v);
+		$accessLog = $this->layout->accessLog($v);
+		$errorLog = $this->layout->errorLog($v);
 		$authInclude = $this->authSnippetPath($v);
+		$customInclude = $this->layout->confDir($v) . '/*.conf';
 		$common = <<<NG
     root $root;
     index index.html index.htm;
-    access_log /var/log/nginx/$slug.access.log;
-    error_log  /var/log/nginx/$slug.error.log;
+    access_log $accessLog;
+    error_log  $errorLog;
     include $authInclude;
+    include $customInclude;
     location / {
         try_files \$uri \$uri/ =404;
     }
@@ -110,13 +113,12 @@ NG;
 			return self::HEADER . "server {\n$listen    server_name localhost;\n$common\n}\n";
 		}
 
-		// Vorläufig lokal instanziiert statt über den Konstruktor: Task 3 löst das ab.
-		$base = (new VhostLayout($this->config))->baseDir($v);
+		$acmeRoot = $this->layout->webDir($v);
 		$acme = <<<NG
     location ^~ /.well-known/acme-challenge/ {
         auth_basic off;
         allow all;
-        root $base;
+        root $acmeRoot;
     }
 NG;
 		$listen80 = "    listen 80;\n" . ($this->config->ipv6 ? "    listen [::]:80;\n" : '');

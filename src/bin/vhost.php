@@ -42,7 +42,7 @@ $config = Config::defaults();
 $database = new Database($config);
 $database->initSchema();
 $repository = new VhostRepository($database);
-$service = new VhostService($config, $repository, new ConfigRenderer($config), new SystemdReloader(), new CertbotClient());
+$service = new VhostService($config, $repository, new ConfigRenderer($config, new VhostLayout($config)), new SystemdReloader(), new CertbotClient());
 $layout = new VhostLayout($config);
 
 exit((new Application($service, $repository, $config, $layout, STDIN, STDOUT, STDERR))->run($argv));

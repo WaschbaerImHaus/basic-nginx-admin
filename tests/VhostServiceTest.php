@@ -24,6 +24,7 @@ use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;
 
@@ -55,7 +56,7 @@ final class VhostServiceTest extends TestCase
 		$this->repo = new VhostRepository($db);
 		$this->reloader = new FakeReloader();
 		$this->certbot = new FakeCertbot($this->dir . '/le');
-		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config), $this->reloader, $this->certbot);
+		$this->service = new VhostService($this->config, $this->repo, new ConfigRenderer($this->config, new VhostLayout($this->config)), $this->reloader, $this->certbot);
 	}
 
 	protected function tearDown(): void
