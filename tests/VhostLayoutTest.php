@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Pfad- und Rechteverwaltung eines vHosts.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 14:45
  */
 
 namespace Tests;
@@ -112,6 +112,23 @@ final class VhostLayoutTest extends TestCase
 			self::assertTrue($layout->needsMigration($v));
 			mkdir($dir . '/alt.example/web');
 			self::assertFalse($layout->needsMigration($v));
+		} finally {
+			TempDir::remove($dir);
+		}
+	}
+
+	public function testNeedsMigrationTrueForWebSymlink(): void
+	{
+		$dir = TempDir::create();
+		try {
+			$layout = new VhostLayout(Config::fromArray(['wwwRoot' => $dir, 'wwwOwner' => 'max']));
+			$v = new Vhost(1, 'alt.example', VhostKind::Domain, null, null, true, false);
+			mkdir($dir . '/alt.example');
+			mkdir($dir . '/anderswo');
+			// Ein untergeschobener Symlink an der Stelle von web/ darf nicht als "schon
+			// migriert" gelten – sonst würde die Schutzausnahme in der Migration nie greifen.
+			symlink($dir . '/anderswo', $dir . '/alt.example/web');
+			self::assertTrue($layout->needsMigration($v));
 		} finally {
 			TempDir::remove($dir);
 		}

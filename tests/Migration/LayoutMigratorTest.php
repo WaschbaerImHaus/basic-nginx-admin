@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Migration alter vHost-Verzeichnisse auf die neue Struktur.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:32
+ * @version Letzte Änderung: 2026-09-19 14:45
  */
 
 namespace Tests\Migration;
@@ -124,5 +124,127 @@ final class LayoutMigratorTest extends TestCase
 	{
 		$this->expectException(\RuntimeException::class);
 		$this->migrator->backup([], $this->dir . '/backups');
+	}
+
+	public function testMigrateAbortsOnCollisionAndKeepsAllContentSafe(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		// Zustand nach einem früheren Fehlschlag: der Zwischenordner enthält schon eine
+		// Datei, und im Basisordner ist – z. B. durch nginx – wieder eine gleichnamige
+		// Datei entstanden. Das ist die Kollision, die migrate() erkennen muss.
+		mkdir($base . '/.web-migrating');
+		file_put_contents($base . '/.web-migrating/conflict.txt', 'ALT');
+		file_put_contents($base . '/conflict.txt', 'NEU');
+
+		try {
+			$this->migrator->migrate($v);
+			self::fail('Erwartete RuntimeException wegen Zielkollision blieb aus.');
+		} catch (\RuntimeException) {
+			// erwartet
+		}
+
+		$names = array_map(static fn($vh) => $vh->name, $this->migrator->pending());
+		self::assertSame(['alt.example'], $names, 'Host gilt weiterhin als nicht migriert');
+		self::assertDirectoryDoesNotExist($base . '/web');
+		self::assertSame('NEU', file_get_contents($base . '/conflict.txt'), 'Basisordner-Inhalt bleibt erhalten');
+		self::assertSame('ALT', file_get_contents($base . '/.web-migrating/conflict.txt'), 'Zwischenordner-Inhalt bleibt erhalten');
+	}
+
+	public function testMigrateThrowsOnCollisionWithoutOverwritingTheStagedFile(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		mkdir($base . '/.web-migrating');
+		file_put_contents($base . '/.web-migrating/index.html', 'ALT-VERSION');
+		file_put_contents($base . '/index.html', 'NEU-VERSION');
+
+		try {
+			$this->migrator->migrate($v);
+			self::fail('Erwartete RuntimeException wegen Zielkollision blieb aus.');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('index.html', $e->getMessage());
+		}
+
+		self::assertSame('ALT-VERSION', file_get_contents($base . '/.web-migrating/index.html'));
+		self::assertSame('NEU-VERSION', file_get_contents($base . '/index.html'));
+	}
+
+	public function testMigrateContinuesAfterCollisionIsResolved(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		mkdir($base . '/.web-migrating');
+		file_put_contents($base . '/.web-migrating/conflict.txt', 'ALT');
+		file_put_contents($base . '/conflict.txt', 'NEU');
+		file_put_contents($base . '/andere.txt', 'ANDERE');
+
+		try {
+			$this->migrator->migrate($v);
+			self::fail('Erwartete RuntimeException wegen Zielkollision blieb aus.');
+		} catch (\RuntimeException) {
+			// erwartet – Ursache jetzt beseitigen: die neue Datei gewinnt.
+		}
+		unlink($base . '/.web-migrating/conflict.txt');
+
+		$this->migrator->migrate($v);
+
+		self::assertSame([], $this->migrator->pending());
+		self::assertDirectoryDoesNotExist($base . '/.web-migrating');
+		self::assertSame('NEU', file_get_contents($base . '/web/conflict.txt'));
+		self::assertSame('ANDERE', file_get_contents($base . '/web/andere.txt'));
+	}
+
+	public function testMigrateMovesStructureNamedFolderFromOldFlatLayout(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		// Beim Erstlauf existiert die neue Struktur noch nicht: ein Ordner "conf" ist
+		// dann zwingend Altinhalt und muss mit nach web/ wandern statt übersprungen zu werden.
+		mkdir($base . '/conf', 0775, true);
+		file_put_contents($base . '/conf/alte-datei.txt', 'Alt');
+
+		$this->migrator->migrate($v);
+
+		self::assertSame('Alt', file_get_contents($base . '/web/conf/alte-datei.txt'));
+		self::assertDirectoryExists($base . '/conf');
+	}
+
+	public function testPendingIncludesHostWithWebSymlink(): void
+	{
+		$this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		$elsewhere = $this->dir . '/anderswo';
+		mkdir($elsewhere);
+		symlink($elsewhere, $base . '/web');
+
+		$names = array_map(static fn($vh) => $vh->name, $this->migrator->pending());
+		self::assertSame(['alt.example'], $names);
+	}
+
+	public function testMigrateThrowsOnWebSymlinkWithoutMovingAnything(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		$elsewhere = $this->dir . '/anderswo';
+		mkdir($elsewhere);
+		symlink($elsewhere, $base . '/web');
+		file_put_contents($base . '/index.html', 'Inhalt');
+
+		try {
+			$this->migrator->migrate($v);
+			self::fail('Erwartete RuntimeException wegen Symlink blieb aus.');
+		} catch (\RuntimeException) {
+			// erwartet
+		}
+
+		self::assertTrue(is_link($base . '/web'), 'Symlink bleibt unangetastet');
+		self::assertSame('Inhalt', file_get_contents($base . '/index.html'), 'nichts wurde verschoben');
+		self::assertDirectoryDoesNotExist($base . '/.web-migrating');
 	}
 }

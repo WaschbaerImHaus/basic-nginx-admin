@@ -12,7 +12,7 @@ declare(strict_types=1);
  * erreicht damit weder Snippet noch Zertifikatsverweise noch Logs.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 14:45
  */
 
 namespace VhostAdmin;
@@ -134,11 +134,16 @@ final class VhostLayout
 	/**
 	 * Muss dieser vHost auf die neue Struktur gebracht werden?
 	 *
-	 * Das ist genau dann der Fall, wenn der Basisordner existiert, aber noch kein web/
-	 * enthält – dann liegen die Dateien noch flach im Basisordner.
+	 * Das ist der Fall, wenn der Basisordner existiert und web/ entweder fehlt (die
+	 * Dateien liegen noch flach im Basisordner) oder ein Symlink ist. Ein Symlink an
+	 * dieser Stelle zählt bewusst als migrationsbedürftig: is_dir() würde ihm sonst
+	 * folgen und ihn fälschlich als "schon migriert" durchgehen lassen – der Host
+	 * verschwände aus pending(), und die Symlink-Schutzausnahme in der Migration
+	 * (ensureDirectory()/moveContentIntoWeb()) würde nie ausgelöst.
 	 */
 	public function needsMigration(Vhost $vhost): bool
 	{
-		return is_dir($this->baseDir($vhost)) && !is_dir($this->webDir($vhost));
+		return is_dir($this->baseDir($vhost))
+			&& (is_link($this->webDir($vhost)) || !is_dir($this->webDir($vhost)));
 	}
 }

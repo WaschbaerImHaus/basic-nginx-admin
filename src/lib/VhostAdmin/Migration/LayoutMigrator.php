@@ -9,8 +9,14 @@ declare(strict_types=1);
  * Wert "subdir" in der Datenbank bleibt unverändert: aus <base>/www/src wird
  * <base>/web/www/src.
  *
+ * Damit ein abgebrochener Lauf nichts verliert und der nächste Lauf sicher fortsetzen
+ * kann, wird der Inhalt nie direkt in web/ verschoben, sondern zuerst in den
+ * Zwischenordner .web-migrating/ im Basisordner. Erst wenn wirklich alles dort liegt,
+ * wird er atomar zu web/ umbenannt. Solange web/ dadurch noch fehlt, hält
+ * VhostLayout::needsMigration() den Host weiterhin für nicht migriert.
+ *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:32
+ * @version Letzte Änderung: 2026-09-19 14:45
  */
 
 namespace VhostAdmin\Migration;
@@ -23,8 +29,8 @@ use VhostAdmin\VhostRepository;
 
 final class LayoutMigrator
 {
-	/** Ordner der neuen Struktur, die beim Verschieben liegen bleiben. */
-	private const STRUCTURE = ['web', 'conf', 'cert', 'private', 'logs'];
+	/** Name des Zwischenordners im Basisordner, in den zuerst verschoben wird. */
+	private const STAGING_DIRNAME = '.web-migrating';
 
 	/**
 	 * Übernimmt Konfiguration, Repository und Layout und merkt sich, wo die
@@ -111,19 +117,44 @@ final class LayoutMigrator
 
 	/**
 	 * Verschiebt den bisherigen Inhalt des Basisordners nach web/.
+	 *
+	 * Läuft über den Zwischenordner .web-migrating/: Der Inhalt landet zuerst dort,
+	 * ein Eintrag nach dem anderen. Existiert der Zwischenordner schon von einem
+	 * früheren, abgebrochenen Lauf, setzt diese Methode einfach dort fort, statt zu
+	 * scheitern. Bevor ein Eintrag verschoben wird, prüft sie, ob im Zwischenordner
+	 * schon etwas gleichnamiges liegt – dann bricht sie mit einer Ausnahme ab, statt
+	 * es stillschweigend zu überschreiben. Erst wenn der komplette Basisordner leer
+	 * verschoben ist, wird der Zwischenordner in einem Schritt zu web/ umbenannt; bis
+	 * dahin bleibt web/ nicht vorhanden, und needsMigration() bleibt wahr, sodass ein
+	 * erneuter Lauf automatisch fortsetzt statt den Host für fertig zu halten.
 	 */
 	private function moveContentIntoWeb(string $base, string $webDir): void
 	{
-		if (!is_dir($webDir) && !mkdir($webDir, 0775)) {
-			throw new \RuntimeException("Kann $webDir nicht anlegen");
+		if (is_link($webDir)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $webDir");
+		}
+		$staging = $base . '/' . self::STAGING_DIRNAME;
+		if (is_link($staging)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $staging");
+		}
+		if (!is_dir($staging) && !mkdir($staging, 0775)) {
+			throw new \RuntimeException("Kann $staging nicht anlegen");
 		}
 		foreach (scandir($base) ?: [] as $entry) {
-			if ($entry === '.' || $entry === '..' || in_array($entry, self::STRUCTURE, true)) {
+			if ($entry === '.' || $entry === '..' || $entry === self::STAGING_DIRNAME) {
 				continue;
 			}
-			if (!rename($base . '/' . $entry, $webDir . '/' . $entry)) {
-				throw new \RuntimeException("Kann $base/$entry nicht nach $webDir verschieben");
+			$from = $base . '/' . $entry;
+			$to = $staging . '/' . $entry;
+			if (file_exists($to) || is_link($to)) {
+				throw new \RuntimeException("Ziel existiert bereits, wird nicht überschrieben: $to");
 			}
+			if (!rename($from, $to)) {
+				throw new \RuntimeException("Kann $from nicht nach $to verschieben");
+			}
+		}
+		if (!rename($staging, $webDir)) {
+			throw new \RuntimeException("Kann $staging nicht nach $webDir umbenennen");
 		}
 	}
 
@@ -155,9 +186,7 @@ final class LayoutMigrator
 			throw new \RuntimeException("Kann {$spec->path} nicht anlegen");
 		}
 		if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
-			if (!@chown($spec->path, $spec->owner)) {
-				chown($spec->path, $this->config->wwwGroup);
-			}
+			@chown($spec->path, $spec->owner);
 			chgrp($spec->path, $spec->group);
 		}
 		chmod($spec->path, $spec->mode);
