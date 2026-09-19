@@ -2,10 +2,10 @@
 declare(strict_types=1);
 
 /**
- * Tests der Web-Logik: Aktionen → CLI-Argumente, Flash, Redirects, CSRF.
+ * Tests der Web-Logik: Aktionen → CLI-Argumente, Flash, Redirects, CSRF, Snippet.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 18:20
+ * @version Letzte Änderung: 2026-09-19 19:13
  */
 
 namespace Tests\Web;
@@ -15,6 +15,7 @@ use Tests\Support\TempDir;
 use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\VhostKind;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\Web\AdminPage;
 use VhostAdmin\Web\CommandRunner;
@@ -29,15 +30,17 @@ final class AdminPageTest extends TestCase
 	protected function setUp(): void
 	{
 		$this->dir = TempDir::create();
+		mkdir($this->dir . '/www');
 		$config = Config::fromArray([
 			'dbPath' => $this->dir . '/db.sqlite',
+			'wwwRoot' => $this->dir . '/www',
 			'vhostBinary' => dirname(__DIR__) . '/Support/echo-command.php',
 		]);
 		$db = new Database($config);
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
 		$this->session = [];
-		$this->page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, $this->session);
+		$this->page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), $this->session);
 	}
 
 	protected function tearDown(): void
@@ -70,6 +73,33 @@ final class AdminPageTest extends TestCase
 		self::assertSame(['args' => ['set', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
 		self::assertNull(AdminPage::commandFor('hack', []));
 		self::assertNull(AdminPage::commandFor('', []));
+	}
+
+	public function testCommandForConfPassesTextOnStdin(): void
+	{
+		self::assertSame(
+			['args' => ['conf', 'a.de'], 'stdin' => "expires 1d;\n"],
+			AdminPage::commandFor('conf', ['name' => 'a.de', 'snippet' => "expires 1d;\n"])
+		);
+		self::assertSame(
+			['args' => ['conf', 'a.de'], 'stdin' => ''],
+			AdminPage::commandFor('conf', ['name' => 'a.de', 'snippet' => ''])
+		);
+	}
+
+	public function testConfRedirectsToDetailPage(): void
+	{
+		self::assertSame('/?v=a.de', AdminPage::redirectTarget('conf', 0, ['name' => 'a.de']));
+		self::assertSame('/?v=a.de', AdminPage::redirectTarget('conf', 1, ['name' => 'a.de']));
+	}
+
+	public function testSnippetReadsFileOrEmpty(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		self::assertSame('', $this->page->snippet($v));
+		mkdir($this->dir . '/www/a.de/conf', 0750, true);
+		file_put_contents($this->dir . '/www/a.de/conf/custom.conf', "expires 1d;\n");
+		self::assertSame("expires 1d;\n", $this->page->snippet($v));
 	}
 
 	/**

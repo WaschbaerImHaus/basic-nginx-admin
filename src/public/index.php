@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Diese Datei ist das Template; alle Logik liegt in VhostAdmin\Web\AdminPage.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 19:13
  */
 
 $bootstrap = is_file('/opt/vhost-admin/bootstrap.php') ? '/opt/vhost-admin/bootstrap.php' : dirname(__DIR__) . '/bootstrap.php';
@@ -23,7 +23,7 @@ use VhostAdmin\Web\CommandRunner;
 session_start();
 $config = Config::defaults();
 $layout = new VhostLayout($config);
-$page = new AdminPage(new VhostRepository(new Database($config)), new CommandRunner($config), $config, $_SESSION);
+$page = new AdminPage(new VhostRepository(new Database($config)), new CommandRunner($config), $config, $layout, $_SESSION);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (!$page->isValidCsrf((string)($_POST['csrf'] ?? ''))) {
@@ -103,6 +103,7 @@ function badge(bool $on, string $yes, string $no): string
 	form.inline { display:inline; margin:0; }
 	form.row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
 	input[type=text], input[type=password], input[type=email] { padding:.45rem .6rem; border:1px solid #cfd4da; border-radius:6px; font:inherit; min-width:12rem; }
+	textarea { width:100%; padding:.5rem .6rem; border:1px solid #cfd4da; border-radius:6px; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical; }
 	button { padding:.4rem .8rem; border:1px solid #cfd4da; border-radius:6px; background:#fff; font:inherit; cursor:pointer; }
 	button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
 	button.danger { color:var(--err); border-color:#f3c2c2; }
@@ -135,6 +136,7 @@ function badge(bool $on, string $yes, string $no): string
 			<dt>Typ</dt><dd><?= $isDomain ? 'Domain (öffentlich)' : '<span class="badge local">localhost</span> nur lokal auf 127.0.0.1:' . h($view->port) ?></dd>
 			<dt>Basisordner</dt><dd><code><?= h($layout->baseDir($view)) ?></code></dd>
 			<dt>Docroot</dt><dd><code><?= h($layout->docroot($view)) ?></code></dd>
+			<dt>Ordner</dt><dd><code><?= h($layout->webDir($view)) ?></code> (web), <code><?= h($layout->privateDir($view)) ?></code> (privat), <code><?= h($layout->logsDir($view)) ?></code> (Logs)</dd>
 			<dt>Aufruf</dt><dd><a href="<?= h($isDomain ? ($view->ssl ? 'https' : 'http') . '://' . $view->name : 'http://localhost:' . $view->port) ?>/" target="_blank"><?= h($isDomain ? $view->name : 'localhost:' . $view->port) ?></a></dd>
 			<dt>Angelegt</dt><dd><?= h($view->createdAt) ?> UTC</dd>
 		</dl>
@@ -195,6 +197,17 @@ function badge(bool $on, string $yes, string $no): string
 				<?php endif ?>
 			</div>
 			<?php endif ?>
+
+			<div class="card">
+				<h2>Eigene nginx-Direktiven</h2>
+				<p class="muted">Wird als <code><?= h($layout->confFile($view)) ?></code> gespeichert und in den server-Block eingebunden. Erlaubt sind unter anderem <code>client_max_body_size</code>, <code>expires</code>, <code>add_header</code>, <code>gzip*</code>, <code>rewrite</code>, <code>return</code>, <code>try_files</code>, <code>error_page</code>, <code>proxy_*</code> und <code>location</code>-Blöcke. Direktiven, die Docroot, Zertifikat oder Verzeichnisschutz betreffen, werden abgelehnt.</p>
+				<form method="post">
+					<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="conf"><input type="hidden" name="name" value="<?= h($view->name) ?>">
+					<textarea name="snippet" rows="10" spellcheck="false"><?= h($page->snippet($view)) ?></textarea>
+					<button class="primary">Übernehmen</button>
+				</form>
+				<p class="muted">Leeres Feld entfernt die Datei. Schlägt der nginx-Test fehl, bleibt die bisherige Fassung aktiv und die Meldung erscheint oben.</p>
+			</div>
 
 			<div class="card">
 				<h2>Entfernen</h2>

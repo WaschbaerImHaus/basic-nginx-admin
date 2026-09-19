@@ -8,13 +8,14 @@ declare(strict_types=1);
  * die Oberfläche selbst schreibt nie in Datenbank oder Dateisystem.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 13:05
+ * @version Letzte Änderung: 2026-09-19 19:13
  */
 
 namespace VhostAdmin\Web;
 
 use VhostAdmin\Config;
 use VhostAdmin\Vhost;
+use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 
 final class AdminPage
@@ -29,6 +30,7 @@ final class AdminPage
 		private readonly VhostRepository $repository,
 		private readonly CommandRunner $runner,
 		private readonly Config $config,
+		private readonly VhostLayout $layout,
 		array &$session,
 	) {
 		$this->session = &$session;
@@ -76,6 +78,7 @@ final class AdminPage
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
 			'remove' => ['args' => ['remove', $name], 'stdin' => null],
 			'email' => ['args' => ['set', 'le_email', $field('le_email')], 'stdin' => null],
+			'conf' => ['args' => ['conf', $name], 'stdin' => (string)($post['snippet'] ?? '')],
 			default => null,
 		};
 	}
@@ -172,5 +175,17 @@ final class AdminPage
 	public function letsEncryptEmail(): ?string
 	{
 		return $this->repository->setting('le_email');
+	}
+
+	/**
+	 * Aktuelles nginx-Snippet des vHosts für die Anzeige im Textfeld.
+	 *
+	 * Die Oberfläche liest die Datei nur; geschrieben wird sie ausschließlich vom
+	 * root-CLI. Ist sie nicht lesbar, bleibt das Feld leer.
+	 */
+	public function snippet(Vhost $vhost): string
+	{
+		$file = $this->layout->confFile($vhost);
+		return is_file($file) && is_readable($file) ? (string)file_get_contents($file) : '';
 	}
 }
