@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 09:25
  */
 
 namespace VhostAdmin;
@@ -124,6 +124,7 @@ final class VhostService
 	 */
 	private function purgeBaseDir(Vhost $vhost): void
 	{
+		// Vorläufig lokal instanziiert: Task 4 gibt das Layout in den Konstruktor.
 		$base = (new VhostLayout($this->config))->baseDir($vhost);
 		if (is_link($base)) {
 			throw new \RuntimeException("Basisordner ist ein Symlink und wird nicht automatisch gelöscht: $base");
@@ -217,6 +218,7 @@ final class VhostService
 			?? throw new \RuntimeException("Keine Let's-Encrypt-E-Mail hinterlegt (Einstellungen / \"vhost set le_email ...\")");
 		$output = '';
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
+			// Vorläufig lokal instanziiert statt injiziert: Task 4 räumt das auf.
 			$output = $this->certbot->obtain($vhost->name, (new VhostLayout($this->config))->baseDir($vhost), $email);
 		}
 		$this->repository->setSsl($vhost->id, true);
@@ -380,6 +382,7 @@ final class VhostService
 	 */
 	private function makeDirectories(Vhost $vhost, ?SubDirectory $subdir): void
 	{
+		// Noch keine Konstruktor-Injektion: bis Task 4 wird das Layout hier lokal gebaut.
 		$base = (new VhostLayout($this->config))->baseDir($vhost);
 		if (is_link($base)) {
 			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $base");

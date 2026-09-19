@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-19 09:25
  */
 
 namespace VhostAdmin\Nginx;
@@ -110,6 +110,7 @@ NG;
 			return self::HEADER . "server {\n$listen    server_name localhost;\n$common\n}\n";
 		}
 
+		// Vorläufig lokal instanziiert statt über den Konstruktor: Task 3 löst das ab.
 		$base = (new VhostLayout($this->config))->baseDir($v);
 		$acme = <<<NG
     location ^~ /.well-known/acme-challenge/ {
