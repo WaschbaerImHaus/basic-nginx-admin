@@ -27,7 +27,7 @@ declare(strict_types=1);
  * abweichenden Nachbildung des nginx-Tokenizers.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 10:34
+ * @version Letzte Änderung: 2026-09-20 15:42
  */
 
 namespace VhostAdmin\Value;
@@ -268,11 +268,8 @@ final class NginxSnippet
 			throw new \InvalidArgumentException("Zeile $line: \"proxy_pass\" auf einen Unix-Socket ist nicht erlaubt.");
 		}
 		$host = self::proxyPassTargetHost($target);
-		if ($host !== null && self::isOwnMachineHost($host)) {
-			throw new \InvalidArgumentException(
-				"Zeile $line: \"proxy_pass\" auf den eigenen Rechner (\"$host\") ist nicht erlaubt – "
-				. 'das würde die Oberfläche über diese Domain erreichbar machen.'
-			);
+		if ($host !== null) {
+			self::assertHostNotOwnMachine($host, $line);
 		}
 	}
 
@@ -289,15 +286,161 @@ final class NginxSnippet
 	}
 
 	/**
-	 * Zeigt der Host auf "diesen Rechner" (Loopback oder unspezifiziert)?
+	 * Befund 1 (Re-Review 2026-09-20): Der bisherige Vergleich prüfte den Host als
+	 * Zeichenkette gegen eine Handvoll bekannter Schreibweisen ("127.", "localhost",
+	 * "0.0.0.0", "::", "::1"). Nachgewiesene Umgehungen: dezimale ("2130706433"),
+	 * oktale ("0177.0.0.1") und hexadezimale ("0x7f000001") Schreibweisen einer
+	 * IPv4-Adresse, die kurze Form "0" statt "0.0.0.0", ein abschließender Punkt
+	 * ("localhost."), die IPv4-mapped-IPv6-Form ("::ffff:127.0.0.1") sowie
+	 * ausgeschriebene/aufgefüllte IPv6-Loopback-Varianten ("0:0:0:0:0:0:0:1",
+	 * "::0001"). Alle akzeptiert PHPs eigener Host-Parser bzw. die Namensauflösung,
+	 * ohne dass der alte Zeichenkettenvergleich sie erkannt hätte.
+	 *
+	 * Deshalb wird jetzt auf der tatsächlichen Adresse geprüft:
+	 *  1. "localhost" (und *.localhost) wird als Name erkannt, unabhängig von
+	 *     Groß-/Kleinschreibung und einem abschließenden Punkt – und zwar OHNE
+	 *     Namensauflösung, denn der lokale Resolver kann für "localhost" beliebige,
+	 *     u.U. irreführende Ergebnisse liefern (in dieser Umgebung z.B. eine
+	 *     AAAA-Antwort für "localhost.me").
+	 *  2. Ist der Host selbst schon eine IP-Literale (inet_pton() gelingt, auch nach
+	 *     Entfernen umschließender IPv6-Klammern), wird genau diese Adresse geprüft.
+	 *  3. Sonst wird der Name aufgelöst: gethostbynamel() für IPv4 – das übernimmt
+	 *     nebenbei auch die von PHP/der libc akzeptierten numerischen Formen
+	 *     (dezimal, oktal, "127.1" u.ä.), weil PHP sie an denselben Resolver
+	 *     durchreicht – und, falls verfügbar, dns_get_record(..., DNS_AAAA) für
+	 *     IPv6. Jede zurückgegebene Adresse wird geprüft.
+	 *  4. Lässt sich der Name NICHT auflösen, wird nur abgelehnt, wenn er wie eine
+	 *     Zahl/Adresse aussieht (siehe looksLikeNumericHost()) – ein "richtiger"
+	 *     Domainname, der hier nur mangels Netzanbindung nicht auflöst, bleibt
+	 *     erlaubt, sonst würden harmlose, tatsächlich erreichbare Ziele blockiert.
+	 *
+	 * @throws \InvalidArgumentException wenn das Ziel auf den eigenen Rechner zeigt
+	 *         oder sich nicht auflösen lässt, obwohl es wie eine Adresse aussieht
 	 */
-	private static function isOwnMachineHost(string $host): bool
+	private static function assertHostNotOwnMachine(string $host, int $line): void
 	{
-		$host = strtolower(trim($host, '[]'));
-		if ($host === 'localhost' || $host === '0.0.0.0' || $host === '::' || $host === '::1') {
+		$normalized = rtrim(strtolower(trim($host, '[]')), '.');
+		if ($normalized === '') {
+			return;
+		}
+
+		if ($normalized === 'localhost' || str_ends_with($normalized, '.localhost')) {
+			throw new \InvalidArgumentException(self::ownMachineMessage($line, $host));
+		}
+
+		if (@inet_pton($normalized) !== false) {
+			if (self::isForbiddenAddress($normalized)) {
+				throw new \InvalidArgumentException(self::ownMachineMessage($line, $host));
+			}
+			return;
+		}
+
+		$addresses = self::resolveHostAddresses($normalized);
+		if ($addresses === []) {
+			if (self::looksLikeNumericHost($normalized)) {
+				throw new \InvalidArgumentException(
+					"Zeile $line: \"proxy_pass\"-Ziel (\"$host\") lässt sich nicht auflösen und könnte auf "
+					. 'den eigenen Rechner zeigen – das Ziel muss beim Speichern feststehen und geprüft werden können.'
+				);
+			}
+			return;
+		}
+
+		foreach ($addresses as $address) {
+			if (self::isForbiddenAddress($address)) {
+				throw new \InvalidArgumentException(self::ownMachineMessage($line, $host, $address));
+			}
+		}
+	}
+
+	private static function ownMachineMessage(int $line, string $host, ?string $resolvedAs = null): string
+	{
+		$target = $resolvedAs !== null && $resolvedAs !== $host ? "\"$host\" -> \"$resolvedAs\"" : "\"$host\"";
+		return "Zeile $line: \"proxy_pass\" auf den eigenen Rechner ($target) ist nicht erlaubt – "
+			. 'das würde die Oberfläche über diese Domain erreichbar machen.';
+	}
+
+	/**
+	 * Löst einen Namen in seine Adresse(n) auf: IPv4 über gethostbynamel(), IPv6
+	 * (falls verfügbar) über dns_get_record() mit DNS_AAAA. Beides wird mit "@"
+	 * unterdrückt: ein Fehlschlag ist hier kein Programmfehler, sondern der
+	 * normale Fall bei einem unbekannten oder (noch) nicht erreichbaren Namen.
+	 *
+	 * @return list<string>
+	 */
+	private static function resolveHostAddresses(string $host): array
+	{
+		$addresses = [];
+		$ipv4 = @gethostbynamel($host);
+		if (is_array($ipv4)) {
+			$addresses = $ipv4;
+		}
+		if (function_exists('dns_get_record')) {
+			$records = @dns_get_record($host, DNS_AAAA);
+			if (is_array($records)) {
+				foreach ($records as $record) {
+					if (isset($record['ipv6']) && is_string($record['ipv6'])) {
+						$addresses[] = $record['ipv6'];
+					}
+				}
+			}
+		}
+		return $addresses;
+	}
+
+	/**
+	 * Sieht der (nicht auflösbare) Host wie eine Zahl bzw. Adresse aus – also wie
+	 * dezimale ("2130706433"), oktale ("0177.0.0.1") oder hexadezimale
+	 * ("0x7f000001") Schreibweisen, die PHP/die libc als Adresse akzeptieren
+	 * würden, wäre der Resolver erreichbar? Ein regulärer Domainname wie
+	 * "backend.example.com" enthält immer mindestens ein Segment, das weder aus
+	 * reinen Ziffern noch aus einer "0x"-Hex-Zahl besteht, und fällt damit nicht
+	 * hierunter.
+	 */
+	private static function looksLikeNumericHost(string $host): bool
+	{
+		return (bool)preg_match('/^(0x[0-9a-f]+|[0-9]+)(\.(0x[0-9a-f]+|[0-9]+)){0,3}$/i', $host);
+	}
+
+	/**
+	 * Zeigt die Adresse auf "diesen Rechner" (Loopback oder unspezifiziert)?
+	 * Vergleicht numerisch über die von inet_pton() gelieferten Bytes, nicht als
+	 * Zeichenkette – abgelehnt werden 127.0.0.0/8, 0.0.0.0/8, ::1, :: sowie die
+	 * IPv4-mapped-Gegenstücke ::ffff:127.0.0.0/104 und ::ffff:0.0.0.0/104.
+	 *
+	 * Die unspezifizierte Adresse gehört dazu, weil ein connect() darauf beim
+	 * Betriebssystem auf dem Loopback landet: In dieser Umgebung nachgemessen
+	 * erreichten "::ffff:0.0.0.0" und "::ffff:0:0" den Listener auf
+	 * 127.0.0.1:8080 tatsächlich (nachgetragen 2026-09-20, zweite Fix-Runde;
+	 * die erste Fassung prüfte beim IPv4-mapped-Fall nur auf 127).
+	 */
+	private static function isForbiddenAddress(string $address): bool
+	{
+		$packed = @inet_pton($address);
+		if ($packed === false) {
+			// Kann bei den Aufrufstellen nicht vorkommen (die Adresse stammt selbst aus
+			// inet_pton()/gethostbynamel()/dns_get_record()); im Zweifel ablehnen.
 			return true;
 		}
-		return str_starts_with($host, '127.');
+		if (strlen($packed) === 4) {
+			// IPv4: 127.0.0.0/8 (Loopback) und 0.0.0.0/8 (unspezifiziert/"diese Maschine").
+			$firstOctet = ord($packed[0]);
+			return $firstOctet === 127 || $firstOctet === 0;
+		}
+		// ::1 (Loopback) und :: (unspezifiziert) – beide bezeichnen diesen Rechner.
+		if ($packed === (string)inet_pton('::1') || $packed === (string)inet_pton('::')) {
+			return true;
+		}
+		// ::ffff:0:0/96 ist der IPv4-mapped-Bereich: erste 12 Byte sind das Präfix, die
+		// letzten 4 die eingebettete IPv4-Adresse. Für die gilt genau dieselbe Regel wie
+		// oben (erstes Oktett 127 oder 0), sonst wäre "::ffff:0.0.0.0" erlaubt, obwohl es
+		// nachgemessen auf dem Loopback ankommt.
+		$v4MappedPrefix = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff";
+		if (substr($packed, 0, 12) !== $v4MappedPrefix) {
+			return false;
+		}
+		$embeddedFirstOctet = ord($packed[12]);
+		return $embeddedFirstOctet === 127 || $embeddedFirstOctet === 0;
 	}
 
 	/**

@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:52
+ * @version Letzte Änderung: 2026-09-20 15:21
  */
 
 namespace VhostAdmin\Cli;
@@ -256,18 +256,29 @@ TXT;
 
 			case 'migrate-layout':
 				$pending = $this->migrator->pending();
-				if ($pending === []) {
+				if ($pending !== []) {
+					$archive = $this->migrator->backup($pending, $this->config->backupDir);
+					$this->out("Sicherung: $archive\n");
+					foreach ($pending as $vhost) {
+						$this->migrator->migrate($vhost);
+						$this->out("Migriert: {$vhost->name} -> " . $this->layout->docroot($vhost) . "\n");
+					}
+					$this->service->renderAll();
+					$this->out(count($pending) . " vHost(s) migriert.\n");
+				}
+				// Befund 2 (Re-Review 2026-09-20): Renewal-Nachzug für ALLE vHosts, nicht
+				// nur für pending() – sonst bekommen bereits migrierte Hosts (deren
+				// Zertifikat noch den alten Webroot trägt) ihn nie. migrate() hat den
+				// Nachzug für die gerade oben migrierten Hosts zwar schon mitgemacht;
+				// dieser Aufruf hier ist idempotent, ein erneutes Anfassen bleibt also
+				// unschädlich (siehe LayoutMigrator::migrateRenewalConfigs()).
+				$renewalCount = $this->migrator->migrateRenewalConfigs();
+				if ($renewalCount > 0) {
+					$this->out("$renewalCount Renewal-Konfiguration(en) angepasst.\n");
+				}
+				if ($pending === [] && $renewalCount === 0) {
 					$this->out("Nichts zu migrieren.\n");
-					return 0;
 				}
-				$archive = $this->migrator->backup($pending, $this->config->backupDir);
-				$this->out("Sicherung: $archive\n");
-				foreach ($pending as $vhost) {
-					$this->migrator->migrate($vhost);
-					$this->out("Migriert: {$vhost->name} -> " . $this->layout->docroot($vhost) . "\n");
-				}
-				$this->service->renderAll();
-				$this->out(count($pending) . " vHost(s) migriert.\n");
 				return 0;
 
 			case 'render':

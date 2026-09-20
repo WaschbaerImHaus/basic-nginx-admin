@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Prüfung des nginx-Snippets aus der Oberfläche.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 10:34
+ * @version Letzte Änderung: 2026-09-20 15:42
  */
 
 namespace Tests\Value;
@@ -266,12 +266,39 @@ final class NginxSnippetTest extends TestCase
 	{
 		yield 'IPv4-Loopback mit Port' => ["proxy_pass http://127.0.0.1:8080/;\n"];
 		yield 'IPv4-Loopback, anderes Oktett' => ["proxy_pass http://127.5.5.5/;\n"];
+		yield 'IPv4-Loopback kurz' => ["proxy_pass http://127.1/;\n"];
+		yield 'IPv4-Loopback mit führenden Nullen' => ["proxy_pass http://127.000.000.001/;\n"];
 		yield 'localhost' => ["proxy_pass https://localhost/;\n"];
+		yield 'localhost großgeschrieben' => ["proxy_pass https://LOCALHOST/;\n"];
 		yield 'IPv6-Loopback' => ["proxy_pass http://[::1]/;\n"];
 		yield 'IPv6-Loopback ohne Schema' => ["proxy_pass [::1]:8080;\n"];
 		yield 'unspezifiziert 0.0.0.0' => ["proxy_pass http://0.0.0.0:8080/;\n"];
 		yield 'Unix-Socket' => ["proxy_pass unix:/run/php-fpm.sock;\n"];
 		yield 'Variable im Ziel' => ["proxy_pass http://\$backend;\n"];
+		// Befund 1 (Re-Review 2026-09-20): der bisherige Zeichenkettenvergleich in
+		// isOwnMachineHost() erkannte nur eine Handvoll Schreibweisen. Die folgenden
+		// Formen wurden im Re-Review per HTTP 200 als funktionierende Umgehungen
+		// nachgewiesen und müssen jetzt über den Adressvergleich abgelehnt werden.
+		yield 'Loopback dezimal' => ["proxy_pass http://2130706433/;\n"];
+		yield 'Loopback oktal' => ["proxy_pass http://0177.0.0.1/;\n"];
+		yield 'unspezifiziert kurz (0 statt 0.0.0.0)' => ["proxy_pass http://0:8080/;\n"];
+		yield 'localhost mit abschließendem Punkt' => ["proxy_pass http://localhost.:8080/;\n"];
+		yield 'IPv4-mapped IPv6-Loopback' => ["proxy_pass http://[::ffff:127.0.0.1]:8080/;\n"];
+		yield 'IPv6-Loopback ausgeschrieben' => ["proxy_pass http://[0:0:0:0:0:0:0:1]/;\n"];
+		yield 'IPv6-Loopback aufgefüllt' => ["proxy_pass http://[::0001]/;\n"];
+		// Nachgetragen in der zweiten Fix-Runde (2026-09-20): Die erste Fassung prüfte
+		// beim IPv4-mapped-Fall nur auf das Oktett 127 und kannte :: nicht. Ein
+		// connect() auf die unspezifizierte Adresse landet aber beim Betriebssystem auf
+		// dem Loopback – in dieser Umgebung nachgemessen erreichten "::ffff:0.0.0.0"
+		// und "::ffff:0:0" den Listener auf 127.0.0.1:8080 wirklich.
+		yield 'IPv4-mapped unspezifiziert' => ["proxy_pass http://[::ffff:0.0.0.0]:8080/;\n"];
+		yield 'IPv4-mapped unspezifiziert, kurz' => ["proxy_pass http://[::ffff:0:0]:8080/;\n"];
+		yield 'IPv6 unspezifiziert' => ["proxy_pass http://[::]:8080/;\n"];
+		// In dieser Testumgebung (ohne funktionierende Namensauflösung ins Internet)
+		// lässt sich diese Form zufällig nicht auflösen – genau deshalb muss sie
+		// abgelehnt werden: ein Ziel, dessen Adresse unbekannt ist, könnte auf
+		// Loopback zeigen. Verlässlich ist nur, dass sie NIE akzeptiert werden darf.
+		yield 'Loopback hexadezimal' => ["proxy_pass http://0x7f000001/;\n"];
 	}
 
 	#[DataProvider('forbiddenProxyPassTargets')]
@@ -285,6 +312,19 @@ final class NginxSnippetTest extends TestCase
 	public function testAcceptsProxyPassToRemoteTarget(): void
 	{
 		$text = "proxy_pass http://192.0.2.10:8080/;\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	/**
+	 * Befund 1 (Re-Review 2026-09-20): Ein regulärer Domainname, der sich in dieser
+	 * Testumgebung nicht auflösen lässt (kein Netzzugang zu echtem DNS), darf nicht
+	 * deshalb abgelehnt werden – sonst wären beliebige, tatsächlich erreichbare
+	 * Ziele blockiert. Abgelehnt wird bei Nichtauflösbarkeit nur, was wie eine Zahl
+	 * bzw. Adresse aussieht (siehe "Loopback hexadezimal" oben).
+	 */
+	public function testAcceptsUnresolvableButNonNumericDomainAsProxyPassTarget(): void
+	{
+		$text = "proxy_pass https://backend.example.com/;\n";
 		self::assertSame($text, NginxSnippet::fromString($text)->value);
 	}
 

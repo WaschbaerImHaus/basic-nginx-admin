@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Migration alter vHost-Verzeichnisse auf die neue Struktur.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 10:34
+ * @version Letzte Änderung: 2026-09-20 15:21
  */
 
 namespace Tests\Migration;
@@ -316,6 +316,125 @@ final class LayoutMigratorTest extends TestCase
 		$migrator->migrate($v);
 
 		self::assertDirectoryExists($base . '/web');
+	}
+
+	/**
+	 * Befund 2 (Re-Review 2026-09-20): migrate() zieht die Renewal-Konfiguration
+	 * bisher nur für den übergebenen (gerade migrierten) Host nach. Der neue,
+	 * öffentliche Schritt migrateRenewalConfigs() muss dagegen ALLE vHosts
+	 * erfassen, auch längst migrierte, deren web/ schon existiert (pending()
+	 * ist für sie leer) – sonst behält ihr Zertifikat für immer den alten
+	 * Webroot als Renewal-Pfad.
+	 */
+	public function testMigrateRenewalConfigsCoversAlreadyMigratedHosts(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base . '/web', 0775, true);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example.conf', "webroot_path = $base,\n");
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		self::assertSame([], $migrator->pending(), 'Host gilt bereits als migriert');
+		$count = $migrator->migrateRenewalConfigs();
+
+		self::assertSame(1, $count);
+		self::assertStringContainsString(
+			"webroot_path = $base/web,",
+			(string)file_get_contents($renewalDir . '/alt.example.conf')
+		);
+	}
+
+	/**
+	 * certbot legt bei erneuter Ausstellung "<domain>-0001.conf" an; die bisherige
+	 * Prüfung erfasste nur "<domain>.conf".
+	 */
+	public function testMigrateRenewalConfigsCoversDashNumberedVariant(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base . '/web', 0775, true);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example-0001.conf', "webroot_path = $base,\n");
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		$count = $migrator->migrateRenewalConfigs();
+
+		self::assertSame(1, $count);
+		self::assertStringContainsString(
+			"webroot_path = $base/web,",
+			(string)file_get_contents($renewalDir . '/alt.example-0001.conf')
+		);
+	}
+
+	public function testMigrateRenewalConfigsSecondRunChangesNothing(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base . '/web', 0775, true);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example.conf', "webroot_path = $base,\n");
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		self::assertSame(1, $migrator->migrateRenewalConfigs());
+		self::assertSame(0, $migrator->migrateRenewalConfigs(), 'zweiter Lauf ist ein No-Op');
+	}
+
+	/**
+	 * migrate() ruft den Nachzug für seinen eigenen Host weiterhin mit auf, damit
+	 * ein frisch migrierter Host nicht auf den nächsten migrate-layout-Aufruf
+	 * warten muss. Ein zusätzlicher Aufruf von migrateRenewalConfigs() (wie ihn
+	 * der CLI-Befehl danach für alle Hosts macht) darf dieselbe Datei nicht noch
+	 * einmal anfassen.
+	 */
+	public function testMigrateAndMigrateRenewalConfigsTogetherStayIdempotent(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		file_put_contents($base . '/index.html', 'Inhalt');
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example.conf', "webroot_path = $base,\n");
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		$migrator->migrate($v);
+		$count = $migrator->migrateRenewalConfigs();
+
+		self::assertSame(0, $count, 'migrate() hat die Datei schon angepasst');
+		self::assertStringContainsString(
+			"webroot_path = $base/web,",
+			(string)file_get_contents($renewalDir . '/alt.example.conf')
+		);
+	}
+
+	/**
+	 * I5-Gegenstück (Abschlussreview) für die Renewal-Konfiguration: schlägt das
+	 * Schreiben fehl, muss das gemeldet werden statt stillschweigend nichts zu tun.
+	 */
+	public function testMigrateRenewalConfigThrowsWhenWriteFails(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		$file = $renewalDir . '/alt.example.conf';
+		file_put_contents($file, "webroot_path = $base,\n");
+		chmod($file, 0444);
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		try {
+			$migrator->migrate($v);
+			self::fail('Erwartete RuntimeException wegen fehlgeschlagenem Schreiben blieb aus.');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString($file, $e->getMessage());
+		} finally {
+			chmod($file, 0644);
+		}
 	}
 
 	public function testMigrateThrowsOnWebSymlinkWithoutMovingAnything(): void

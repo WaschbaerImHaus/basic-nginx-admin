@@ -1,4 +1,4 @@
-Stand: 2026-09-17, geprüfter Commit: eba8282
+Stand: 2026-09-20, geprüfter Commit: HEAD nach Fix-Welle 2
 
 # Verbleibende Risiken
 
@@ -47,3 +47,4 @@ Keine.
 - **Der ACME-Pfad bleibt ohne Verzeichnisschutz erreichbar.** Notwendig, damit certbot auch bei aktivem Schutz durchkommt; es gehören dort nur Challenge-Dateien hinein.
 - **`vhost` läuft vollständig als root.** Es schreibt nach `/etc/nginx`, `/var/www` und lädt nginx neu; eine Aufteilung in weniger privilegierte Teilprozesse steht in keinem Verhältnis zum Umfang des Werkzeugs.
 - **Die Datenbank selbst bleibt fail-closed streng.** Eine einzelne ungültige Zeile lässt die Übersicht mit 500 scheitern, statt unvalidierte Daten anzuzeigen (Tabelle oben) – die bewusste Kehrseite der Revalidierung aus Fix-Welle 1.
+- **`nginx -t` ist die zweite Verteidigungslinie für Snippets.** `NginxSnippet::fromString()` ist eine eigene, notwendig unvollständige Nachbildung des nginx-Tokenizers (Positivliste erlaubter Direktiven, siehe Klassen-DocBlock `src/lib/VhostAdmin/Value/NginxSnippet.php:1-31`); trotzdem wird ein Snippet nie ungeprüft aktiv, weil `VhostService::setSnippet()`/`render()` vor jedem Reload `nginx -t` laufen lassen (`src/lib/VhostAdmin/Nginx/SystemdReloader.php:39-41`) und die Datei bei einem Fehlschlag auf ihren Vorzustand zurücksetzen (`src/lib/VhostAdmin/VhostService.php:311-317`). Divergenzen zwischen unserer Prüfung und dem tatsächlichen nginx-Parser – wie der am 2026-09-20 behobene Tokenizer-Fehler (C1) oder die in dieser Runde geschlossene Loopback-Umgehung bei `proxy_pass` (Befund 1) – fallen dort auf und lösen die Rücknahme aus, auch wenn `NginxSnippet` sie selbst einmal nicht erkennen sollte.

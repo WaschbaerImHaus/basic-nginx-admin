@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Kommandozeile: Argument-Parsing und Befehle über Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:52
+ * @version Letzte Änderung: 2026-09-20 15:21
  */
 
 namespace Tests\Cli;
@@ -65,18 +65,23 @@ final class ApplicationTest extends TestCase
 	 * Name "runCli", weil PHPUnit\Framework\TestCase::run() final ist.
 	 *
 	 * @param list<string> $args
+	 * @param string|null $renewalDir Überschreibt das Renewal-Verzeichnis des
+	 *        Migrators (Befund 2, Re-Review 2026-09-20); null lässt den Default.
 	 * @return array{int, string, string}
 	 */
-	private function runCli(array $args, string $stdin = ''): array
+	private function runCli(array $args, string $stdin = '', ?string $renewalDir = null): array
 	{
 		$in = fopen('php://memory', 'w+');
 		fwrite($in, $stdin);
 		rewind($in);
 		$out = fopen('php://memory', 'w+');
 		$err = fopen('php://memory', 'w+');
+		$migrator = $renewalDir !== null
+			? new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir)
+			: new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs');
 		$app = new Application(
 			$this->service, $this->repo, $this->config, $this->layout,
-			new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs'),
+			$migrator,
 			$in, $out, $err
 		);
 		$code = $app->run(array_merge(['vhost'], $args));
@@ -312,6 +317,43 @@ final class ApplicationTest extends TestCase
 		self::assertStringContainsString('Sicherung', $out);
 		self::assertSame('Inhalt', file_get_contents($base . '/web/index.html'));
 		[$code, $out] = $this->runCli(['migrate-layout']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Nichts zu migrieren', $out);
+	}
+
+	/**
+	 * Befund 2 (Re-Review 2026-09-20): migrate-layout rief migrate() bisher nur für
+	 * pending() auf, und pending() enthält nur Hosts, deren web/ noch fehlt. Ein
+	 * bereits migrierter Host (web/ existiert schon) bekam den certbot-Renewal-
+	 * Nachzug dadurch NIE – auch wenn migrate-layout beliebig oft erneut läuft.
+	 */
+	public function testMigrateLayoutFixesRenewalConfigForAlreadyMigratedHost(): void
+	{
+		$this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base . '/web', 0775, true);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example.conf', "webroot_path = $base,\n");
+
+		[$code, $out] = $this->runCli(['migrate-layout'], '', $renewalDir);
+
+		self::assertSame(0, $code);
+		self::assertStringNotContainsString('Nichts zu migrieren', $out);
+		self::assertStringContainsString('1', $out);
+		self::assertStringContainsString(
+			"webroot_path = $base/web,",
+			(string)file_get_contents($renewalDir . '/alt.example.conf')
+		);
+	}
+
+	public function testMigrateLayoutReportsNothingToDoWhenBothStepsAreEmpty(): void
+	{
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+
+		[$code, $out] = $this->runCli(['migrate-layout'], '', $renewalDir);
+
 		self::assertSame(0, $code);
 		self::assertStringContainsString('Nichts zu migrieren', $out);
 	}

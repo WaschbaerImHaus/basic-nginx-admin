@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 14:52
+ * @version Letzte Änderung: 2026-09-20 15:25
  */
 
 namespace VhostAdmin;
@@ -483,8 +483,9 @@ final class VhostService
 	 *
 	 * Die Liste kommt aus VhostLayout::directories() (Eltern vor Kindern), damit Service,
 	 * Installer und Migration dieselben Rechte anwenden. Jedes Verzeichnis wird einzeln
-	 * geprüft und angelegt: innerhalb des Basisordners (für www-data beschreibbar) könnte
-	 * ein Segment ein untergeschobener Symlink sein.
+	 * geprüft und angelegt: seit der Rechteänderung vom Abschlussreview (C2, 2026-09-20)
+	 * ist innerhalb des Basisordners nur noch web/ für www-data beschreibbar – trotzdem
+	 * könnte dort ein Segment ein untergeschobener Symlink sein.
 	 */
 	private function makeDirectories(Vhost $vhost): void
 	{

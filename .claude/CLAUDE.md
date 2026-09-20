@@ -12,7 +12,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 
 ## Struktur
 - `src/lib/VhostAdmin/` – Klassen (Namespace `VhostAdmin`, Autoloader `src/bootstrap.php`)
-  - `Config` Pfade/Ports (inkl. `backupDir`) · `Database` PDO/Schema · `Value/*` validierende Wertobjekte, u. a. `Value\NginxSnippet` (Positivliste erlaubter Direktiven, Tokenizer über `;`/`{`/`}`, prüft insbesondere die Klammerbilanz) · `Vhost` Entität (hat **keine** Pfadmethoden mehr) · `VhostKind` Enum · `VhostRepository` SQL
+  - `Config` Pfade/Ports (inkl. `backupDir`) · `Database` PDO/Schema · `Value/*` validierende Wertobjekte, u. a. `Value\NginxSnippet` (Positivliste erlaubter Direktiven, Tokenizer über `;`/`{`/`}` mit nginx-treuer Behandlung von `#`/`"`/`'` **nur am Tokenanfang**, prüft die Klammerbilanz und lehnt `proxy_pass` auf den eigenen Rechner ab – per Adressvergleich, nicht per Zeichenkette) · `Vhost` Entität (hat **keine** Pfadmethoden mehr) · `VhostKind` Enum · `VhostRepository` SQL
   - `VhostLayout` – einzige Quelle für die Pfade **und** Soll-Rechte je vHost (`web/`, `conf/`, `cert/`, `private/`, `logs/`); liefert `DirectorySpec`-Objekte (Pfad, Owner, Gruppe, Modus, Beschreibung)
   - `Migration\LayoutMigrator` – bringt vHosts aus der alten flachen Struktur auf `web/conf/cert/private/logs`; verschiebt über den Zwischenordner `.web-migrating`, bricht bei Kollisionen mit Ausnahme ab statt zu überschreiben
   - `Nginx\ConfigRenderer` reine Textausgabe (nutzt `VhostLayout`) · `Nginx\ReloaderInterface`/`Nginx\SystemdReloader` Reload nach Rendern
@@ -21,7 +21,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (261 Tests, Stand Abschlussreview 2026-09-20); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (283 Tests, Stand Fix-Runde 2 vom 2026-09-20); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -31,6 +31,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Jeder neue Host startet gesperrt (Schutz ohne Benutzer/IP). Freigabe: IP **oder** Login (`satisfy any`).
 - Testhilfsmethoden für CLI-Läufe heißen `runCli()`, nicht `run()` – `PHPUnit\Framework\TestCase::run()` ist seit PHPUnit 13 `final` und würde kollidieren.
 - Pfade kommen ausschließlich aus `VhostLayout`, nie aus `Vhost` selbst oder frei zusammengesetzt. `www-data` darf ausschließlich in `web/` schreiben; `conf/`, `cert/`, `logs/` gehören root (Rechte-Tabelle in der Spec vom 2026-09-18).
+- `NginxSnippet` bildet den nginx-Tokenizer nach. Jede Abweichung von nginx ist eine potenzielle Lücke: `#`/`"`/`'` wirken nur am Tokenanfang, und Hostvergleiche laufen **immer** über `inet_pton()`/Namensauflösung, nie über Zeichenketten – dieselbe Adresse hat zu viele Schreibweisen (`2130706433`, `0177.0.0.1`, `::ffff:0:0`).
 - Das Snippet in `conf/custom.conf` wird nie von Hand gepflegt, sondern ausschließlich über die Oberfläche; `NginxSnippet` prüft gegen eine Positivliste inklusive Klammerbilanz.
 
 ## Bewusste Abweichungen von der globalen CLAUDE.md

@@ -16,7 +16,7 @@ declare(strict_types=1);
  * VhostLayout::needsMigration() den Host weiterhin für nicht migriert.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 10:34
+ * @version Letzte Änderung: 2026-09-20 15:21
  */
 
 namespace VhostAdmin\Migration;
@@ -62,6 +62,32 @@ final class LayoutMigrator
 			$this->repository->all(),
 			fn(Vhost $vhost): bool => $this->layout->needsMigration($vhost)
 		));
+	}
+
+	/**
+	 * Befund 2 (Re-Review 2026-09-20): Zieht den certbot-Renewal-Nachzug (siehe
+	 * migrateCertbotRenewalConfig()) für ALLE vHosts nach, nicht nur für die aus
+	 * pending(). migrate() ruft den Nachzug bisher nur für den ihm übergebenen
+	 * Host auf; da pending() ausschließlich Hosts liefert, deren web/ noch
+	 * fehlt, bekamen genau die im vorigen Durchlauf schon migrierten Hosts –
+	 * deren Zertifikat mit dem alten Webroot ausgestellt wurde – den Nachzug
+	 * dadurch nie. Dieser Schritt ist unabhängig von pending() und wird vom
+	 * CLI-Befehl "migrate-layout" zusätzlich für alle vHosts aufgerufen.
+	 *
+	 * Idempotent: ein Host, dessen Renewal-Konfiguration schon den neuen Webroot
+	 * enthält (z.B. weil migrate() sie gerade erst angepasst hat), wird beim
+	 * erneuten Aufruf nicht noch einmal verändert (siehe
+	 * migrateCertbotRenewalConfig()).
+	 *
+	 * @return int Anzahl insgesamt angepasster Renewal-Dateien
+	 */
+	public function migrateRenewalConfigs(): int
+	{
+		$count = 0;
+		foreach ($this->repository->all() as $vhost) {
+			$count += $this->migrateCertbotRenewalConfig($vhost);
+		}
+		return $count;
 	}
 
 	/**
@@ -128,7 +154,7 @@ final class LayoutMigrator
 	}
 
 	/**
-	 * Zieht eine vorhandene certbot-Renewal-Konfiguration auf den neuen Webroot nach.
+	 * Zieht vorhandene certbot-Renewal-Konfigurationen auf den neuen Webroot nach.
 	 *
 	 * certbot merkt sich den beim Ausstellen verwendeten Webroot-Pfad in
 	 * "<renewalDir>/<domain>.conf", und zwar zweifach: als Fallback in
@@ -139,31 +165,55 @@ final class LayoutMigrator
 	 * Renderer erwartet, läge sie dann nicht. Ein fehlendes Renewal-Verzeichnis oder
 	 * eine fehlende/unpassende Konfigurationsdatei ist kein Fehler: nicht jeder
 	 * vHost hat schon ein Zertifikat.
+	 *
+	 * Bei erneuter Ausstellung legt certbot zusätzlich "<domain>-0001.conf",
+	 * "<domain>-0002.conf" usw. an (Befund 2, Re-Review 2026-09-20) – deshalb wird
+	 * nicht nur "<domain>.conf", sondern auch "<domain>-*.conf" erfasst.
+	 *
+	 * @return int Anzahl tatsächlich angepasster Dateien (0 bis 2, je vHost)
 	 */
-	private function migrateCertbotRenewalConfig(Vhost $vhost): void
+	private function migrateCertbotRenewalConfig(Vhost $vhost): int
 	{
 		if (!is_dir($this->renewalDir)) {
-			return;
+			return 0;
 		}
-		$file = $this->renewalDir . '/' . $vhost->name . '.conf';
-		if (!is_file($file) || is_link($file)) {
-			return;
-		}
+		$domain = $vhost->name;
+		$files = array_unique(array_merge(
+			glob($this->renewalDir . '/' . $domain . '.conf') ?: [],
+			glob($this->renewalDir . '/' . $domain . '-*.conf') ?: [],
+		));
 		$old = $this->layout->baseDir($vhost);
 		$new = $this->layout->webDir($vhost);
-		$content = (string)file_get_contents($file);
-		// Der alte Basisordner wird nur ersetzt, wenn er als eigenständiger Pfadwert
-		// auftritt (davor "=", "," oder Leerraum; danach ",", Leerraum oder Textende) –
-		// so bleibt ein bereits migrierter Eintrag ("<basis>/web") unverändert, weil
-		// ihm dort kein Trenner/Textende folgt, sondern "/web".
-		$updated = preg_replace(
-			'/(?<=[=,\s])' . preg_quote($old, '/') . '(?=[,\s]|$)/m',
-			$new,
-			$content
-		);
-		if ($updated !== null && $updated !== $content) {
-			file_put_contents($file, $updated);
+		$count = 0;
+		foreach ($files as $file) {
+			if (!is_file($file) || is_link($file)) {
+				continue;
+			}
+			$content = (string)file_get_contents($file);
+			// Der alte Basisordner wird nur ersetzt, wenn er als eigenständiger
+			// Pfadwert auftritt (davor "=", "," oder Leerraum; danach ",", Leerraum
+			// oder Textende) – so bleibt ein bereits migrierter Eintrag
+			// ("<basis>/web") unverändert, weil ihm dort kein Trenner/Textende
+			// folgt, sondern "/web".
+			$updated = preg_replace(
+				'/(?<=[=,\s])' . preg_quote($old, '/') . '(?=[,\s]|$)/m',
+				$new,
+				$content
+			);
+			if ($updated === null || $updated === $content) {
+				continue;
+			}
+			// Rückgabewert prüfen (Befund 2, Re-Review 2026-09-20, analog zu I5 bei
+			// setSnippet()): schlägt das Schreiben fehl, war die Anpassung bisher
+			// stillschweigend wirkungslos. Die "@"-Notation unterdrückt die
+			// PHP-Warnung bewusst (siehe VhostService::setSnippet()) – der Fehler
+			// wird als Ausnahme gemeldet, die Warnung wäre doppelt.
+			if (@file_put_contents($file, $updated) === false) {
+				throw new \RuntimeException("Kann Renewal-Konfiguration nicht schreiben: $file");
+			}
+			$count++;
 		}
+		return $count;
 	}
 
 	/**
