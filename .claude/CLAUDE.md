@@ -8,17 +8,20 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Installation/Update auf dem LXC: `sudo ./install.sh [--owner BENUTZER]` (Wrapper, ruft `src/install.sh` auf)
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - localhost-Host anlegen: `sudo vhost add-local <port> [--subdir DIR]` (die Oberfläche kann das absichtlich nicht)
+- Snippet setzen, Rechte reparieren, alte vHosts nachziehen: `sudo vhost conf <name>` (stdin), `sudo vhost fix-permissions [name]`, `sudo vhost migrate-layout`
 
 ## Struktur
 - `src/lib/VhostAdmin/` – Klassen (Namespace `VhostAdmin`, Autoloader `src/bootstrap.php`)
-  - `Config` Pfade/Ports · `Database` PDO/Schema · `Value/*` validierende Wertobjekte · `Vhost` Entität · `VhostKind` Enum · `VhostRepository` SQL
-  - `Nginx\ConfigRenderer` reine Textausgabe · `Nginx\ReloaderInterface`/`Nginx\SystemdReloader` Reload nach Rendern
+  - `Config` Pfade/Ports (inkl. `backupDir`) · `Database` PDO/Schema · `Value/*` validierende Wertobjekte, u. a. `Value\NginxSnippet` (Positivliste erlaubter Direktiven, Tokenizer über `;`/`{`/`}`, prüft insbesondere die Klammerbilanz) · `Vhost` Entität (hat **keine** Pfadmethoden mehr) · `VhostKind` Enum · `VhostRepository` SQL
+  - `VhostLayout` – einzige Quelle für die Pfade **und** Soll-Rechte je vHost (`web/`, `conf/`, `cert/`, `private/`, `logs/`); liefert `DirectorySpec`-Objekte (Pfad, Owner, Gruppe, Modus, Beschreibung)
+  - `Migration\LayoutMigrator` – bringt vHosts aus der alten flachen Struktur auf `web/conf/cert/private/logs`; verschiebt über den Zwischenordner `.web-migrating`, bricht bei Kollisionen mit Ausnahme ab statt zu überschreiben
+  - `Nginx\ConfigRenderer` reine Textausgabe (nutzt `VhostLayout`) · `Nginx\ReloaderInterface`/`Nginx\SystemdReloader` Reload nach Rendern
   - `Ssl\CertbotInterface`/`Ssl\CertbotClient` Zertifikatsbeschaffung
-  - `VhostService` Anwendungsfälle (verbindet Repository, Renderer, Reloader, certbot)
-  - `Cli\Application` CLI · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
-- `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080`)
-- `src/etc/` – nginx-, sudoers-, certbot-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (147 Tests); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+  - `VhostService` Anwendungsfälle (verbindet Repository, Renderer, Reloader, certbot, Layout)
+  - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
+- `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
+- `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
+- `tests/` – PHPUnit (237 Tests); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -27,6 +30,8 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Schreibende Aktionen nur über das CLI; `www-data` darf per sudoers ausschließlich `/usr/local/sbin/vhost`.
 - Jeder neue Host startet gesperrt (Schutz ohne Benutzer/IP). Freigabe: IP **oder** Login (`satisfy any`).
 - Testhilfsmethoden für CLI-Läufe heißen `runCli()`, nicht `run()` – `PHPUnit\Framework\TestCase::run()` ist seit PHPUnit 13 `final` und würde kollidieren.
+- Pfade kommen ausschließlich aus `VhostLayout`, nie aus `Vhost` selbst oder frei zusammengesetzt. `www-data` darf ausschließlich in `web/` schreiben; `conf/`, `cert/`, `logs/` gehören root (Rechte-Tabelle in der Spec vom 2026-09-18).
+- Das Snippet in `conf/custom.conf` wird nie von Hand gepflegt, sondern ausschließlich über die Oberfläche; `NginxSnippet` prüft gegen eine Positivliste inklusive Klammerbilanz.
 
 ## Bewusste Abweichungen von der globalen CLAUDE.md
 - Kein Windows/ARM-Cross-Build, kein Windows-Setup, keine `.pid`: Linux-spezifische nginx/systemd/sudoers-Verwaltung ohne eigenen Daemon.

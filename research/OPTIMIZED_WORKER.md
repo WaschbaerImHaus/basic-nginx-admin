@@ -21,3 +21,10 @@ Ein LXC-Verwaltungswerkzeug: nginx-vHosts als Datensätze in SQLite, aus denen `
 ## Offene Fragen an den Nutzer (bei Gelegenheit)
 - Sollen Domains einen `www.`-Alias bekommen?
 - Wird PHP in normalen vHosts gebraucht?
+
+## Was ich am 2026-09-19/20 gelernt habe
+- `conf/` braucht Leserecht für `www-data` (Gruppe `www-data`, Modus `0750`), sonst kann die Oberfläche das gespeicherte Snippet nicht ins Textfeld laden – sie schreibt dort trotzdem nie selbst, nur das CLI tut das.
+- Die Klammerbilanz ist die eigentliche Sicherheitsprüfung eines nginx-Snippets, nicht die Positivliste allein: eine rein zeilenweise Prüfung (nur das erste Wort jeder Zeile gegen die Liste) ist umgehbar, z. B. mit `expires 1d; root /etc;` in einer Zeile – erst ein echter Tokenizer über `;`/`{`/`}` (mit Anführungszeichen/Kommentaren) verhindert, dass eine schließende Klammer den umgebenden `server`-Block verlässt und danach beliebige Direktiven folgen.
+- `realpath()` in Löschpfaden kann Symlinks selbst zum Angriffsweg machen: löst man erst auf und vergleicht dann, folgt man einem untergeschobenen Symlink auf ein fremdes Ziel, statt den Symlink selbst als verboten zu erkennen – die Prüfung muss vor der Auflösung ansetzen (`is_link()` zuerst).
+- Ein Reload, der auf das Verschwinden der alten Worker wartet, blockiert sich selbst, wenn er aus genau der HTTP-Anfrage heraus läuft, die noch vom alten Worker bedient wird: der Worker kann sich erst beenden, wenn die Antwort auf diese Anfrage geschrieben ist, das Warten läuft also planmäßig bis zum Timeout, ohne etwas zu gewinnen.
+- Ein Abnahmetest darf nur prüfen, was tatsächlich zugesichert ist – nicht, was intuitiv wünschenswert wäre. „Snippet wirkt sofort per HTTP nach dem POST" war nie zugesichert (nginx übernimmt asynchron); der Smoke-Test wurde deshalb auf die deterministisch prüfbare Kette (Datei geschrieben, Flash ok, verbotene Direktive abgelehnt, fünf Ordner mit Soll-Rechten vorhanden) zurückgeschnitten, statt eine nicht zugesicherte Eigenschaft immer aufwendiger nachzujagen.

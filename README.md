@@ -26,12 +26,20 @@ Schreibende Aktionen laufen nie direkt in der Oberfläche, sondern immer über d
 
 ## Pfade
 
-| Host | Docroot |
+| Host | Struktur |
 |---|---|
-| `example.com` | `/var/www/example.com/` (oder `/var/www/example.com/<unterordner>/`) |
-| `localhost:3000` | `/var/www/localhost-3000/` |
+| `example.com` | `/var/www/example.com/` mit `web/` (Docroot, mit Unterordner `web/<unterordner>/`), `conf/`, `cert/`, `private/`, `logs/` |
+| `localhost:3000` | `/var/www/localhost-3000/` mit denselben fünf Ordnern |
 
-Beim Anlegen entsteht eine bunte `index.html` („200“), sofern noch keine liegt. Die Ordner gehören dem bei der Installation gewählten Benutzer (Gruppe `www-data`).
+Beim Anlegen entsteht in `web/` eine bunte `index.html` („200“), sofern noch keine liegt. `web/` gehört dem bei der Installation gewählten Benutzer und der Gruppe `www-data` (`www-data` darf ausschließlich hier schreiben); `conf/`, `cert/`, `logs/` gehören root, `private/` dem Benutzer allein.
+
+## Eigene nginx-Direktiven
+
+Auf der Detailseite eines vHosts gibt es unter „Eigene nginx-Direktiven“ ein Textfeld. Erlaubt sind unter anderem `client_max_body_size`, `expires`, `add_header`, `gzip*`, `rewrite`, `return`, `try_files`, `error_page`, `proxy_*` und `location`-Blöcke – Direktiven, die Docroot, Zertifikat oder Verzeichnisschutz betreffen, werden abgelehnt (Positivliste in `Value\NginxSnippet`). Schlägt die Prüfung fehl oder lässt `nginx -t` das Ergebnis nicht zu, bleibt die bisherige Fassung aktiv und die Meldung erscheint im roten Kasten. Gespeichert wird das Snippet in `[domain]/conf/custom.conf`.
+
+## Logdateien
+
+Jeder vHost schreibt nach `[domain]/logs/access.log` und `[domain]/logs/error.log`. Rotation täglich, 14 Tage Aufbewahrung (`/etc/logrotate.d/vhost-admin`, per `install.sh` eingerichtet).
 
 ## Verzeichnisschutz
 
@@ -60,17 +68,24 @@ sudo vhost ip-del <name> <ip|cidr>
 sudo vhost ssl <name> on|off
 sudo vhost set le_email <adresse>
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
+sudo vhost conf <name>                                        # nginx-Snippet per stdin (leer = entfernen)
+sudo vhost fix-permissions [name]                             # Rechte laut VhostLayout wiederherstellen
+sudo vhost migrate-layout                                     # alte vHosts (ohne web/conf/cert/private/logs) nachziehen
 ```
 
 localhost-Hosts lassen sich nur über die Kommandozeile anlegen; die Oberfläche listet sie nur.
 
 ## Umzug auf einen anderen Server
 
-`/var/lib/vhost-admin`, `/var/www` und `/etc/letsencrypt` mitnehmen, dann `sudo ./install.sh` – die nginx-Konfigurationen werden aus der Datenbank neu erzeugt.
+`/var/lib/vhost-admin`, `/var/www` und `/etc/letsencrypt` mitnehmen, dann `sudo ./install.sh` – die nginx-Konfigurationen werden aus der Datenbank neu erzeugt. `install.sh` sichert vorhandene Hosts zuvor automatisch nach `/var/backups/` und ruft danach `vhost migrate-layout` auf, das jeden noch nicht umgestellten vHost auf die aktuelle Struktur (`web/conf/cert/private/logs`) bringt – auch ein frisch mitgenommener alter Stand landet also automatisch in der neuen Struktur.
+
+### Kollision während der Migration
+
+`vhost migrate-layout` verschiebt den bisherigen Inhalt eines vHosts erst in den Zwischenordner `<domain>/.web-migrating`, bevor er atomar zu `<domain>/web` umbenannt wird. Findet sich dabei im Zwischenordner (oder am Ziel) bereits ein gleichnamiger Eintrag, bricht die Migration mit einer Meldung ab, die den betroffenen Pfad nennt – nichts Vorhandenes wird stillschweigend überschrieben. Nach dem Auflösen der Kollision (die störende Datei im Zwischenordner oder im Basisordner entfernen oder umbenennen) setzt ein erneutes `sudo vhost migrate-layout` genau dort fort, wo der vorige Lauf stehen geblieben ist – bereits verschobene Einträge werden nicht erneut angefasst. Vor der Migration liegt ohnehin eine Sicherung unter `/var/backups/` (Tar-Archiv je Lauf, siehe `LayoutMigrator::backup()`).
 
 ## Entwicklung
 
-- Tests: `phpunit` (147 Tests, Stand nach den Sicherheits-Fix-Wellen vom 2026-09-17)
+- Tests: `phpunit` (237 Tests, Stand nach der Verzeichnisstruktur-Umstellung vom 2026-09-19/20)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`
