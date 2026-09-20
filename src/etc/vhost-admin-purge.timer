@@ -1,0 +1,13 @@
+[Unit]
+Description=vhost-admin: Loeschvormerkungen regelmaessig pruefen
+
+[Timer]
+# Alle zehn Minuten: die Schonfrist betraegt standardmaessig 60 Minuten, ein vHost
+# verschwindet damit spaetestens zehn Minuten nach Ablauf der Frist.
+OnBootSec=5min
+OnUnitActiveSec=10min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

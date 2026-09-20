@@ -400,4 +400,61 @@ final class ApplicationTest extends TestCase
 		self::assertSame(1, $code);
 		self::assertFalse($this->repo->byName('php.example')->php);
 	}
+	/**
+	 * "remove" ohne Option sperrt nur und setzt eine Frist – der Eintrag bleibt, damit
+	 * ein versehentliches Entfernen zurückgenommen werden kann.
+	 */
+	public function testRemoveSchedulesAndRestoreBringsItBack(): void
+	{
+		$this->runCli(['add', 'weg.example']);
+		[$code, $out] = $this->runCli(['remove', 'weg.example']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Gesperrt', $out);
+		self::assertStringContainsString('vhost restore weg.example', $out);
+		$pending = $this->repo->byName('weg.example');
+		self::assertNotNull($pending);
+		self::assertTrue($pending->isPendingDeletion());
+		self::assertFileDoesNotExist($this->config->sitesEnabled . '/weg.example.conf');
+
+		[$code, $out] = $this->runCli(['restore', 'weg.example']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Zurückgeholt', $out);
+		self::assertFalse($this->repo->byName('weg.example')->isPendingDeletion());
+		self::assertFileExists($this->config->sitesEnabled . '/weg.example.conf');
+	}
+
+	public function testRemoveWithNowSkipsTheGracePeriod(): void
+	{
+		$this->runCli(['add', 'weg.example']);
+		[$code, $out] = $this->runCli(['remove', 'weg.example', '--now']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Entfernt', $out);
+		self::assertNull($this->repo->byName('weg.example'));
+	}
+
+	public function testRestoreRefusesForAVhostThatIsNotPending(): void
+	{
+		$this->runCli(['add', 'da.example']);
+		[$code, , $err] = $this->runCli(['restore', 'da.example']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('nicht zum Entfernen vorgemerkt', $err);
+	}
+
+	public function testListMarksPendingVhosts(): void
+	{
+		$this->runCli(['add', 'weg.example']);
+		$this->runCli(['remove', 'weg.example']);
+		[, $out] = $this->runCli(['list']);
+		self::assertStringContainsString('GESPERRT', $out);
+	}
+
+	public function testPurgeDueReportsWhenNothingIsDue(): void
+	{
+		$this->runCli(['add', 'weg.example']);
+		$this->runCli(['remove', 'weg.example']);
+		[$code, $out] = $this->runCli(['purge-due']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Nichts fällig', $out);
+		self::assertNotNull($this->repo->byName('weg.example'));
+	}
 }

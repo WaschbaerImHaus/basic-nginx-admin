@@ -34,6 +34,8 @@ final class Config
 	 * @param string $fpmService      systemd-Dienst von php-fpm (für den Reload)
 	 * @param string $fastcgiParams   fastcgi_params von nginx (absolut, siehe Standardwert)
 	 * @param string $fpmBinary       php-fpm-Programm für "php-fpm -t" (heißt php-fpm<version>)
+	 * @param int    $removalGraceMinutes Minuten, die ein entfernter vHost gesperrt liegen
+	 *                                    bleibt, bevor er endgültig verschwindet
 	 */
 	public function __construct(
 		public readonly string $dbPath,
@@ -54,6 +56,7 @@ final class Config
 		public readonly string $fpmService,
 		public readonly string $fastcgiParams,
 		public readonly string $fpmBinary,
+		public readonly int $removalGraceMinutes,
 	) {
 	}
 
@@ -97,6 +100,7 @@ final class Config
 			// Das Programm heißt "php-fpm<version>", der Dienst dagegen "php<version>-fpm"
 			// – die beiden Namen sind nicht dieselbe Reihenfolge, deshalb zwei Schlüssel.
 			'fpmBinary' => '/usr/sbin/php-fpm' . self::phpFpmVersion(),
+			'removalGraceMinutes' => 60,
 		];
 		$unknown = array_diff_key($values, $defaults);
 		if ($unknown !== []) {

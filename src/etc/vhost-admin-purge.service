@@ -1,0 +1,12 @@
+[Unit]
+Description=vhost-admin: abgelaufene Loeschvormerkungen endgueltig entfernen
+Documentation=file:///opt/vhost-admin/README.md
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vhost purge-due
+# Nur schreiben, wohin dieses Werkzeug schreiben muss.
+ProtectSystem=full
+ReadWritePaths=/var/lib/vhost-admin /etc/nginx /var/www
+NoNewPrivileges=false

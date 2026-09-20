@@ -851,4 +851,102 @@ final class VhostServiceTest extends TestCase
 		self::assertSame(ReachabilityStatus::NotApplicable, $results['localhost:3010']->status);
 		self::assertSame([], $this->reachability->calls, 'Für localhost darf keine Anfrage rausgehen');
 	}
+	// ------------------------------------------------------------------
+	// Entfernen mit Schonfrist
+	// ------------------------------------------------------------------
+
+	/**
+	 * Nach dem Anstossen liefert nginx den vHost sofort nicht mehr aus – der Eintrag und
+	 * alle Dateien bleiben aber bestehen, damit sich das zurückholen lässt.
+	 */
+	public function testScheduleRemovalDisablesNginxAtOnceButKeepsEverything(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('weg.example'), null);
+		$enabled = $this->config->sitesEnabled . '/weg.example.conf';
+		self::assertFileExists($enabled);
+
+		$this->service->scheduleRemoval($v);
+
+		self::assertFileDoesNotExist($enabled, 'nginx muss sofort aufhören auszuliefern');
+		self::assertGreaterThanOrEqual(1, $this->reloader->calls, 'und dafür neu geladen werden');
+		$pending = $this->repo->byName('weg.example');
+		self::assertNotNull($pending, 'Der Eintrag bleibt bis zum Ablauf der Frist');
+		self::assertTrue($pending->isPendingDeletion());
+		self::assertDirectoryExists($this->layout->baseDir($pending), 'Dateien bleiben unangetastet');
+		self::assertFileExists($this->config->sitesAvailable . '/weg.example.conf');
+	}
+
+	public function testRestoreBringsTheVhostBack(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('weg.example'), null);
+		$this->service->scheduleRemoval($v);
+
+		$this->service->restore($this->repo->byName('weg.example'));
+
+		$back = $this->repo->byName('weg.example');
+		self::assertFalse($back->isPendingDeletion());
+		self::assertFileExists($this->config->sitesEnabled . '/weg.example.conf');
+	}
+
+	/**
+	 * Ein vorgemerkter vHost darf durch ein Neuschreiben (z.B. install.sh) nicht
+	 * versehentlich wieder aktiv werden.
+	 */
+	public function testRenderKeepsAPendingVhostDisabled(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('weg.example'), null);
+		$this->service->scheduleRemoval($v);
+
+		$this->service->renderAll();
+
+		self::assertFileDoesNotExist($this->config->sitesEnabled . '/weg.example.conf');
+	}
+
+	public function testPurgeDueRemovesOnlyExpiredEntries(): void
+	{
+		$frisch = $this->service->createDomain(DomainName::fromString('frisch.example'), null);
+		$alt = $this->service->createDomain(DomainName::fromString('alt.example'), null);
+		$this->service->scheduleRemoval($frisch);
+		$this->service->scheduleRemoval($alt);
+		// "alt" vor mehr als einer Stunde vorgemerkt.
+		$this->repo->setDeletedAt(
+			$this->repo->byName('alt.example')->id,
+			(new \DateTimeImmutable('-2 hours', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s')
+		);
+
+		$removed = $this->service->purgeDue();
+
+		self::assertSame(['alt.example'], $removed);
+		self::assertNull($this->repo->byName('alt.example'));
+		self::assertNotNull($this->repo->byName('frisch.example'), 'Die frische Vormerkung bleibt');
+	}
+
+	/**
+	 * Das endgültige Entfernen löscht die Dateien nicht – so wie das Entfernen über die
+	 * Oberfläche es noch nie getan hat.
+	 */
+	public function testPurgeDueKeepsTheFiles(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('alt.example'), null);
+		$this->service->scheduleRemoval($v);
+		$this->repo->setDeletedAt(
+			$this->repo->byName('alt.example')->id,
+			(new \DateTimeImmutable('-2 hours', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s')
+		);
+		$base = $this->layout->baseDir($this->repo->byName('alt.example'));
+
+		$this->service->purgeDue();
+
+		self::assertDirectoryExists($base);
+	}
+
+	public function testDeletionDueAtIsOneHourAfterScheduling(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('weg.example'), null);
+		$this->service->scheduleRemoval($v);
+		$pending = $this->repo->byName('weg.example');
+		$due = $pending->deletionDueAt($this->config->removalGraceMinutes);
+		$expected = new \DateTimeImmutable($pending->deletedAt . ' UTC');
+		self::assertSame(3600, $due->getTimestamp() - $expected->getTimestamp());
+	}
 }

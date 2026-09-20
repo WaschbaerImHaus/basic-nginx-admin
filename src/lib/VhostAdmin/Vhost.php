@@ -37,6 +37,8 @@ final class Vhost
 	 * @param bool      $php       PHP über einen eigenen FPM-Pool ausliefern
 	 * @param ?string   $healthToken Kennung im ACME-Marker, mit der der Erreichbarkeitstest
 	 *                               belegt, dass die Domain auf diesen Server zeigt
+	 * @param ?string   $deletedAt Zeitpunkt (UTC), zu dem das Entfernen angestossen wurde;
+	 *                             bis zum Ablauf der Schonfrist ist der vHost nur gesperrt
 	 * @param ?string   $createdAt Zeitstempel aus der Datenbank (UTC)
 	 */
 	public function __construct(
@@ -49,6 +51,7 @@ final class Vhost
 		public readonly bool $ssl,
 		public readonly bool $php = false,
 		public readonly ?string $healthToken = null,
+		public readonly ?string $deletedAt = null,
 		public readonly ?string $createdAt = null,
 	) {
 		$this->assertConsistent();
@@ -132,8 +135,32 @@ final class Vhost
 			// sie nach, der Standardwert hier hält den Fall bis dahin aus.
 			(bool)($row['php'] ?? false),
 			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
+			($row['deleted_at'] ?? null) === null || $row['deleted_at'] === '' ? null : (string)$row['deleted_at'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
 		);
+	}
+
+	/**
+	 * Ist das Entfernen angestossen, die Schonfrist aber noch nicht abgelaufen?
+	 *
+	 * Ein solcher vHost wird von nginx nicht mehr ausgeliefert, steht aber noch in der
+	 * Datenbank und lässt sich zurückholen.
+	 */
+	public function isPendingDeletion(): bool
+	{
+		return $this->deletedAt !== null;
+	}
+
+	/**
+	 * Zeitpunkt (UTC), ab dem der Eintrag endgültig verschwindet.
+	 */
+	public function deletionDueAt(int $graceMinutes): ?\DateTimeImmutable
+	{
+		if ($this->deletedAt === null) {
+			return null;
+		}
+		return new \DateTimeImmutable($this->deletedAt . ' UTC')
+			->modify("+$graceMinutes minutes");
 	}
 
 	/**

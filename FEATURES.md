@@ -2,6 +2,8 @@
 
 ## Implementiert
 
+- **Entfernen mit Schonfrist** (2026-09-20): Die Rückfrage sagt jetzt, was geschieht; der vHost wird sofort gesperrt (nginx antwortet nicht mehr), der Eintrag verschwindet erst nach 60 Minuten. Bis dahin „Entfernen zurücknehmen" in der Oberfläche bzw. `vhost restore`. Endgültiges Aufräumen über den systemd-Timer `vhost-admin-purge.timer`. Dateien unter `/var/www` werden weiterhin nie gelöscht.
+
 - **Erreichbarkeitstest über den ACME-Pfad** (2026-09-20): Marker mit eigener Kennung je vHost, Abfrage beim Aufruf der Oberfläche (parallel, nicht laufend), grün/rot in Übersicht und Detailseite. Vor der Zertifikatsausstellung verpflichtend – ohne erreichbaren ACME-Pfad wird `ssl on` abgelehnt, damit kein Fehlversuch gegen das Kontingent von Let's Encrypt zählt. CLI: `vhost check-acme [name]`.
 
 - **Generierte Konfiguration im ISPConfig-Stil** (2026-09-20): viel vorgegeben, eigener Bereich am Ende des `server`-Blocks zwischen `# >>>>`/`# <<<<`. Zusätzlich Dotfile-Sperre, `favicon.ico`, `robots.txt`, HTTP/3 mit QUIC und `Alt-Svc` bei Hosts mit Zertifikat. `try_files` bewusst auf Server-Ebene statt in einem generierten `location /`, damit ein eingefügtes eigenes `location /` nicht mit "duplicate location" scheitert.

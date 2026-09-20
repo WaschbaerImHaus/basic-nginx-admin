@@ -102,6 +102,27 @@ final class VhostRepository
 	}
 
 	/**
+	 * Zeitpunkt des angestossenen Entfernens setzen (null = zurückholen).
+	 */
+	public function setDeletedAt(int $id, ?string $when): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET deleted_at = ? WHERE id = ?')->execute([$when, $id]);
+	}
+
+	/**
+	 * vHosts, deren Schonfrist abgelaufen ist.
+	 *
+	 * @param string $cutoff UTC-Zeitstempel "Y-m-d H:i:s"; alles davor ist fällig
+	 * @return list<Vhost>
+	 */
+	public function dueForDeletion(string $cutoff): array
+	{
+		$st = $this->db->pdo()->prepare('SELECT * FROM vhosts WHERE deleted_at IS NOT NULL AND deleted_at <= ? ORDER BY name');
+		$st->execute([$cutoff]);
+		return array_map(static fn(array $row): Vhost => Vhost::fromRow($row), $st->fetchAll());
+	}
+
+	/**
 	 * Kennung für den ACME-Marker setzen.
 	 */
 	public function setHealthToken(int $id, string $token): void

@@ -95,6 +95,13 @@ echo "== Datenbank und nginx-Configs"
 # aufruft; hier nur, damit "vhost init" gleich in ein passendes Verzeichnis schreibt.
 install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
+# Zeitgeber, der abgelaufene Loeschvormerkungen endgueltig entfernt. Ohne ihn bliebe
+# ein entfernter vHost unbegrenzt gesperrt liegen, statt nach der Frist zu verschwinden.
+install -m 644 "$SRC/etc/vhost-admin-purge.service" /etc/systemd/system/vhost-admin-purge.service
+install -m 644 "$SRC/etc/vhost-admin-purge.timer" /etc/systemd/system/vhost-admin-purge.timer
+systemctl daemon-reload
+systemctl enable --now vhost-admin-purge.timer >/dev/null
+
 /usr/local/sbin/vhost migrate-layout
 # Rechte bestehender vHosts auf den aktuellen Stand bringen. Nötig, weil sich die
 # Soll-Rechte zwischen Fassungen ändern koennen (z.B. conf/ am 2026-09-20 von

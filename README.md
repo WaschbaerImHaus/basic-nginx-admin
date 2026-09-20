@@ -124,6 +124,27 @@ Jeder neue Host ist zunächst gesperrt: Schutz aktiv, aber ohne Benutzer und ohn
 
 Solange der offene Punkt „Reload wird verschluckt“ (`BUGS.md`) nicht behoben ist, kann ein Reload – selten, aber möglich – wirkungslos bleiben; das betrifft auch sicherheitsrelevante Änderungen (Schutz einschalten, Benutzer entfernen, IP-Freigabe zurücknehmen). Solche Änderungen deshalb zur Sicherheit mit `sudo vhost render <name>` bestätigen.
 
+## vHost entfernen
+
+Entfernen läuft in zwei Stufen, damit ein Fehlgriff nicht sofort endgültig ist:
+
+1. Nach der Rückfrage wird der vHost **sofort gesperrt** – der Symlink in
+   `sites-enabled` verschwindet, nginx wird neu geladen und antwortet auf den Namen
+   nicht mehr (444). Der Eintrag, die Konfiguration, die Benutzer und alle Dateien
+   bleiben bestehen.
+2. **60 Minuten später** verschwindet der Eintrag endgültig. Bis dahin steht in der
+   Oberfläche der Knopf „Entfernen zurücknehmen", auf der Kommandozeile
+   `sudo vhost restore <name>`.
+
+Die Dateien unter `/var/www/<domain>/` werden dabei nie gelöscht – auch nicht nach
+Ablauf der Frist. Wer auch die Dateien loswerden will, nimmt
+`sudo vhost remove <name> --purge` (sofort und endgültig, aus der Oberfläche gesperrt).
+`--now` entfernt sofort, lässt die Dateien aber liegen.
+
+Das endgültige Entfernen erledigt der systemd-Timer `vhost-admin-purge.timer` (alle zehn
+Minuten, von `install.sh` eingerichtet); von Hand geht es mit `sudo vhost purge-due`.
+Die Frist lässt sich über `removalGraceMinutes` in `Config` ändern.
+
 ## Erreichbarkeit
 
 Jeder vHost hat unter `web/.well-known/acme-challenge/vhost-admin-health` eine Datei mit
@@ -167,7 +188,11 @@ HTTP wird danach auf HTTPS umgeleitet; die Verlängerung übernimmt der certbot-
 sudo vhost list
 sudo vhost add <domain> [--subdir DIR] [--no-protect]
 sudo vhost add-local <port> [--subdir DIR] [--no-protect]   # nur 127.0.0.1
-sudo vhost remove <name> [--purge]                           # --purge löscht auch /var/www/<name>
+sudo vhost remove <name>                                     # sperrt sofort, entfernt nach 60 Min.
+sudo vhost restore <name>                                    # Entfernen zurücknehmen
+sudo vhost remove <name> --now                               # sofort entfernen (Dateien bleiben)
+sudo vhost remove <name> --purge                             # sofort entfernen, auch /var/www/<name>
+sudo vhost purge-due                                         # abgelaufene Vormerkungen aufräumen
 sudo vhost protect <name> on|off
 printf 'passwort\n' | sudo vhost user-add <name> <user>
 sudo vhost user-del <name> <user>

@@ -421,7 +421,11 @@ final class VhostService
 		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
 
 		file_put_contents($available, $this->renderer->serverConfig($vhost));
-		if (!$symlinkExistedBefore) {
+		// Ein zum Entfernen vorgemerkter vHost darf durch ein Neuschreiben (z.B. aus
+		// install.sh oder renderAll()) nicht wieder aktiv werden.
+		if ($vhost->isPendingDeletion()) {
+			$this->disableSite($vhost);
+		} elseif (!$symlinkExistedBefore) {
 			symlink($available, $enabled);
 		}
 
@@ -438,6 +442,78 @@ final class VhostService
 				@unlink($enabled);
 			}
 			throw $e;
+		}
+	}
+
+	/**
+	 * Entfernen anstossen: sofort sperren, endgültig erst nach der Schonfrist.
+	 *
+	 * nginx hört unmittelbar auf, den vHost auszuliefern – der Symlink in sites-enabled
+	 * verschwindet und nginx wird neu geladen. Alles andere bleibt: der Eintrag in der
+	 * Datenbank, die Konfiguration in sites-available, die Benutzer und sämtliche
+	 * Dateien unter /var/www. Damit lässt sich das Entfernen innerhalb der Frist
+	 * vollständig zurücknehmen (restore()), und erst purgeDue() räumt endgültig auf.
+	 *
+	 * Mehrfach aufrufbar: ist das Entfernen schon angestossen, bleibt der ursprüngliche
+	 * Zeitpunkt stehen – sonst liesse sich die Frist durch wiederholtes Klicken verlängern.
+	 */
+	public function scheduleRemoval(Vhost $vhost): void
+	{
+		if (!$vhost->isPendingDeletion()) {
+			$this->repository->setDeletedAt(
+				(int)$vhost->id,
+				new \DateTimeImmutable('now', new \DateTimeZone('UTC'))->format('Y-m-d H:i:s')
+			);
+		}
+		$this->disableSite($vhost);
+		$this->reloader->reload();
+	}
+
+	/**
+	 * Ein angestossenes Entfernen zurücknehmen; der vHost wird wieder ausgeliefert.
+	 */
+	public function restore(Vhost $vhost): void
+	{
+		if (!$vhost->isPendingDeletion()) {
+			return;
+		}
+		$this->repository->setDeletedAt((int)$vhost->id, null);
+		$this->render($this->repository->byId((int)$vhost->id));
+	}
+
+	/**
+	 * Alle vHosts endgültig entfernen, deren Schonfrist abgelaufen ist.
+	 *
+	 * Die Dateien unter /var/www bleiben dabei liegen – genau wie beim Entfernen über
+	 * die Oberfläche, das noch nie Dateien gelöscht hat. Wer auch die Dateien los werden
+	 * will, nimmt "vhost remove <name> --purge".
+	 *
+	 * @return list<string> Namen der entfernten vHosts
+	 */
+	public function purgeDue(): array
+	{
+		$cutoff = new \DateTimeImmutable('now', new \DateTimeZone('UTC'))
+			->modify('-' . $this->config->removalGraceMinutes . ' minutes')
+			->format('Y-m-d H:i:s');
+		$removed = [];
+		foreach ($this->repository->dueForDeletion($cutoff) as $vhost) {
+			$this->remove($vhost);
+			$removed[] = $vhost->name;
+		}
+		return $removed;
+	}
+
+	/**
+	 * Nimmt den vHost aus sites-enabled, ohne sonst etwas anzufassen.
+	 *
+	 * Danach kennt nginx den Namen nicht mehr; Anfragen landen beim default_server und
+	 * werden mit 444 abgewiesen. Der Reload bleibt dem Aufrufer überlassen.
+	 */
+	private function disableSite(Vhost $vhost): void
+	{
+		$enabled = $this->config->sitesEnabled . '/' . $vhost->slug() . '.conf';
+		if (is_link($enabled) || file_exists($enabled)) {
+			unlink($enabled);
 		}
 	}
 

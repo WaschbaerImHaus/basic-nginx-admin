@@ -261,7 +261,14 @@ function reach(?ReachabilityResult $r): string
 			<div class="card">
 				<h2>Entfernen</h2>
 				<p class="muted">Entfernt nginx-Konfiguration und Datenbankeintrag. Die Dateien unter <code><?= h($layout->baseDir($view)) ?></code> bleiben erhalten.</p>
-				<?= form('remove', ['name' => $view->name], 'vHost entfernen', 'danger', $view->name . ' wirklich entfernen?') ?>
+				<?php if ($view->isPendingDeletion()): $due = $view->deletionDueAt($config->removalGraceMinutes); ?>
+					<p><span class="badge bad">gesperrt</span> Dieser vHost wird nicht mehr ausgeliefert.</p>
+					<p class="muted">Endgültig entfernt am <strong><?= h($due?->format('d.m.Y H:i')) ?> UTC</strong>. Bis dahin lässt sich das zurücknehmen; die Dateien unter <code><?= h($layout->baseDir($view)) ?></code> bleiben ohnehin erhalten.</p>
+					<?= form('restore', ['name' => $view->name], 'Entfernen zurücknehmen', 'primary') ?>
+				<?php else: ?>
+					<p class="muted">Der vHost wird sofort gesperrt und erst nach <?= h($config->removalGraceMinutes) ?> Minuten endgültig entfernt. Bis dahin lässt sich das zurücknehmen. Dateien unter <code><?= h($layout->baseDir($view)) ?></code> werden nie gelöscht.</p>
+					<?= form('remove', ['name' => $view->name], 'vHost entfernen', 'danger', $view->name . " wirklich entfernen?\n\nDer vHost wird sofort gesperrt und ist dann nicht mehr erreichbar. Endgültig entfernt wird er erst in " . $config->removalGraceMinutes . ' Minuten - bis dahin können Sie das zurücknehmen.') ?>
+				<?php endif ?>
 			</div>
 		</div>
 	</div>
@@ -283,7 +290,8 @@ function reach(?ReachabilityResult $r): string
 			<?php foreach ($vhosts as $v): ?>
 			<tr>
 				<td><a href="/?v=<?= h(rawurlencode($v->name)) ?>"><?= h($v->name) ?></a>
-					<?php if ($v->isLocal()): ?> <span class="badge local">lokal</span><?php endif ?></td>
+					<?php if ($v->isLocal()): ?> <span class="badge local">lokal</span><?php endif ?>
+					<?php if ($v->isPendingDeletion()): ?> <span class="badge bad" title="Endgültig entfernt am <?= h($v->deletionDueAt($config->removalGraceMinutes)?->format('d.m.Y H:i')) ?> UTC">wird entfernt</span><?php endif ?></td>
 				<td><code><?= h($layout->docroot($v)) ?></code></td>
 				<td><?= badge($v->protect, 'aktiv', 'aus') ?></td>
 				<td><?= badge($v->php, 'aktiv', 'aus') ?></td>

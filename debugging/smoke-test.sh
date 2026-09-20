@@ -28,8 +28,9 @@ cleanup() {
 	vhost remove smoke-ui.example --purge >/dev/null 2>&1
 	vhost remove smoke-conf.example --purge >/dev/null 2>&1
 	vhost remove smoke-php.example --purge >/dev/null 2>&1
+	vhost remove smoke-frist.example --purge >/dev/null 2>&1
 	rm -rf /var/www/smoke-test.example /var/www/smoke-ui.example /var/www/localhost-3999
-	rm -rf /var/www/smoke-conf.example /var/www/smoke-php.example
+	rm -rf /var/www/smoke-conf.example /var/www/smoke-php.example /var/www/smoke-frist.example
 	rm -f /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf
 	[ -n "$JAR" ] && rm -f "$JAR"
 	set -e
@@ -166,10 +167,29 @@ echo 'listen 0.0.0.0:8081;' | vhost conf smoke-php.example >/dev/null 2>&1 && fa
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 
+echo "== Entfernen mit Schonfrist"
+vhost add smoke-frist.example >/dev/null
+vhost protect smoke-frist.example off >/dev/null
+expect 200 "vor dem Entfernen erreichbar" -H 'Host: smoke-frist.example' http://127.0.0.1/
+vhost remove smoke-frist.example >/dev/null
+# Kernzusage: nginx liefert sofort nicht mehr aus (444 -> curl schreibt 000).
+expect 000 "sofort gesperrt" -H 'Host: smoke-frist.example' http://127.0.0.1/
+grep -q 'smoke-frist.example.*GESPERRT' <<<"$(vhost list)" && echo "ok   als gesperrt gelistet" || fail "nicht als gesperrt gelistet"
+[ -d /var/www/smoke-frist.example ] && echo "ok   Dateien bleiben" || fail "Dateien wurden geloescht"
+grep -q 'Nichts fällig' <<<"$(vhost purge-due)" && echo "ok   Frist laeuft noch" || fail "zu frueh entfernt"
+vhost restore smoke-frist.example >/dev/null
+expect 200 "zurueckgeholt" -H 'Host: smoke-frist.example' http://127.0.0.1/
+# Frist kuenstlich ablaufen lassen und endgueltig entfernen.
+vhost remove smoke-frist.example >/dev/null
+php -r '$p = new PDO("sqlite:/var/lib/vhost-admin/vhosts.sqlite"); $p->exec("UPDATE vhosts SET deleted_at = datetime(\"now\", \"-2 hours\") WHERE name = \"smoke-frist.example\"");'
+grep -q 'smoke-frist.example' <<<"$(vhost purge-due)" && echo "ok   nach Ablauf endgueltig entfernt" || fail "nach Ablauf nicht entfernt"
+grep -q smoke-frist <<<"$(vhost list)" && fail "Eintrag noch in der Datenbank" || echo "ok   Eintrag weg"
+[ -d /var/www/smoke-frist.example ] && echo "ok   Dateien auch danach erhalten" || fail "Dateien wurden mitgeloescht"
+
 echo "== Aufräumen"
 # Die eigentliche Entfernung übernimmt cleanup() (auch schon über den trap
 # beim Skriptende zuständig); hier nur vorgezogen, damit die folgende Prüfung
 # auf einen bereits sauberen Zustand trifft, bevor die Erfolgsmeldung fällt.
 cleanup
-vhost list | grep -q smoke && fail "Reste in der Datenbank" || echo "ok   sauber"
+grep -q smoke <<<"$(vhost list)" && fail "Reste in der Datenbank" || echo "ok   sauber"
 echo "ALLE PRÜFUNGEN BESTANDEN"

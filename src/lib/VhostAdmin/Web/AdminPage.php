@@ -103,6 +103,7 @@ final class AdminPage
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
 			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
 			'remove' => ['args' => ['remove', $name], 'stdin' => null],
+			'restore' => ['args' => ['restore', $name], 'stdin' => null],
 			'email' => ['args' => ['set', 'le_email', $field('le_email')], 'stdin' => null],
 			'conf' => ['args' => ['conf', $name], 'stdin' => (string)($post['snippet'] ?? '')],
 			default => null,

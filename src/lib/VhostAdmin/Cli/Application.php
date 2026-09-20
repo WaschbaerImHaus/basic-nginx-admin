@@ -34,7 +34,11 @@ vhost – nginx-vHosts verwalten
   vhost list
   vhost add <domain> [--subdir DIR] [--no-protect]
   vhost add-local <port> [--subdir DIR] [--no-protect]
-  vhost remove <name> [--purge]
+  vhost restore <name>
+  vhost purge-due
+  vhost remove <name> [--purge|--now]   (ohne Option: sperren, Frist, dann entfernen)
+  vhost restore <name>                  (ein angestossenes Entfernen zurücknehmen)
+  vhost purge-due                       (abgelaufene Vormerkungen endgültig entfernen)
   vhost protect <name> on|off
   vhost user-add <name> <user>        (Passwort per stdin)
   vhost user-del <name> <user>
@@ -62,6 +66,9 @@ TXT;
 	 * @param resource $stdout
 	 * @param resource $stderr
 	 */
+	/** Hat der Leser der Standardausgabe die Verbindung abgebrochen? */
+	private bool $stdoutBroken = false;
+
 	public function __construct(
 		private readonly VhostService $service,
 		private readonly VhostRepository $repository,
@@ -155,12 +162,16 @@ TXT;
 			case 'list':
 				foreach ($this->repository->all() as $vhost) {
 					$this->out(sprintf(
-						"%-32s %-9s %-44s schutz:%-3s ssl:%s\n",
+						"%-32s %-9s %-44s schutz:%-3s ssl:%-3s %s\n",
 						$vhost->name,
 						$vhost->kind->value,
 						$this->layout->docroot($vhost),
 						$vhost->protect ? 'an' : 'aus',
-						$vhost->ssl ? 'an' : 'aus'
+						$vhost->ssl ? 'an' : 'aus',
+						$vhost->isPendingDeletion()
+							? 'GESPERRT, wird entfernt am '
+								. $vhost->deletionDueAt($this->config->removalGraceMinutes)?->format('d.m.Y H:i') . ' UTC'
+							: ''
 					));
 				}
 				return 0;
@@ -184,8 +195,40 @@ TXT;
 				if (isset($options['purge']) && getenv('SUDO_USER') === 'www-data') {
 					throw new \RuntimeException('--purge ist aus der Oberfläche nicht erlaubt');
 				}
-				$this->service->remove($this->service->load($arg(0, 'Name')), isset($options['purge']));
-				$this->out("Entfernt.\n");
+				$vhost = $this->service->load($arg(0, 'Name'));
+				// Ohne --purge/--now wird das Entfernen nur angestossen: nginx liefert den
+				// vHost sofort nicht mehr aus, der Eintrag bleibt aber für die Dauer der
+				// Schonfrist bestehen und lässt sich mit "vhost restore" zurückholen.
+				// --purge (Dateien mit löschen) und --now sind die ausdrücklichen Wege,
+				// sofort und endgültig zu entfernen.
+				if (isset($options['purge']) || isset($options['now'])) {
+					$this->service->remove($vhost, isset($options['purge']));
+					$this->out("Entfernt.\n");
+					return 0;
+				}
+				$this->service->scheduleRemoval($vhost);
+				$due = $this->service->load($vhost->name)->deletionDueAt($this->config->removalGraceMinutes);
+				$this->out(
+					"Gesperrt: {$vhost->name} wird nicht mehr ausgeliefert.\n"
+					. 'Endgültig entfernt am ' . $due?->format('d.m.Y H:i') . " UTC.\n"
+					. "Zurückholen mit: vhost restore {$vhost->name}\n"
+				);
+				return 0;
+
+			case 'restore':
+				$vhost = $this->service->load($arg(0, 'Name'));
+				if (!$vhost->isPendingDeletion()) {
+					throw new \RuntimeException("{$vhost->name} ist nicht zum Entfernen vorgemerkt.");
+				}
+				$this->service->restore($vhost);
+				$this->out("Zurückgeholt: {$vhost->name} wird wieder ausgeliefert.\n");
+				return 0;
+
+			case 'purge-due':
+				$removed = $this->service->purgeDue();
+				$this->out($removed === []
+					? "Nichts fällig.\n"
+					: count($removed) . ' endgültig entfernt: ' . implode(', ', $removed) . "\n");
 				return 0;
 
 			case 'protect':
@@ -337,10 +380,21 @@ TXT;
 
 	/**
 	 * Schreibt Text auf den Standardausgabe-Stream.
+	 *
+	 * Bricht der Leser die Verbindung ab ("vhost list | head", "| grep -q"), schlägt
+	 * fwrite() mit "Broken pipe" fehl und PHP gibt eine Notice aus – mitten in der
+	 * Ausgabe des Werkzeugs. Das ist kein Fehler des Aufrufs: der Leser wollte einfach
+	 * nicht mehr lesen. Nach dem ersten Fehlschlag wird deshalb stillschweigend nichts
+	 * mehr geschrieben, statt für jede weitere Zeile eine Notice zu erzeugen.
 	 */
 	private function out(string $text): void
 	{
-		fwrite($this->stdout, $text);
+		if ($this->stdoutBroken) {
+			return;
+		}
+		if (@fwrite($this->stdout, $text) === false) {
+			$this->stdoutBroken = true;
+		}
 	}
 
 	/**

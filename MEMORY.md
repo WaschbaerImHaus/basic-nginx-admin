@@ -31,3 +31,9 @@ Nutzerentscheidungen:
 Warum der eigene Pool je Host nicht verhandelbar ist: der mitgelieferte Pool läuft als `www-data`, und `www-data` darf per sudoers das vhost-CLI als root aufrufen. Website-PHP in diesem Pool wäre root auf dem LXC.
 
 Eigene Fehler dieser Runde (alle behoben und durch Tests abgedeckt): relatives `include fastcgi_params` scheitert bei `nginx -t -c`; erste Sperrliste liess `listen`/`server_name` durch; `logs/` war für den PHP-Benutzer nicht durchquerbar; `remove()` liess die Pool-Datei liegen. Zwei eigene Planvorgaben verworfen, weil der Bestandscode besser begründet war (`ssl_certificate` direkt aus letsencrypt/live, ACME nur im :80-Block).
+
+## 2026-09-20 (Abend) – Entfernen mit Schonfrist, erstes echtes Zertifikat
+
+- Nutzer entfernte `mfsrv.de` über die Oberfläche (beabsichtigt – der Vertipper), fand den Vorgang aber zu leichtgängig: „es soll da eine 'wollen sie wirklich?' nachfrage kommen und der eintrag wird zuerst auf gesperrt gesetzt … und kann noch 1 stunde lang wieder rückgängig gemacht werden. … der nginx antwortet aber sofort ab 'wollen sie wirklich? - ja' nicht mehr." Genau so umgesetzt.
+- Ich hatte den Host zunächst voreilig wiederhergestellt, weil ich die Löschung für ein Versehen hielt. Der Nutzer stellte klar: das Löschen war richtig, nur der Weg zu einfach. Lehre: bei „das ging zu schnell" erst klären, ob das Ergebnis oder der Weg das Problem ist.
+- `mfsvr.de` hat das erste echte Let's-Encrypt-Zertifikat bekommen. Damit ist der C3-Befund (certbot-Webroot auf `web/`) erstmals am realen System belegt, inklusive erfolgreichem `certbot renew --dry-run`.
