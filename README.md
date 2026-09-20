@@ -145,6 +145,48 @@ Das endgültige Entfernen erledigt der systemd-Timer `vhost-admin-purge.timer` (
 Minuten, von `install.sh` eingerichtet); von Hand geht es mit `sudo vhost purge-due`.
 Die Frist lässt sich über `removalGraceMinutes` in `Config` ändern.
 
+## Sicherheit, Browser-Cache und Komprimierung
+
+Der generierte Block bringt Voreinstellungen mit, die für jede Seite sinnvoll sind:
+
+**Sicherheitskopfzeilen** (auf Server-Ebene, alle mit `always`, damit sie auch bei 401 und
+Fehlerseiten gesendet werden): `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: SAMEORIGIN` und
+`server_tokens off` (die Antwort nennt nur noch `nginx`, nicht mehr die Version). Bei Hosts
+mit Zertifikat zusätzlich `Strict-Transport-Security: max-age=15552000` – 180 Tage, ohne
+`includeSubDomains` und ohne `preload`.
+
+> **Zu HSTS:** Die Kopfzeile wirkt im Browser bis zum Ablauf nach. Wird HTTPS für eine
+> Domain später abgeschaltet, bleibt die Seite für wiederkehrende Besucher unerreichbar –
+> auch über HTTP. Mit `sudo vhost set hsts off` lässt sich das für alle Hosts abschalten
+> (schreibt die Konfiguration neu); bereits ausgelieferte Kopfzeilen laufen trotzdem erst
+> ab.
+
+Nicht vorgegeben sind `Content-Security-Policy` und `Permissions-Policy`: die lassen sich
+nicht sinnvoll pauschal setzen, ohne Seiten zu zerlegen. Sie gehören in die eigenen
+Direktiven.
+
+**Komprimierung:** `gzip` ist in der `nginx.conf` von Ubuntu aktiv, komprimiert ohne
+`gzip_types` aber ausschliesslich `text/html`. Der Block ergänzt CSS, JavaScript, JSON, XML,
+SVG, WASM und Schriften im TTF/OTF-Format, dazu `gzip_vary`, `gzip_comp_level 5`,
+`gzip_min_length 256` und `gzip_static`. Schon komprimierte Formate (JPEG, PNG, WOFF2)
+stehen absichtlich nicht drin – sie erneut zu packen kostet nur Rechenzeit.
+
+**Browser-Cache:** CSS/JS 7 Tage, Bilder/Schriften/Medien/Archive 30 Tage, HTML/JSON/XML/TXT
+`no-cache` (der Browser fragt nach, bekommt bei unveränderter Datei aber ein billiges 304
+über den ETag). Ohne `immutable`: das gilt nur für Dateien mit Fingerabdruck im Namen, auf
+einer gewöhnlichen `style.css` würde es Änderungen wochenlang verstecken.
+
+> **Eine nginx-Falle, die hier wichtig ist:** Ein `add_header` in einem `location`-Block
+> verwirft **alle** geerbten `add_header` des `server`-Blocks – die Sicherheitskopfzeilen
+> wären in genau diesem Block dann weg. Der Cache wird deshalb über `expires` gesetzt, das
+> diesen Nebeneffekt nicht hat. Wer in eigenen Direktiven ein `add_header` in einem
+> `location` verwendet, muss die gewünschten Kopfzeilen dort wiederholen.
+>
+> Und: Cache-Regeln überschreiben lassen sich nicht mit einem weiteren regulären Ausdruck –
+> bei denen gewinnt der erste Treffer, und die generierten stehen vorher. Wirksam sind ein
+> genauer Pfad (`location = /x.css`) oder ein Präfix mit Vorrang (`location ^~ /assets/`).
+
 ## Erreichbarkeit
 
 Jeder vHost hat unter `web/.well-known/acme-challenge/vhost-admin-health` eine Datei mit
@@ -202,6 +244,7 @@ sudo vhost php <name> on|off                                  # eigener FPM-Pool
 sudo vhost check-acme [name]                                  # Erreichbarkeit pruefen
 sudo vhost ssl <name> on|off
 sudo vhost set le_email <adresse>
+sudo vhost set hsts on|off                                   # HSTS wirkt im Browser nach
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
 sudo vhost conf <name>                                        # nginx-Snippet per stdin (leer = entfernen)
 sudo vhost conf-show <name>                                   # aktuelles Snippet ausgeben

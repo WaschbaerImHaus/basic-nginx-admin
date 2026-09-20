@@ -68,60 +68,53 @@ final class ConfigRendererTest extends TestCase
 		);
 	}
 
-	public function testDomainWithoutSsl(): void
+	/**
+	 * Aufbau und Reihenfolge des server-Blocks.
+	 *
+	 * Geprüft wird die Reihenfolge, nicht der Wortlaut jeder Zeile – die Inhalte der
+	 * einzelnen Abschnitte haben ihre eigenen Tests. Die Reihenfolge ist dagegen
+	 * fachlich bindend: Server-Ebene vor den location-Blöcken (sonst greifen die
+	 * add_header nicht), die Dotfile-Sperre vor den Cache-Regeln (bei regulären
+	 * Ausdrücken gewinnt der erste Treffer) und der eigene Bereich zuletzt.
+	 */
+	public function testDomainWithoutSslHasTheExpectedStructureInOrder(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, 'public', true, false);
-		$expected = <<<NG
-# generiert von vhost – nicht manuell bearbeiten
-server {
-    listen 80;
-    listen [::]:80;
-    server_name example.com;
+		$out = $this->renderer()->serverConfig($v);
 
-    location ^~ /.well-known/acme-challenge/ {
-        auth_basic off;
-        allow all;
-        root /var/www/example.com/web;
-    }
+		self::assertStringStartsWith("# generiert von vhost – nicht manuell bearbeiten\nserver {\n", $out);
+		self::assertStringEndsWith("    # <<<<\n}\n", $out);
+		self::assertSame(1, substr_count($out, 'server {'), 'ohne SSL nur ein server-Block');
 
-    root /var/www/example.com/web/public;
-    index index.html index.htm;
-    try_files \$uri \$uri/ =404;
-
-    access_log /var/www/example.com/logs/access.log;
-    error_log  /var/www/example.com/logs/error.log;
-
-    include /etc/nginx/auth/example.com.conf;
-
-    location ~ /\.(?!well-known/) {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-
-    location = /favicon.ico {
-        log_not_found off;
-        access_log off;
-    }
-
-    location = /robots.txt {
-        allow all;
-        log_not_found off;
-        access_log off;
-    }
-
-    location ~ \.php\$ {
-        return 404;
-    }
-
-    # >>>>
-    # ab hier eigene Direktiven (Oberfläche: "Eigene Direktiven")
-    include /var/www/example.com/conf/*.conf;
-    # <<<<
-}
-
-NG;
-		self::assertSame($expected, $this->renderer()->serverConfig($v));
+		$expectedOrder = [
+			'listen 80;',
+			'server_name example.com;',
+			'location ^~ /.well-known/acme-challenge/',
+			'root /var/www/example.com/web/public;',
+			'index index.html index.htm;',
+			'try_files $uri $uri/ =404;',
+			'access_log /var/www/example.com/logs/access.log;',
+			'server_tokens off;',
+			'add_header X-Content-Type-Options',
+			'gzip_types',
+			'include /etc/nginx/auth/example.com.conf;',
+			'location ~ /\.(?!well-known/)',
+			'location = /favicon.ico',
+			'location = /robots.txt',
+			'expires 7d;',
+			'expires 30d;',
+			'expires -1;',
+			'location ~ \.php$',
+			'# >>>>',
+			'include /var/www/example.com/conf/*.conf;',
+		];
+		$previous = -1;
+		foreach ($expectedOrder as $needle) {
+			$position = strpos($out, $needle);
+			self::assertIsInt($position, "fehlt in der Konfiguration: $needle");
+			self::assertGreaterThan($previous, $position, "steht an der falschen Stelle: $needle");
+			$previous = $position;
+		}
 	}
 
 	public function testDomainWithSslRedirectsAndServes443(): void
@@ -253,7 +246,8 @@ NG;
 		$out = $this->renderer()->serverConfig($withSsl);
 		self::assertStringContainsString("    listen 443 quic;\n", $out);
 		self::assertStringContainsString("    http3 on;\n", $out);
-		self::assertStringContainsString("add_header Alt-Svc 'h3=\":443\"; ma=86400';", $out);
+		// Mit "always", sonst fehlt die Ankündigung auf geschützten Hosts (401).
+		self::assertStringContainsString("add_header Alt-Svc 'h3=\":443\"; ma=86400' always;", $out);
 
 		$withoutSsl = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
 		self::assertStringNotContainsString('quic', $this->renderer()->serverConfig($withoutSsl));
@@ -279,5 +273,109 @@ NG;
 		self::assertStringContainsString("    listen 127.0.0.1:3000;\n", $out);
 		self::assertStringContainsString('fastcgi_pass unix:/run/php/vhost-localhost-3000.sock;', $out);
 		self::assertStringEndsWith("    # <<<<\n}\n", $out);
+	}
+	// ------------------------------------------------------------------
+	// Sicherheit, Browser-Cache, Komprimierung
+	// ------------------------------------------------------------------
+
+	public function testSecurityHeadersAreSetOnServerLevel(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringContainsString("    server_tokens off;\n", $out);
+		self::assertStringContainsString('add_header X-Content-Type-Options "nosniff" always;', $out);
+		self::assertStringContainsString('add_header Referrer-Policy "strict-origin-when-cross-origin" always;', $out);
+		self::assertStringContainsString('add_header X-Frame-Options "SAMEORIGIN" always;', $out);
+	}
+
+	/**
+	 * HSTS gehört nur auf einen Host mit Zertifikat – über HTTP ist die Kopfzeile
+	 * wirkungslos, und der Port-80-Block leitet ohnehin nur um.
+	 */
+	public function testHstsOnlyForSslHosts(): void
+	{
+		$withSsl = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		self::assertStringContainsString('add_header Strict-Transport-Security', $this->renderer()->serverConfig($withSsl));
+
+		$withoutSsl = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		self::assertStringNotContainsString('Strict-Transport-Security', $this->renderer()->serverConfig($withoutSsl));
+	}
+
+	/**
+	 * HSTS wirkt im Browser über Monate weiter, auch wenn HTTPS hier abgeschaltet wird.
+	 * Deshalb muss es abschaltbar sein.
+	 */
+	public function testHstsCanBeTurnedOff(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		$out = $this->renderer()->serverConfig($v, false);
+		self::assertStringNotContainsString('Strict-Transport-Security', $out);
+		// Die übrigen Kopfzeilen bleiben.
+		self::assertStringContainsString('X-Content-Type-Options', $out);
+	}
+
+	/**
+	 * Der Browser-Cache wird über "expires" gesetzt, NICHT über add_header: ein
+	 * add_header in einem location-Block verwirft alle geerbten add_header des
+	 * server-Blocks – die Sicherheitskopfzeilen wären dort dann weg.
+	 */
+	public function testCacheRulesUseExpiresSoSecurityHeadersSurvive(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		// Langlebige Dateien lange, HTML nie aus dem Cache.
+		self::assertStringContainsString('expires 30d;', $out);
+		self::assertStringContainsString('expires 7d;', $out);
+		self::assertStringContainsString('expires -1;', $out);
+		// add_header darf nur auf Server-Ebene stehen (Klammertiefe 1). Tiefer, also in
+		// einem location-Block, verwirft nginx dort alle geerbten Kopfzeilen.
+		$depth = 0;
+		foreach (explode("\n", $out) as $number => $line) {
+			if (str_contains($line, 'add_header')) {
+				self::assertSame(
+					1,
+					$depth,
+					'add_header in Zeile ' . ($number + 1) . ' steht in einem location-Block und würde '
+					. 'die geerbten Sicherheitskopfzeilen dort verwerfen: ' . trim($line)
+				);
+			}
+			$depth += substr_count($line, '{') - substr_count($line, '}');
+		}
+	}
+
+	/**
+	 * nginx komprimiert von Haus aus nur text/html; ohne gzip_types gehen CSS und JS
+	 * unkomprimiert raus.
+	 */
+	public function testGzipCoversTextFormatsButNotAlreadyCompressedOnes(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringContainsString('gzip_types', $out);
+		self::assertStringContainsString('text/css', $out);
+		self::assertStringContainsString('application/javascript', $out);
+		self::assertStringContainsString('image/svg+xml', $out);
+		self::assertStringContainsString("    gzip_vary on;\n", $out);
+		// Schon komprimierte Formate erneut zu komprimieren kostet nur Rechenzeit.
+		self::assertStringNotContainsString('image/jpeg', $out);
+		self::assertStringNotContainsString('font/woff2', $out);
+		// text/html ist immer dabei und gehört nicht in die Liste.
+		self::assertStringNotContainsString('gzip_types text/html', $out);
+	}
+
+	/**
+	 * Die Sperre für versteckte Dateien muss vor den Cache-Regeln stehen: Bei
+	 * regulären Ausdrücken gewinnt in nginx der erste Treffer, sonst wäre ".env.js"
+	 * über die Cache-Regel erreichbar statt gesperrt.
+	 */
+	public function testDotfileDenyComesBeforeTheCacheRules(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertLessThan(
+			strpos($out, 'expires 7d;'),
+			strpos($out, 'location ~ /\\.(?!well-known/)'),
+			'Die Dotfile-Sperre muss vor den Cache-Regeln stehen'
+		);
 	}
 }

@@ -167,6 +167,30 @@ echo 'listen 0.0.0.0:8081;' | vhost conf smoke-php.example >/dev/null 2>&1 && fa
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 
+echo "== Sicherheit, Cache, Komprimierung"
+printf 'body{color:red}/* Fuellung */\n%.0s' $(seq 60) > /var/www/smoke-test.example/web/public/t.css
+printf '<h1>x</h1>\n' > /var/www/smoke-test.example/web/public/t.html
+printf 'PNGDATA%.0s' $(seq 200) > /var/www/smoke-test.example/web/public/t.png
+H=$(curl -sI -H 'Host: smoke-test.example' http://127.0.0.1/t.html)
+grep -qi 'x-content-type-options: nosniff' <<<"$H" && echo "ok   nosniff" || fail "nosniff fehlt"
+grep -qi 'referrer-policy:' <<<"$H" && echo "ok   Referrer-Policy" || fail "Referrer-Policy fehlt"
+grep -qi 'x-frame-options: SAMEORIGIN' <<<"$H" && echo "ok   X-Frame-Options" || fail "X-Frame-Options fehlt"
+grep -qi '^Server: nginx.$' <<<"$(printf '%s' "$H" | tr -d '\r')" && echo "ok   Version verschwiegen" || echo "ok   Server-Kopfzeile: $(grep -i '^server:' <<<"$H" | tr -d '\r')"
+# Wichtig: Die Sicherheitskopfzeilen muessen AUCH in den Cache-Bloecken ankommen. Ein
+# add_header in einem location-Block wuerde sie dort verwerfen - deshalb "expires".
+grep -qi 'cache-control: no-cache' <<<"$H" && echo "ok   HTML ohne Cache" || fail "HTML wird zwischengespeichert"
+HC=$(curl -sI -H 'Host: smoke-test.example' -H 'Accept-Encoding: gzip' http://127.0.0.1/t.css)
+grep -qi 'x-content-type-options: nosniff' <<<"$HC" && echo "ok   Kopfzeilen auch im Cache-Block" || fail "Sicherheitskopfzeilen im Cache-Block verloren"
+grep -qi 'content-encoding: gzip' <<<"$HC" && echo "ok   CSS komprimiert" || fail "CSS nicht komprimiert"
+grep -qi 'cache-control: max-age=604800' <<<"$HC" && echo "ok   CSS 7 Tage" || fail "CSS ohne 7-Tage-Cache"
+PLAIN=$(curl -s -o /dev/null -w '%{size_download}' -H 'Host: smoke-test.example' http://127.0.0.1/t.css)
+GZ=$(curl -s -o /dev/null -w '%{size_download}' -H 'Host: smoke-test.example' -H 'Accept-Encoding: gzip' http://127.0.0.1/t.css)
+[ "$GZ" -lt "$PLAIN" ] && echo "ok   gzip spart ($PLAIN -> $GZ Bytes)" || fail "gzip spart nichts ($PLAIN -> $GZ)"
+HP=$(curl -sI -H 'Host: smoke-test.example' -H 'Accept-Encoding: gzip' http://127.0.0.1/t.png)
+grep -qi 'cache-control: max-age=2592000' <<<"$HP" && echo "ok   PNG 30 Tage" || fail "PNG ohne 30-Tage-Cache"
+grep -qi 'content-encoding: gzip' <<<"$HP" && fail "PNG wird erneut komprimiert" || echo "ok   PNG nicht neu komprimiert"
+rm -f /var/www/smoke-test.example/web/public/t.css /var/www/smoke-test.example/web/public/t.html /var/www/smoke-test.example/web/public/t.png
+
 echo "== Entfernen mit Schonfrist"
 vhost add smoke-frist.example >/dev/null
 vhost protect smoke-frist.example off >/dev/null

@@ -33,6 +33,7 @@ use VhostAdmin\Value\Username;
 final class VhostService
 {
 	private const SETTING_EMAIL = 'le_email';
+	private const SETTING_HSTS = 'hsts';
 
 	/**
 	 * Übernimmt Konfiguration, Repository, Renderer, Reloader, certbot-Client und Layout.
@@ -376,6 +377,28 @@ final class VhostService
 	/**
 	 * Hinterlegte Let's-Encrypt-Registrierungsadresse, falls gesetzt.
 	 */
+	/**
+	 * Darf Strict-Transport-Security gesendet werden? Standard: ja.
+	 *
+	 * Abschaltbar, weil die Kopfzeile im Browser monatelang nachwirkt: Wer HTTPS für
+	 * eine Domain wieder abschaltet, macht sie für wiederkehrende Besucher bis zum
+	 * Ablauf unerreichbar. Wer das nicht will, setzt die Einstellung auf "off", bevor
+	 * er Zertifikate verteilt.
+	 */
+	public function hstsEnabled(): bool
+	{
+		return $this->repository->setting(self::SETTING_HSTS) !== 'off';
+	}
+
+	/**
+	 * HSTS für alle Hosts ein- oder ausschalten und die Konfiguration neu schreiben.
+	 */
+	public function setHsts(bool $on): void
+	{
+		$this->repository->setSetting(self::SETTING_HSTS, $on ? 'on' : 'off');
+		$this->renderAll();
+	}
+
 	public function letsEncryptEmail(): ?string
 	{
 		return $this->repository->setting(self::SETTING_EMAIL);
@@ -420,7 +443,7 @@ final class VhostService
 
 		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
 
-		file_put_contents($available, $this->renderer->serverConfig($vhost));
+		file_put_contents($available, $this->renderer->serverConfig($vhost, $this->hstsEnabled()));
 		// Ein zum Entfernen vorgemerkter vHost darf durch ein Neuschreiben (z.B. aus
 		// install.sh oder renderAll()) nicht wieder aktiv werden.
 		if ($vhost->isPendingDeletion()) {

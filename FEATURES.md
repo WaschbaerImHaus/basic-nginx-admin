@@ -2,6 +2,8 @@
 
 ## Implementiert
 
+- **Sicherheit, Cache und Komprimierung im Wrapper** (2026-09-20): `server_tokens off`, `nosniff`, `Referrer-Policy`, `X-Frame-Options`, bei HTTPS zusätzlich HSTS (180 Tage, abschaltbar mit `vhost set hsts off`). `gzip_types` für CSS/JS/JSON/XML/SVG/WASM/Schriften – vorher komprimierte nginx nur HTML. Browser-Cache über `expires` (CSS/JS 7 Tage, Medien 30 Tage, HTML `no-cache`), bewusst ohne `add_header`, weil das die geerbten Sicherheitskopfzeilen im jeweiligen `location`-Block verwerfen würde.
+
 - **Entfernen mit Schonfrist** (2026-09-20): Die Rückfrage sagt jetzt, was geschieht; der vHost wird sofort gesperrt (nginx antwortet nicht mehr), der Eintrag verschwindet erst nach 60 Minuten. Bis dahin „Entfernen zurücknehmen" in der Oberfläche bzw. `vhost restore`. Endgültiges Aufräumen über den systemd-Timer `vhost-admin-purge.timer`. Dateien unter `/var/www` werden weiterhin nie gelöscht.
 
 - **Erreichbarkeitstest über den ACME-Pfad** (2026-09-20): Marker mit eigener Kennung je vHost, Abfrage beim Aufruf der Oberfläche (parallel, nicht laufend), grün/rot in Übersicht und Detailseite. Vor der Zertifikatsausstellung verpflichtend – ohne erreichbaren ACME-Pfad wird `ssl on` abgelehnt, damit kein Fehlversuch gegen das Kontingent von Let's Encrypt zählt. CLI: `vhost check-acme [name]`.

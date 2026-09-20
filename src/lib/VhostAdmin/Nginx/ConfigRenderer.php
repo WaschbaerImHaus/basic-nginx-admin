@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 20:50
+ * @version Letzte Änderung: 2026-09-20 22:30
  */
 
 namespace VhostAdmin\Nginx;
@@ -98,8 +98,12 @@ final class ConfigRenderer
 	 * Bewusst kein eigenes "location / { … }": try_files steht stattdessen auf
 	 * Server-Ebene. Ein eingefügtes eigenes "location /" würde sonst mit
 	 * "duplicate location" scheitern – genau der Fall, den copy-paste auslöst.
+	 *
+	 * @param bool $hsts ob Strict-Transport-Security gesendet werden darf (nur bei SSL
+	 *                   überhaupt relevant); abschaltbar, weil die Kopfzeile im Browser
+	 *                   monatelang nachwirkt
 	 */
-	public function serverConfig(Vhost $v): string
+	public function serverConfig(Vhost $v, bool $hsts = true): string
 	{
 		if ($v->isLocal()) {
 			$listen = "    listen 127.0.0.1:{$v->port};\n"
@@ -128,7 +132,9 @@ final class ConfigRenderer
 			// die Folgeanfragen über h3 stellen darf.
 			. "    listen 443 quic;\n" . ($this->config->ipv6 ? "    listen [::]:443 quic;\n" : '')
 			. "    http3 on;\n"
-			. "    add_header Alt-Svc 'h3=\":443\"; ma=86400';\n";
+			// "always": ohne den Zusatz sendet nginx die Kopfzeile nur bei 2xx/3xx – auf
+			// einem Host mit Verzeichnisschutz (401) würde HTTP/3 also nie angekündigt.
+			. "    add_header Alt-Svc 'h3=\":443\"; ma=86400' always;\n";
 		// Bewusst direkt nach /etc/letsencrypt/live und nicht über die Symlinks in cert/:
 		// eine defekte Symlink-Kette würde nginx am Start hindern (siehe
 		// VhostService::linkCertificates(), cert/ ist reine Sichtbarkeit).
@@ -144,7 +150,7 @@ final class ConfigRenderer
 		// dort hat "location ^~" Vorrang vor der Weiterleitung.
 		return $redirect
 			. "server {\n" . $listen443 . "\n    server_name {$v->name};\n\n" . $ssl . "\n"
-			. $this->body($v) . "}\n";
+			. $this->body($v, $hsts) . "}\n";
 	}
 
 	/**
@@ -164,7 +170,7 @@ final class ConfigRenderer
 	 * Gemeinsamer Teil jedes server-Blocks: Docroot, Logs, Schutz, Standardblöcke,
 	 * PHP und zum Schluss der eigene Bereich des Nutzers.
 	 */
-	private function body(Vhost $v): string
+	private function body(Vhost $v, bool $hsts = true): string
 	{
 		$root = $this->layout->docroot($v);
 		// index.php nur anbieten, wenn PHP auch ausgeliefert wird – sonst würde die
@@ -175,9 +181,12 @@ final class ConfigRenderer
 			. "    try_files \$uri \$uri/ =404;\n\n"
 			. '    access_log ' . $this->layout->accessLog($v) . ";\n"
 			. '    error_log  ' . $this->layout->errorLog($v) . ";\n\n"
+			. $this->hardening($v, $hsts) . "\n"
+			. $this->compression() . "\n"
 			. '    include ' . $this->authSnippetPath($v) . ";\n\n"
 			. $this->standardBlocks()
-			. "\n" . $this->phpBlock($v) . "\n";
+			. "\n" . $this->cacheBlocks() . "\n"
+			. $this->phpBlock($v) . "\n";
 
 		// Alles in conf/ gehört dem Nutzer: das Feld "Eigene Direktiven" der Oberfläche
 		// schreibt custom.conf, weitere Dateien (z.B. rewrites.conf) werden mit
@@ -188,6 +197,102 @@ final class ConfigRenderer
 			. "    # ab hier eigene Direktiven (Oberfläche: \"Eigene Direktiven\")\n"
 			. "    include $custom;\n"
 			. "    # <<<<\n";
+	}
+
+	/**
+	 * Sicherheitskopfzeilen und Verschweigen der nginx-Version.
+	 *
+	 * Alle mit "always", damit sie auch bei Fehlerseiten (401 vom Verzeichnisschutz,
+	 * 404, 5xx) gesendet werden – ohne "always" liefert nginx sie nur bei 2xx/3xx.
+	 *
+	 * Bewusst NICHT enthalten: Content-Security-Policy und Permissions-Policy. Beide
+	 * lassen sich nicht sinnvoll vorgeben, ohne fremde Seiten zu zerlegen; sie gehören
+	 * in die eigenen Direktiven des jeweiligen Hosts.
+	 *
+	 * "server_tokens off" gehört hierher und nicht in die nginx.conf des Pakets: die
+	 * setzt "server_tokens build" und würde bei einem Paketupdate überschrieben. Im
+	 * server-Block überschreiben wir den Wert sauber.
+	 */
+	private function hardening(Vhost $v, bool $hsts): string
+	{
+		$out = "    server_tokens off;\n"
+			// Verhindert, dass der Browser den Inhaltstyp erraet (z.B. eine .txt als
+			// Skript ausfuehrt).
+			. '    add_header X-Content-Type-Options "nosniff" always;' . "\n"
+			// Kein vollstaendiger Verweisender an fremde Ziele.
+			. '    add_header Referrer-Policy "strict-origin-when-cross-origin" always;' . "\n"
+			// Gegen Clickjacking: Einbetten nur von derselben Herkunft.
+			. '    add_header X-Frame-Options "SAMEORIGIN" always;' . "\n";
+		if ($v->ssl && $hsts) {
+			// 180 Tage, ohne includeSubDomains und ohne preload – bewusst zurückhaltend:
+			// Der Browser weigert sich für diese Dauer, die Domain über HTTP zu laden.
+			// Wird HTTPS hier später abgeschaltet, bleibt die Seite für wiederkehrende
+			// Besucher bis zum Ablauf unerreichbar. Abschaltbar mit "vhost set hsts off".
+			$out .= '    add_header Strict-Transport-Security "max-age=15552000" always;' . "\n";
+		}
+		return $out;
+	}
+
+	/**
+	 * Komprimierung.
+	 *
+	 * Ohne "gzip_types" komprimiert nginx ausschliesslich text/html – CSS, JavaScript
+	 * und JSON gingen unkomprimiert über die Leitung. text/html steht deshalb absichtlich
+	 * nicht in der Liste (es ist immer dabei), schon komprimierte Formate (JPEG, PNG,
+	 * WOFF2) ebenso wenig: sie erneut zu packen kostet nur Rechenzeit und macht die
+	 * Antwort meist grösser.
+	 *
+	 * "gzip_static on" liefert eine vorkomprimierte Datei "name.gz" direkt aus, falls
+	 * jemand eine anlegt; ohne solche Dateien ist die Direktive wirkungslos.
+	 */
+	private function compression(): string
+	{
+		return "    gzip_vary on;\n"
+			. "    gzip_proxied any;\n"
+			. "    gzip_comp_level 5;\n"
+			. "    gzip_min_length 256;\n"
+			. "    gzip_static on;\n"
+			. "    gzip_types text/plain text/css text/xml text/javascript application/javascript\n"
+			. "               application/json application/xml application/rss+xml application/wasm\n"
+			. "               image/svg+xml font/ttf font/otf;\n";
+	}
+
+	/**
+	 * Browser-Cache.
+	 *
+	 * Gesetzt über "expires", NICHT über add_header: Ein add_header in einem
+	 * location-Block verwirft sämtliche geerbten add_header des server-Blocks – die
+	 * Sicherheitskopfzeilen wären in genau diesen Blöcken dann weg. "expires" setzt
+	 * Cache-Control und Expires ohne diesen Nebeneffekt.
+	 *
+	 * Bewusst ohne "immutable": Das gilt nur für Dateien, deren Name sich bei jeder
+	 * Änderung ändert (Fingerabdruck im Namen). Auf einer gewöhnlichen "style.css"
+	 * würde es bedeuten, dass ein Besucher die Änderung wochenlang nicht sieht.
+	 *
+	 * HTML steht auf "expires -1" (Cache-Control: no-cache): Der Browser fragt jedes
+	 * Mal nach, bekommt bei unveränderter Datei aber ein billiges 304 über den ETag.
+	 * Das ist der Unterschied zwischen "meine Änderung ist sofort sichtbar" und
+	 * "warum sehe ich noch die alte Seite".
+	 *
+	 * Eigene Direktiven können das überschreiben, aber nicht mit einem weiteren
+	 * regulären Ausdruck: Bei denen gewinnt in nginx der erste Treffer, und die
+	 * generierten stehen vorher. Wirksam sind ein genauer Pfad ("location = /x.css")
+	 * oder ein Präfix mit Vorrang ("location ^~ /assets/") – beide schlagen jeden
+	 * regulären Ausdruck, unabhängig von der Reihenfolge.
+	 */
+	private function cacheBlocks(): string
+	{
+		return "    location ~* \\.(?:css|js|mjs)\$ {\n"
+			. "        expires 7d;\n"
+			. "        access_log off;\n"
+			. "    }\n\n"
+			. "    location ~* \\.(?:jpe?g|png|gif|webp|avif|svg|svgz|ico|cur|woff2?|ttf|otf|eot|mp4|webm|ogv|ogg|mp3|wav|flac|pdf|zip|gz|bz2|xz|7z)\$ {\n"
+			. "        expires 30d;\n"
+			. "        access_log off;\n"
+			. "    }\n\n"
+			. "    location ~* \\.(?:html?|json|xml|txt)\$ {\n"
+			. "        expires -1;\n"
+			. "    }\n";
 	}
 
 	/**

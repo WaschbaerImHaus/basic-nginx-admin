@@ -47,6 +47,7 @@ vhost – nginx-vHosts verwalten
   vhost php <name> on|off
   vhost ssl <name> on|off
   vhost set le_email <adresse>
+  vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
   vhost conf-show <name>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
@@ -290,8 +291,14 @@ TXT;
 
 			case 'set':
 				$key = $arg(0, 'Schlüssel');
+				if ($key === 'hsts') {
+					$this->service->setHsts($onOff($arg(1, 'on|off')));
+					$this->out('Strict-Transport-Security ' . ($this->service->hstsEnabled() ? 'aktiviert' : 'deaktiviert')
+						. " (alle Hosts neu geschrieben).\n");
+					return 0;
+				}
 				if ($key !== 'le_email') {
-					throw new \RuntimeException("Unbekannte Einstellung: $key");
+					throw new \RuntimeException("Unbekannte Einstellung: $key (bekannt: le_email, hsts)");
 				}
 				$this->service->setLetsEncryptEmail($positional[1] ?? '');
 				$this->out("Gespeichert.\n");
