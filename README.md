@@ -45,6 +45,8 @@ Jeder vHost schreibt nach `[domain]/logs/access.log` und `[domain]/logs/error.lo
 
 Jeder neue Host ist zunächst gesperrt: Schutz aktiv, aber ohne Benutzer und ohne IP – niemand kommt hinein. Freigabe: eine IP/ein Netz **oder** ein gültiger Login genügt. Oder den Schutz ganz abschalten. Der Pfad `/.well-known/acme-challenge/` bleibt immer frei, damit certbot arbeiten kann.
 
+Solange der offene Punkt „Reload wird verschluckt“ (`BUGS.md`) nicht behoben ist, kann ein Reload – selten, aber möglich – wirkungslos bleiben; das betrifft auch sicherheitsrelevante Änderungen (Schutz einschalten, Benutzer entfernen, IP-Freigabe zurücknehmen). Solche Änderungen deshalb zur Sicherheit mit `sudo vhost render <name>` bestätigen.
+
 ## Let's Encrypt
 
 1. E-Mail-Adresse in den Einstellungen hinterlegen.
@@ -85,7 +87,7 @@ localhost-Hosts lassen sich nur über die Kommandozeile anlegen; die Oberfläche
 
 ## Entwicklung
 
-- Tests: `phpunit` (237 Tests, Stand nach der Verzeichnisstruktur-Umstellung vom 2026-09-19/20)
+- Tests: `phpunit` (261 Tests, Stand nach dem Abschlussreview vom 2026-09-20)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`

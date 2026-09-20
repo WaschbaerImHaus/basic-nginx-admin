@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Migration alter vHost-Verzeichnisse auf die neue Struktur.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:45
+ * @version Letzte Änderung: 2026-09-20 10:34
  */
 
 namespace Tests\Migration;
@@ -120,6 +120,23 @@ final class LayoutMigratorTest extends TestCase
 		self::assertNotEmpty(preg_grep('#alt\.example/index\.html$#', $out));
 	}
 
+	/**
+	 * I2 (Abschlussreview): Das Archiv enthält den kompletten Inhalt der
+	 * Basisordner, auch private/ – es darf deshalb nicht mit dem Umask von root
+	 * (üblicherweise 0644) für alle lesbar bleiben.
+	 */
+	public function testBackupArchiveIsNotWorldOrGroupReadable(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		file_put_contents($base . '/index.html', 'Inhalt');
+		$target = $this->dir . '/backups';
+		mkdir($target);
+		$archive = $this->migrator->backup([$v], $target);
+		self::assertSame('0600', sprintf('%04o', (fileperms($archive) ?: 0) & 07777));
+	}
+
 	public function testBackupOfNothingThrows(): void
 	{
 		$this->expectException(\RuntimeException::class);
@@ -224,6 +241,81 @@ final class LayoutMigratorTest extends TestCase
 
 		$names = array_map(static fn($vh) => $vh->name, $this->migrator->pending());
 		self::assertSame(['alt.example'], $names);
+	}
+
+	/**
+	 * C3 (Abschlussreview): certbot merkt sich den beim Ausstellen verwendeten
+	 * Webroot in /etc/letsencrypt/renewal/<domain>.conf ("webroot_path" und
+	 * "[[webroot_map]]"). Zeigt der gespeicherte Pfad noch auf den alten
+	 * Basisordner, muss die Migration ihn auf "<basis>/web" nachziehen – sonst
+	 * legt "certbot renew" die nächste Challenge-Datei am falschen Ort ab.
+	 */
+	public function testMigrateRewritesCertbotRenewalWebrootPath(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		file_put_contents($base . '/index.html', 'Inhalt');
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		file_put_contents($renewalDir . '/alt.example.conf', <<<CONF
+			# renew_before_expiry = 30 days
+			version = 2.9.0
+			archive_dir = /etc/letsencrypt/archive/alt.example
+			cert = /etc/letsencrypt/live/alt.example/cert.pem
+
+			[renewalparams]
+			authenticator = webroot
+			webroot_path = $base,
+			[[webroot_map]]
+			alt.example = $base
+			CONF);
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		$migrator->migrate($v);
+
+		$conf = (string)file_get_contents($renewalDir . '/alt.example.conf');
+		self::assertStringContainsString("webroot_path = $base/web,", $conf);
+		self::assertStringContainsString("alt.example = $base/web", $conf);
+		self::assertStringNotContainsString("= $base,\n", $conf);
+	}
+
+	/**
+	 * Eine Renewal-Konfiguration ohne passenden Eintrag (z.B. ein anderer vHost
+	 * oder ein bereits migrierter Pfad) bleibt unverändert.
+	 */
+	public function testMigrateLeavesUnrelatedCertbotRenewalConfigUntouched(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		$renewalDir = $this->dir . '/renewal';
+		mkdir($renewalDir);
+		$original = "[renewalparams]\nauthenticator = webroot\nwebroot_path = /var/www/anderer.example,\n";
+		file_put_contents($renewalDir . '/alt.example.conf', $original);
+		$migrator = new LayoutMigrator($this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $renewalDir);
+
+		$migrator->migrate($v);
+
+		self::assertSame($original, file_get_contents($renewalDir . '/alt.example.conf'));
+	}
+
+	/**
+	 * Ein fehlendes Renewal-Verzeichnis (z.B. frische Installation ohne
+	 * bestehende Zertifikate) darf die Migration nicht scheitern lassen.
+	 */
+	public function testMigrateToleratesMissingCertbotRenewalDirectory(): void
+	{
+		$v = $this->repo->insert('alt.example', VhostKind::Domain, null, null, true);
+		$base = $this->dir . '/www/alt.example';
+		mkdir($base);
+		$migrator = new LayoutMigrator(
+			$this->config, $this->repo, $this->layout, $this->dir . '/nginxlogs', $this->dir . '/nicht-vorhanden'
+		);
+
+		$migrator->migrate($v);
+
+		self::assertDirectoryExists($base . '/web');
 	}
 
 	public function testMigrateThrowsOnWebSymlinkWithoutMovingAnything(): void

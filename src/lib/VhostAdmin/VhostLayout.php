@@ -9,10 +9,13 @@ declare(strict_types=1);
  * Zertifikate), private/ (nicht ausgeliefert) und logs/ (Zugriffs- und Fehlerlog).
  *
  * www-data darf ausschließlich in web/ schreiben; ein dort untergeschobener Symlink
- * erreicht damit weder Snippet noch Zertifikatsverweise noch Logs.
+ * erreicht damit weder Snippet noch Zertifikatsverweise noch Logs. Der Basisordner
+ * selbst gehört seit dem Abschlussreview vom 2026-09-20 (C2) ausschließlich dem
+ * Besitzer (0755, nicht gruppenbeschreibbar) – sonst könnte www-data ihn umbenennen
+ * oder Einträge darin ersetzen, auch den root-eigenen conf/-Ordner.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:45
+ * @version Letzte Änderung: 2026-09-20 10:34
  */
 
 namespace VhostAdmin;
@@ -116,7 +119,12 @@ final class VhostLayout
 		$owner = $this->config->wwwOwner;
 		$group = $this->config->wwwGroup;
 		$specs = [
-			new DirectorySpec($this->baseDir($vhost), $owner, $group, 02775, 'Basisordner des vHosts'),
+			// Basisordner gehört ausschließlich dem Besitzer (Gruppe = Besitzer, 0755):
+			// www-data braucht hier nur Durchqueren, um nach web/ zu gelangen, nicht
+			// Schreibrecht. Wäre er gruppenbeschreibbar, könnte www-data ihn umbenennen
+			// oder Einträge ersetzen – auch den root-eigenen conf/-Ordner (C2, Review vom
+			// 2026-09-20). Geschrieben wird hier nur von root (Anlegen der Unterordner).
+			new DirectorySpec($this->baseDir($vhost), $owner, $owner, 0755, 'Basisordner des vHosts (nicht gruppenbeschreibbar)'),
 			new DirectorySpec($this->webDir($vhost), $owner, $group, 02775, 'Docroot (wird ausgeliefert)'),
 			new DirectorySpec($this->confDir($vhost), 'root', $group, 0750, 'nginx-Snippet der Oberfläche'),
 			new DirectorySpec($this->certDir($vhost), 'root', $owner, 0750, 'Symlinks auf die Zertifikate'),

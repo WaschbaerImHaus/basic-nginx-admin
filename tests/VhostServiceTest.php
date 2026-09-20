@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests der Anwendungsfälle mit Temp-Verzeichnissen und Fakes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:28
+ * @version Letzte Änderung: 2026-09-20 14:52
  */
 
 namespace Tests;
@@ -245,7 +245,6 @@ final class VhostServiceTest extends TestCase
 		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
 		$output = $this->service->enableSsl($v);
 		self::assertStringContainsString('Simuliertes Zertifikat', $output);
-		self::assertSame([['example.com', $this->dir . '/www/example.com', 'admin@example.com']], $this->certbot->calls);
 		self::assertTrue($this->service->load('example.com')->ssl);
 		$conf = (string)file_get_contents($this->dir . '/avail/example.com.conf');
 		self::assertStringContainsString('listen 443 ssl;', $conf);
@@ -253,6 +252,25 @@ final class VhostServiceTest extends TestCase
 		$this->service->disableSsl($this->service->load('example.com'));
 		self::assertFalse($this->service->load('example.com')->ssl);
 		self::assertStringNotContainsString('443', (string)file_get_contents($this->dir . '/avail/example.com.conf'));
+	}
+
+	/**
+	 * C3 (Abschlussreview): certbot muss web/ als Webroot bekommen, nicht den
+	 * Basisordner. Der Renderer bedient die ACME-Location mit "root <basis>/web"
+	 * (ConfigRenderer::serverConfig(), Location "^~ /.well-known/acme-challenge/");
+	 * bekommt certbot stattdessen den Basisordner, legt es die Challenge-Datei unter
+	 * "<basis>/.well-known/..." ab, während nginx sie unter "<basis>/web/.well-known/..."
+	 * erwartet – die Ausstellung schlägt fehl, obwohl der Aufruf selbst durchläuft.
+	 */
+	public function testEnableSslPassesWebDirAsCertbotWebrootToMatchAcmeLocation(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->enableSsl($v);
+		self::assertSame(
+			[['example.com', $this->dir . '/www/example.com/web', 'admin@example.com']],
+			$this->certbot->calls
+		);
 	}
 
 	public function testSslSkipsCertbotWhenCertificateExists(): void
@@ -534,6 +552,29 @@ final class VhostServiceTest extends TestCase
 		} catch (\RuntimeException) {
 		}
 		self::assertFileDoesNotExist($file, 'neu angelegte Datei muss wieder weg sein');
+	}
+
+	/**
+	 * I5 (Abschlussreview): Fehlt der conf/-Ordner (z.B. durch einen manuellen
+	 * Eingriff), muss setSnippet() den fehlgeschlagenen file_put_contents() melden,
+	 * statt Erfolg zu melden, ohne geschrieben zu haben. Kein Reload, weil nichts
+	 * geändert wurde.
+	 */
+	public function testSetSnippetThrowsWhenTargetDirectoryIsMissing(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$confDir = $this->dir . '/www/example.com/conf';
+		rmdir($confDir);
+		$before = $this->reloader->calls;
+
+		try {
+			$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n"));
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString($confDir, $e->getMessage());
+		}
+		self::assertSame($before, $this->reloader->calls, 'kein Reload, wenn nichts geschrieben wurde');
+		self::assertDirectoryDoesNotExist($confDir);
 	}
 
 	/**

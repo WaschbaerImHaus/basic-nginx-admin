@@ -40,7 +40,11 @@ sed -i "s|'wwwOwner' => '[^']*'|'wwwOwner' => '$OWNER'|" "$APP/lib/VhostAdmin/Co
 grep -q "'wwwOwner' => '$OWNER'" "$APP/lib/VhostAdmin/Config.php" || { echo "Besitzer konnte nicht gesetzt werden" >&2; exit 1; }
 
 echo "== Oberfläche nach /var/www/localhost-8080/web"
-install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080 /var/www/localhost-8080/web
+# Basisordner nicht gruppenbeschreibbar (C2, Abschlussreview 2026-09-20): www-data
+# könnte sonst Einträge darin ersetzen, auch den root-eigenen conf/-Ordner. Nur web/
+# selbst bleibt für www-data beschreibbar (analog zu VhostLayout::directories()).
+install -d -m 755 -o "$OWNER" -g "$OWNER" /var/www/localhost-8080
+install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080/web
 install -d -m 750 -o root -g www-data /var/www/localhost-8080/conf
 install -d -m 750 -o root -g "$OWNER" /var/www/localhost-8080/cert /var/www/localhost-8080/logs
 install -d -m 750 -o "$OWNER" -g "$OWNER" /var/www/localhost-8080/private

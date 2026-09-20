@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:28
+ * @version Letzte Änderung: 2026-09-20 14:52
  */
 
 namespace VhostAdmin;
@@ -219,7 +219,9 @@ final class VhostService
 			?? throw new \RuntimeException("Keine Let's-Encrypt-E-Mail hinterlegt (Einstellungen / \"vhost set le_email ...\")");
 		$output = '';
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
-			$output = $this->certbot->obtain($vhost->name, $this->layout->baseDir($vhost), $email);
+			// Webroot muss web/ sein, nicht der Basisordner: der Renderer bedient die
+			// ACME-Location mit "root <basis>/web" (C3, Abschlussreview 2026-09-20).
+			$output = $this->certbot->obtain($vhost->name, $this->layout->webDir($vhost), $email);
 		}
 		$this->repository->setSsl($vhost->id, true);
 		$this->linkCertificates($vhost);
@@ -292,7 +294,14 @@ final class VhostService
 		if ($snippet->isEmpty()) {
 			unlink($file);
 		} else {
-			file_put_contents($file, $snippet->value);
+			// Rückgabewert prüfen (I5, Abschlussreview 2026-09-20): schlägt das Schreiben
+			// fehl (z.B. weil conf/ fehlt), meldete setSnippet() bisher trotzdem Erfolg.
+			// Die @-Notation unterdrückt die PHP-Warnung bewusst – der Fehler wird als
+			// Ausnahme gemeldet, die Warnung wäre doppelt und würde die Testausgabe/das
+			// CLI-Protokoll unnötig verunreinigen.
+			if (@file_put_contents($file, $snippet->value) === false) {
+				throw new \RuntimeException("Kann Snippet nicht schreiben: $file");
+			}
 			if ($this->isRoot()) {
 				chown($file, 'root');
 				chgrp($file, $this->config->wwwGroup);
@@ -506,7 +515,13 @@ final class VhostService
 	 * Besitzer und Gruppe nur als root; die Rechte werden immer gesetzt, damit die
 	 * Tests ohne root dieselbe Wirkung prüfen können.
 	 *
-	 * @throws \RuntimeException wenn der Pfad ein Symlink ist
+	 * Kein Fallback auf die www-Gruppe, wenn chown() fehlschlägt (I1, Abschlussreview
+	 * 2026-09-20): ein Fallback würde das Verzeichnis dem Webserver-Benutzer zu eigen
+	 * machen und eine Fehlkonfiguration (z.B. unbekannter Soll-Besitzer) verschleiern,
+	 * statt sie zu melden.
+	 *
+	 * @throws \RuntimeException wenn der Pfad ein Symlink ist, oder wenn chown() als
+	 *         root fehlschlägt (z.B. weil der Soll-Besitzer nicht existiert)
 	 */
 	private function applySpec(DirectorySpec $spec): void
 	{
@@ -515,7 +530,7 @@ final class VhostService
 		}
 		if ($this->isRoot()) {
 			if (!@chown($spec->path, $spec->owner)) {
-				chown($spec->path, $this->config->wwwGroup);
+				throw new \RuntimeException("Kann Besitzer von {$spec->path} nicht auf \"{$spec->owner}\" setzen");
 			}
 			chgrp($spec->path, $spec->group);
 		}
@@ -546,8 +561,11 @@ final class VhostService
 	/**
 	 * Besitzer/Gruppe/Rechte setzen; ohne root nur die Rechte.
 	 *
+	 * Kein Fallback auf die www-Gruppe, wenn chown() fehlschlägt (I1, wie applySpec()).
+	 *
 	 * @throws \RuntimeException wenn $path ein Symlink ist (gehört dort nicht hin;
-	 *         www-data könnte ihn auf z.B. /etc/cron.d gelegt haben)
+	 *         www-data könnte ihn auf z.B. /etc/cron.d gelegt haben), oder wenn
+	 *         chown() als root fehlschlägt
 	 */
 	private function own(string $path, int $mode): void
 	{
@@ -556,7 +574,7 @@ final class VhostService
 		}
 		if ($this->isRoot()) {
 			if (!@chown($path, $this->config->wwwOwner)) {
-				chown($path, $this->config->wwwGroup);
+				throw new \RuntimeException("Kann Besitzer von $path nicht auf \"{$this->config->wwwOwner}\" setzen");
 			}
 			chgrp($path, $this->config->wwwGroup);
 		}

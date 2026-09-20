@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Prüfung des nginx-Snippets aus der Oberfläche.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:28
+ * @version Letzte Änderung: 2026-09-20 10:34
  */
 
 namespace Tests\Value;
@@ -32,7 +32,9 @@ final class NginxSnippetTest extends TestCase
 		yield 'Dateisuche' => ["try_files \$uri \$uri/ /index.php?\$args;\n"];
 		yield 'Rate' => ["limit_rate 200k;\nlimit_rate_after 1m;\n"];
 		yield 'gzip' => ["gzip on;\ngzip_types text/css application/javascript;\n"];
-		yield 'Block' => ["location /api {\n\tproxy_pass http://127.0.0.1:9000;\n\tproxy_set_header Host \$host;\n}\n"];
+		// I3 (Abschlussreview): das Ziel darf nicht der eigene Rechner sein, deshalb
+		// hier eine Adresse außerhalb (statt des früheren 127.0.0.1) verwenden.
+		yield 'Block' => ["location /api {\n\tproxy_pass http://192.0.2.10:9000;\n\tproxy_set_header Host \$host;\n}\n"];
 		yield 'verschachtelt' => ["location /a {\n\tlocation /a/b {\n\t\texpires 1d;\n\t}\n}\n"];
 		yield 'Kommentar und Leerzeilen' => ["# nur ein Kommentar\n\n\texpires 1d;\n\n"];
 		yield 'leer' => [''];
@@ -218,5 +220,84 @@ final class NginxSnippetTest extends TestCase
 	{
 		$text = "proxy_set_header Host \$host;\n";
 		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	/**
+	 * C1 (Abschlussreview): "#", '"' und "'" sind für nginx nur am Anfang eines
+	 * Tokens Sonderzeichen. Mitten in einem Wort ist z.B. "#" ein gewöhnliches
+	 * Zeichen, sodass alles danach für nginx aktive Konfiguration bleibt, auch
+	 * wenn unser bisheriger Tokenizer es fälschlich als Kommentar überspringt
+	 * und damit an der Positivliste vorbeischleust. Die Prüfung erfolgt über die
+	 * konkrete Fehlermeldung ("mitten im Wort"): der bisherige Tokenizer wirft
+	 * bei diesen Eingaben teils ebenfalls eine InvalidArgumentException, aber aus
+	 * einem anderen (zufälligen) Grund – ohne den Meldungsvergleich wären diese
+	 * Tests vor dem Fix fälschlich grün.
+	 *
+	 * @return iterable<string, array{string}>
+	 */
+	public static function tokenStartViolations(): iterable
+	{
+		yield 'Hash mitten im Wort, root danach' => ["add_header X v#; root /etc;\n"];
+		yield 'Hash mitten im Wort, innerhalb einer Location' => ["location /x {\n\tadd_header X v#; root /etc;\n}\n"];
+		yield 'Hash mitten im Wort, auth_basic danach' => ["add_header X v#; auth_basic off;\n"];
+		yield 'Hash mitten im Wort, access_log danach' => ["add_header X v#; access_log /tmp/x.log;\n"];
+		yield 'Hash mitten im Wort, CR statt LF' => ["add_header X v#\r root /etc;\n"];
+		yield 'Anführungszeichen mitten im Wort' => ["add_header X a\"; root /etc; \"x\";\n"];
+		yield 'Hash mitten im Wort vor Blockausbruch' => ["add_header X v#; } server { root /; }\n"];
+	}
+
+	#[DataProvider('tokenStartViolations')]
+	public function testRejectsSpecialCharactersInMiddleOfToken(string $text): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('mitten im Wort');
+		NginxSnippet::fromString($text);
+	}
+
+	/**
+	 * I3 (Abschlussreview): proxy_pass bleibt erlaubt, darf aber nicht auf den
+	 * eigenen Rechner zeigen – sonst wäre die Oberfläche (ohne eigene Anmeldung)
+	 * über jede beliebige öffentliche Domain erreichbar, weil nginx den Port beim
+	 * server_name-Vergleich abschneidet.
+	 *
+	 * @return iterable<string, array{string}>
+	 */
+	public static function forbiddenProxyPassTargets(): iterable
+	{
+		yield 'IPv4-Loopback mit Port' => ["proxy_pass http://127.0.0.1:8080/;\n"];
+		yield 'IPv4-Loopback, anderes Oktett' => ["proxy_pass http://127.5.5.5/;\n"];
+		yield 'localhost' => ["proxy_pass https://localhost/;\n"];
+		yield 'IPv6-Loopback' => ["proxy_pass http://[::1]/;\n"];
+		yield 'IPv6-Loopback ohne Schema' => ["proxy_pass [::1]:8080;\n"];
+		yield 'unspezifiziert 0.0.0.0' => ["proxy_pass http://0.0.0.0:8080/;\n"];
+		yield 'Unix-Socket' => ["proxy_pass unix:/run/php-fpm.sock;\n"];
+		yield 'Variable im Ziel' => ["proxy_pass http://\$backend;\n"];
+	}
+
+	#[DataProvider('forbiddenProxyPassTargets')]
+	public function testRejectsProxyPassToOwnMachine(string $text): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('proxy_pass');
+		NginxSnippet::fromString($text);
+	}
+
+	public function testAcceptsProxyPassToRemoteTarget(): void
+	{
+		$text = "proxy_pass http://192.0.2.10:8080/;\n";
+		self::assertSame($text, NginxSnippet::fromString($text)->value);
+	}
+
+	/**
+	 * Vollständiges Belegbeispiel aus dem Abschlussreview: Vor dem Fix wird dieses
+	 * Snippet komplett akzeptiert, weil "# root /etc;" fälschlich als Kommentar
+	 * gilt und die verbleibende erste Zeile "add_header X-B v" (Direktive
+	 * "add_header") noch gültig erscheint – "root /etc;" landet unverändert und
+	 * unvalidiert in der Datei, die nginx tatsächlich auswertet.
+	 */
+	public function testRejectsFullDisclosedExploitFromReview(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		NginxSnippet::fromString("location /leak {\n\tadd_header X-B v#; root /etc;\nexpires 1d; }\n");
 	}
 }

@@ -16,7 +16,7 @@ declare(strict_types=1);
  * VhostLayout::needsMigration() den Host weiterhin für nicht migriert.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:45
+ * @version Letzte Änderung: 2026-09-20 10:34
  */
 
 namespace VhostAdmin\Migration;
@@ -34,15 +34,20 @@ final class LayoutMigrator
 
 	/**
 	 * Übernimmt Konfiguration, Repository und Layout und merkt sich, wo die
-	 * bisherigen nginx-Logdateien liegen.
+	 * bisherigen nginx-Logdateien und die certbot-Renewal-Konfigurationen liegen.
 	 *
 	 * @param string $nginxLogDir Verzeichnis der bisherigen nginx-Logdateien
+	 * @param string $renewalDir  Verzeichnis der certbot-Renewal-Konfigurationen
+	 *                            (C3, Abschlussreview 2026-09-20: dort steht der beim
+	 *                            Ausstellen verwendete Webroot-Pfad, der bei alten
+	 *                            vHosts noch auf den Basisordner statt auf web/ zeigt)
 	 */
 	public function __construct(
 		private readonly Config $config,
 		private readonly VhostRepository $repository,
 		private readonly VhostLayout $layout,
 		private readonly string $nginxLogDir = '/var/log/nginx',
+		private readonly string $renewalDir = '/etc/letsencrypt/renewal',
 	) {
 	}
 
@@ -94,6 +99,12 @@ final class LayoutMigrator
 		if ($code !== 0) {
 			throw new \RuntimeException("Sicherung fehlgeschlagen:\n" . implode("\n", $output));
 		}
+		// Das Archiv enthält den kompletten Inhalt der Basisordner, auch private/, und
+		// entsteht mit dem Umask von root (üblicherweise 0644 – für alle lesbar). I2,
+		// Abschlussreview 2026-09-20: nur noch der Besitzer (root) darf lesen.
+		if (!chmod($archive, 0600)) {
+			throw new \RuntimeException("Kann Rechte der Sicherung nicht auf 0600 setzen: $archive");
+		}
 		return $archive;
 	}
 
@@ -113,6 +124,46 @@ final class LayoutMigrator
 			$this->ensureDirectory($spec);
 		}
 		$this->moveLogs($vhost);
+		$this->migrateCertbotRenewalConfig($vhost);
+	}
+
+	/**
+	 * Zieht eine vorhandene certbot-Renewal-Konfiguration auf den neuen Webroot nach.
+	 *
+	 * certbot merkt sich den beim Ausstellen verwendeten Webroot-Pfad in
+	 * "<renewalDir>/<domain>.conf", und zwar zweifach: als Fallback in
+	 * "webroot_path" (kommagetrennte Liste) und je Domain unter "[[webroot_map]]".
+	 * Zeigt einer der beiden noch auf den alten Basisordner (vor C3, Review vom
+	 * 2026-09-20), würde certbot beim nächsten "certbot renew" die Challenge-Datei
+	 * unterhalb des Basisordners statt unterhalb von web/ ablegen – dort, wo sie der
+	 * Renderer erwartet, läge sie dann nicht. Ein fehlendes Renewal-Verzeichnis oder
+	 * eine fehlende/unpassende Konfigurationsdatei ist kein Fehler: nicht jeder
+	 * vHost hat schon ein Zertifikat.
+	 */
+	private function migrateCertbotRenewalConfig(Vhost $vhost): void
+	{
+		if (!is_dir($this->renewalDir)) {
+			return;
+		}
+		$file = $this->renewalDir . '/' . $vhost->name . '.conf';
+		if (!is_file($file) || is_link($file)) {
+			return;
+		}
+		$old = $this->layout->baseDir($vhost);
+		$new = $this->layout->webDir($vhost);
+		$content = (string)file_get_contents($file);
+		// Der alte Basisordner wird nur ersetzt, wenn er als eigenständiger Pfadwert
+		// auftritt (davor "=", "," oder Leerraum; danach ",", Leerraum oder Textende) –
+		// so bleibt ein bereits migrierter Eintrag ("<basis>/web") unverändert, weil
+		// ihm dort kein Trenner/Textende folgt, sondern "/web".
+		$updated = preg_replace(
+			'/(?<=[=,\s])' . preg_quote($old, '/') . '(?=[,\s]|$)/m',
+			$new,
+			$content
+		);
+		if ($updated !== null && $updated !== $content) {
+			file_put_contents($file, $updated);
+		}
 	}
 
 	/**

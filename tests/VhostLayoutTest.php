@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Pfad- und Rechteverwaltung eines vHosts.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:45
+ * @version Letzte Änderung: 2026-09-20 10:34
  */
 
 namespace Tests;
@@ -81,12 +81,31 @@ final class VhostLayoutTest extends TestCase
 			self::assertSame($mode, $s->mode, $s->path);
 			self::assertNotSame('', $s->description, $s->path);
 		};
-		$expect($byPath['/srv/www/example.com'], 'max', 'www-data', 02775);
+		$expect($byPath['/srv/www/example.com'], 'max', 'max', 0755);
 		$expect($byPath['/srv/www/example.com/web'], 'max', 'www-data', 02775);
 		$expect($byPath['/srv/www/example.com/conf'], 'root', 'www-data', 0750);
 		$expect($byPath['/srv/www/example.com/cert'], 'root', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/private'], 'max', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/logs'], 'root', 'max', 0750);
+	}
+
+	/**
+	 * C2 (Abschlussreview): Der Basisordner darf für www-data nicht mehr
+	 * gruppenbeschreibbar sein – sonst kann www-data ihn umbenennen/Einträge
+	 * ersetzen und z.B. den root-eigenen conf/-Ordner austauschen. web/ bleibt
+	 * bewusst gruppenbeschreibbar, damit die Oberfläche dort Inhalte pflegen kann.
+	 */
+	public function testBaseDirIsNotGroupWritableButWebDirIs(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$byPath = [];
+		foreach ($this->layout->directories($v) as $spec) {
+			$byPath[$spec->path] = $spec;
+		}
+		$base = $byPath['/srv/www/example.com'];
+		$web = $byPath['/srv/www/example.com/web'];
+		self::assertSame(0, $base->mode & 0020, 'Basisordner darf nicht gruppenbeschreibbar sein');
+		self::assertNotSame(0, $web->mode & 0020, 'web/ muss gruppenbeschreibbar sein');
 	}
 
 	public function testDirectoriesIncludeSubdirectorySegments(): void
