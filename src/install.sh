@@ -96,6 +96,11 @@ echo "== Datenbank und nginx-Configs"
 install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
 /usr/local/sbin/vhost migrate-layout
+# Rechte bestehender vHosts auf den aktuellen Stand bringen. Nötig, weil sich die
+# Soll-Rechte zwischen Fassungen ändern koennen (z.B. conf/ am 2026-09-20 von
+# root:www-data auf root:<besitzer>, damit der Besitzer lesen darf, aber nur root
+# schreibt). Ohne diesen Schritt bliebe ein Bestandshost auf den alten Rechten.
+/usr/local/sbin/vhost fix-permissions
 /usr/local/sbin/vhost render
 
 echo

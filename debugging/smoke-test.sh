@@ -100,6 +100,26 @@ grep -q 'flash ok' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=s
 curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF2" -d 'action=conf&name=smoke-conf.example' --data-urlencode 'snippet=root /etc;' http://127.0.0.1:8080/
 grep -q 'X-Smoke-Test' /var/www/smoke-conf.example/conf/custom.conf && echo "ok   verbotene Direktive abgelehnt, alte Fassung aktiv" || fail "verbotene Direktive hat das Snippet überschrieben"
 grep -q 'flash err' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-conf.example')" && echo "ok   Fehlermeldung angezeigt" || fail "keine Fehlermeldung in der Oberfläche"
+# conf/ darf vom Besitzer der Website nur gelesen werden; bearbeitet wird
+# ausschliesslich über die Oberfläche bzw. das CLI (Nutzervorgabe 2026-09-20).
+OWNER=$(stat -c '%U' /var/www/smoke-conf.example)
+[ "$(stat -c '%U:%G:%a' /var/www/smoke-conf.example/conf)" = "root:$OWNER:750" ] \
+	&& echo "ok   conf/ gehoert root, Gruppe $OWNER" \
+	|| fail "conf/ hat falsche Rechte: $(stat -c '%U:%G:%a' /var/www/smoke-conf.example/conf)"
+[ "$(stat -c '%U:%G:%a' /var/www/smoke-conf.example/conf/custom.conf)" = "root:$OWNER:640" ] \
+	&& echo "ok   custom.conf gehoert root, nur lesbar" \
+	|| fail "custom.conf hat falsche Rechte: $(stat -c '%U:%G:%a' /var/www/smoke-conf.example/conf/custom.conf)"
+sudo -u "$OWNER" test -r /var/www/smoke-conf.example/conf/custom.conf \
+	&& echo "ok   Besitzer darf lesen" || fail "Besitzer kann custom.conf nicht lesen"
+sudo -u "$OWNER" test -w /var/www/smoke-conf.example/conf/custom.conf \
+	&& fail "Besitzer kann custom.conf schreiben - das muss der Admin allein tun" \
+	|| echo "ok   Besitzer darf nicht schreiben"
+sudo -u "$OWNER" test -w /var/www/smoke-conf.example/conf \
+	&& fail "Besitzer kann Dateien in conf/ anlegen" || echo "ok   Besitzer darf in conf/ nichts anlegen"
+# Die Oberflaeche zeigt den Text trotzdem an - sie holt ihn ueber "vhost conf-show".
+grep -q 'X-Smoke-Test' <<<"$(vhost conf-show smoke-conf.example)" \
+	&& echo "ok   conf-show liefert den Text" || fail "conf-show liefert das Snippet nicht"
+
 for sub in web conf cert private logs; do
 	[ -d "/var/www/smoke-conf.example/$sub" ] || fail "Ordner $sub fehlt"
 done

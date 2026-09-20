@@ -194,7 +194,11 @@ final class VhostLayout
 			// 2026-09-20). Geschrieben wird hier nur von root (Anlegen der Unterordner).
 			new DirectorySpec($this->baseDir($vhost), $owner, $owner, 0755, 'Basisordner des vHosts (nicht gruppenbeschreibbar)'),
 			new DirectorySpec($this->webDir($vhost), $webOwner, $group, $webMode, 'Docroot (wird ausgeliefert)'),
-			new DirectorySpec($this->confDir($vhost), 'root', $group, 0750, 'nginx-Snippet der Oberfläche'),
+			// conf/ gehört root und hat als Gruppe den Besitzer der Website: der Mensch darf
+			// lesen, schreiben darf nur root (über das CLI). Bearbeitet wird ausschliesslich
+			// über die Oberfläche – Nutzervorgabe vom 2026-09-20. www-data steht hier
+			// bewusst NICHT: die Oberfläche holt den Text über das CLI, nicht aus der Datei.
+			new DirectorySpec($this->confDir($vhost), 'root', $owner, 0750, 'nginx-Snippet (nur root schreibt)'),
 			new DirectorySpec($this->certDir($vhost), 'root', $owner, 0750, 'Symlinks auf die Zertifikate'),
 			new DirectorySpec($this->privateDir($vhost), $owner, $owner, 0750, 'nicht ausgelieferte Dateien'),
 			// Mit PHP zusätzlich für andere durchquerbar (0751): PHP läuft als eigener

@@ -314,9 +314,12 @@ final class VhostService
 			if (@file_put_contents($file, $snippet->value) === false) {
 				throw new \RuntimeException("Kann Snippet nicht schreiben: $file");
 			}
+			// root als Besitzer, Gruppe = Besitzer der Website: der Mensch darf lesen,
+			// schreiben darf nur root. Gehörte ihm die Datei, könnte er sich per chmod
+			// selbst Schreibrecht geben und am Admin vorbei Direktiven setzen.
 			if ($this->isRoot()) {
 				chown($file, 'root');
-				chgrp($file, $this->config->wwwGroup);
+				chgrp($file, $this->config->wwwOwner);
 			}
 			chmod($file, 0640);
 		}

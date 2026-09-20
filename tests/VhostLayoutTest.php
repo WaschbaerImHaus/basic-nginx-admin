@@ -84,7 +84,8 @@ final class VhostLayoutTest extends TestCase
 		};
 		$expect($byPath['/srv/www/example.com'], 'max', 'max', 0755);
 		$expect($byPath['/srv/www/example.com/web'], 'max', 'www-data', 02775);
-		$expect($byPath['/srv/www/example.com/conf'], 'root', 'www-data', 0750);
+		// conf/: nur root schreibt, der Besitzer der Website liest über die Gruppe.
+		$expect($byPath['/srv/www/example.com/conf'], 'root', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/cert'], 'root', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/private'], 'max', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/logs'], 'root', 'max', 0750);
@@ -253,6 +254,32 @@ final class VhostLayoutTest extends TestCase
 		foreach ($this->layout->directories($vhost) as $spec) {
 			if ($spec->path === $path) {
 				return $spec->mode;
+			}
+		}
+		self::fail("Verzeichnis $path nicht in den Soll-Rechten");
+	}
+	/**
+	 * conf/ darf ausschliesslich von root beschrieben werden; der Besitzer der Website
+	 * (der Mensch) darf lesen, aber nicht bearbeiten – das Bearbeiten läuft
+	 * ausschliesslich über die Oberfläche bzw. das CLI (Nutzervorgabe 2026-09-20).
+	 * www-data braucht hier gar keinen Zugriff: den Text holt die Oberfläche über das
+	 * CLI, nicht aus der Datei.
+	 */
+	public function testConfDirIsReadableByTheOwnerButWritableOnlyByRoot(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false);
+		$spec = $this->specFor($v, '/srv/www/example.com/conf');
+		self::assertSame('root', $spec->owner, 'Nur root darf schreiben');
+		self::assertSame('max', $spec->group, 'Der Besitzer der Website liest über die Gruppe');
+		self::assertSame(0750, $spec->mode);
+		self::assertNotSame('www-data', $spec->group, 'www-data braucht conf/ nicht mehr');
+	}
+
+	private function specFor(Vhost $vhost, string $path): DirectorySpec
+	{
+		foreach ($this->layout->directories($vhost) as $spec) {
+			if ($spec->path === $path) {
+				return $spec;
 			}
 		}
 		self::fail("Verzeichnis $path nicht in den Soll-Rechten");

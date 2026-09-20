@@ -93,13 +93,38 @@ final class AdminPageTest extends TestCase
 		self::assertSame('/?v=a.de', AdminPage::redirectTarget('conf', 1, ['name' => 'a.de']));
 	}
 
-	public function testSnippetReadsFileOrEmpty(): void
+	/**
+	 * Die Oberfläche liest das Snippet nicht mehr aus conf/ – der Ordner gehört root und
+	 * ist für www-data unzugänglich (Nutzervorgabe 2026-09-20: bearbeiten nur über den
+	 * Admin). Sie ruft stattdessen "vhost conf-show <name>" auf.
+	 */
+	public function testSnippetIsFetchedThroughTheCliNotFromTheFile(): void
 	{
 		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
-		self::assertSame('', $this->page->snippet($v));
+		// Das Testskript spiegelt die Argumente zurück; daran ist der Aufruf erkennbar.
+		self::assertStringContainsString('ARGS=conf-show|a.de', $this->page->snippet($v));
+
+		// Eine Datei in conf/ darf das Ergebnis NICHT beeinflussen: gelesen wird über das CLI.
 		mkdir($this->dir . '/www/a.de/conf', 0750, true);
 		file_put_contents($this->dir . '/www/a.de/conf/custom.conf', "expires 1d;\n");
-		self::assertSame("expires 1d;\n", $this->page->snippet($v));
+		self::assertStringNotContainsString('expires 1d;', $this->page->snippet($v));
+	}
+
+	/**
+	 * Scheitert der CLI-Aufruf, zeigt das Textfeld nichts an statt eine Fehlermeldung
+	 * als angeblichen Snippet-Inhalt.
+	 */
+	public function testSnippetIsEmptyWhenTheCliFails(): void
+	{
+		$config = Config::fromArray([
+			'dbPath' => $this->dir . '/db.sqlite',
+			'wwwRoot' => $this->dir . '/www',
+			'vhostBinary' => $this->dir . '/gibt-es-nicht.php',
+		]);
+		$session = [];
+		$page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), $session);
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		self::assertSame('', $page->snippet($v));
 	}
 
 	/**

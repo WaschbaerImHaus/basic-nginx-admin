@@ -86,6 +86,13 @@ Eine unbekannte Direktive ist erlaubt und wird an nginx weitergegeben. Schlägt 
 fehl, bleibt die bisherige Fassung aktiv und die Meldung erscheint im roten Kasten.
 Gespeichert wird das Snippet in `[domain]/conf/custom.conf`.
 
+**Bearbeitet wird ausschliesslich über die Oberfläche bzw. `vhost conf`.** `[domain]/conf/`
+gehört root (`root:<besitzer> 0750`, die Datei `0640`): der Besitzer der Website darf den
+Text lesen, aber nicht ändern, und keine eigenen Dateien dort anlegen. Auch `www-data` hat
+keinen Zugriff mehr – die Oberfläche holt den Text über `vhost conf-show <name>`, das als
+root liest. Damit gibt es genau einen Weg, auf dem nginx-Direktiven entstehen, und jede
+Änderung läuft durch die Prüfung.
+
 ## PHP
 
 Jeder vHost kann PHP ausliefern – über einen **eigenen php-fpm-Pool mit eigenem
@@ -142,6 +149,7 @@ sudo vhost ssl <name> on|off
 sudo vhost set le_email <adresse>
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
 sudo vhost conf <name>                                        # nginx-Snippet per stdin (leer = entfernen)
+sudo vhost conf-show <name>                                   # aktuelles Snippet ausgeben
 sudo vhost fix-permissions [name]                             # Rechte laut VhostLayout wiederherstellen
 sudo vhost migrate-layout                                     # alte vHosts (ohne web/conf/cert/private/logs) nachziehen
 ```

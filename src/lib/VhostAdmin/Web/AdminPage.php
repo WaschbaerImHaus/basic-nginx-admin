@@ -194,7 +194,11 @@ final class AdminPage
 	 */
 	public function snippet(Vhost $vhost): string
 	{
-		$file = $this->layout->confFile($vhost);
-		return is_file($file) && is_readable($file) ? (string)file_get_contents($file) : '';
+		// Nicht aus der Datei: conf/ gehört root und ist für www-data nicht zugänglich
+		// (Nutzervorgabe vom 2026-09-20 – bearbeitet wird ausschliesslich über den Admin).
+		// Der Text kommt deshalb über das CLI, das als root liest. Ohne Beschneiden,
+		// damit Einrückung und Leerzeilen im Textfeld erhalten bleiben.
+		[$code, $output] = $this->runner->run(['conf-show', $vhost->name], null, false);
+		return $code === 0 ? $output : '';
 	}
 }

@@ -31,7 +31,7 @@ final class CommandRunner
 	 * @param list<string> $args
 	 * @return array{int, string} Exit-Code und gesamte Ausgabe (stdout + stderr, getrimmt)
 	 */
-	public function run(array $args, ?string $stdin = null): array
+	public function run(array $args, ?string $stdin = null, bool $trimOutput = true): array
 	{
 		$command = array_merge($this->prefix, [$this->config->vhostBinary], $args);
 		$process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
@@ -45,6 +45,6 @@ final class CommandRunner
 		$output = (string)stream_get_contents($pipes[1]) . (string)stream_get_contents($pipes[2]);
 		fclose($pipes[1]);
 		fclose($pipes[2]);
-		return [proc_close($process), trim($output)];
+		return [proc_close($process), $trimOutput ? trim($output) : $output];
 	}
 }

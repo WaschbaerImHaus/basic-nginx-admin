@@ -43,6 +43,7 @@ vhost – nginx-vHosts verwalten
   vhost php <name> on|off
   vhost ssl <name> on|off
   vhost set le_email <adresse>
+  vhost conf-show <name>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
   vhost fix-permissions [name]
   vhost migrate-layout
@@ -262,6 +263,12 @@ TXT;
 				);
 				$this->service->setSnippet($vhost, $snippet);
 				$this->out($snippet->isEmpty() ? "Konfiguration entfernt.\n" : "Konfiguration übernommen.\n");
+				return 0;
+
+			case 'conf-show':
+				// Die Oberfläche kommt an conf/ nicht mehr heran (root:<besitzer> 0750) und
+				// holt den Text deshalb hier. Rein lesend.
+				$this->out($this->service->snippet($this->service->load($arg(0, 'Name'))));
 				return 0;
 
 			case 'fix-permissions':

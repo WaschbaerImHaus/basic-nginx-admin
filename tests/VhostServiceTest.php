@@ -752,4 +752,17 @@ final class VhostServiceTest extends TestCase
 		self::assertFileDoesNotExist($pool);
 		self::assertNull($this->repo->byName('php.example'));
 	}
+	/**
+	 * Die Snippet-Datei gehört root und ist für den Besitzer der Website nur lesbar.
+	 * Gehörte sie ihm, könnte er sich per chmod selbst Schreibrecht geben und damit am
+	 * Admin vorbei nginx-Direktiven setzen.
+	 */
+	public function testSnippetFileBelongsToRootAndIsGroupReadableOnly(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('conf.example'), null);
+		$this->service->setSnippet($v, NginxSnippet::fromString("expires 1d;\n", $this->layout->snippetScope($v)));
+		$file = $this->layout->confFile($v);
+		self::assertFileExists($file);
+		self::assertSame('0640', substr(sprintf('%o', fileperms($file)), -4));
+	}
 }

@@ -24,7 +24,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (354 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (357 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -41,6 +41,8 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Pfade in nginx-Includes immer absolut (`fastcgi_params` über `Config::$fastcgiParams`): einen relativen Pfad löst nginx je nach Aufrufweg unterschiedlich auf.
 - `NginxSnippet` prüft gegen eine **Sperrliste** (seit 2026-09-20), nicht mehr gegen eine Positivliste. Erlaubt ist alles, was nicht aus dem vHost herausführt; Pfade werden gegen `VhostLayout::snippetScope()` geprüft. Neue Sperren immer dort ergänzen, nie im Renderer.
 - `NginxSnippet` bildet den nginx-Tokenizer nach. Jede Abweichung von nginx ist eine potenzielle Lücke: `#`/`"`/`'` wirken nur am Tokenanfang, und Hostvergleiche laufen **immer** über `inet_pton()`/Namensauflösung, nie über Zeichenketten – dieselbe Adresse hat zu viele Schreibweisen (`2130706433`, `0177.0.0.1`, `::ffff:0:0`).
+- **`conf/` ist für alle außer root schreibgeschützt** (`root:<wwwOwner> 0750`, Datei `0640`) – Nutzervorgabe vom 2026-09-20: „das editieren muss ausschließlich über den admin passieren". Der Besitzer der Website darf nur lesen, `www-data` gar nichts; die Oberfläche holt den Text über `vhost conf-show`. Diese Rechte nie aufweichen, sonst gäbe es einen zweiten Weg, auf dem ungeprüfte Direktiven entstehen.
+- Ändern sich Soll-Rechte, muss `install.sh` sie bei bestehenden Hosts nachziehen (`vhost fix-permissions` läuft dort vor `render`) – sonst bleibt ein Bestandshost auf den alten Rechten.
 - Das Snippet in `conf/custom.conf` wird nie von Hand gepflegt, sondern ausschließlich über die Oberfläche; `NginxSnippet` prüft gegen eine Positivliste inklusive Klammerbilanz.
 
 ## Bewusste Abweichungen von der globalen CLAUDE.md
