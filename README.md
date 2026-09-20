@@ -124,6 +124,35 @@ Jeder neue Host ist zunächst gesperrt: Schutz aktiv, aber ohne Benutzer und ohn
 
 Solange der offene Punkt „Reload wird verschluckt“ (`BUGS.md`) nicht behoben ist, kann ein Reload – selten, aber möglich – wirkungslos bleiben; das betrifft auch sicherheitsrelevante Änderungen (Schutz einschalten, Benutzer entfernen, IP-Freigabe zurücknehmen). Solche Änderungen deshalb zur Sicherheit mit `sudo vhost render <name>` bestätigen.
 
+## Erreichbarkeit
+
+Jeder vHost hat unter `web/.well-known/acme-challenge/vhost-admin-health` eine Datei mit
+einer eigenen Kennung. Beim Aufruf der Oberfläche wird für jede Domain
+`http://<domain>/.well-known/acme-challenge/vhost-admin-health` abgefragt und der Inhalt
+verglichen; das Ergebnis steht in der Übersicht und auf der Detailseite als grüner oder
+roter Punkt (der Text im Tooltip sagt, was fehlt). Geprüft wird nur beim Seitenaufruf,
+nicht laufend, und alle Domains parallel.
+
+Das ist genau der Weg, den Let's Encrypt für die `http-01`-Prüfung nimmt. Damit deckt ein
+Test beides ab: ob die Domain überhaupt aus dem Internet erreichbar ist, und ob eine
+Zertifikatsausstellung gelingen würde. Mögliche Ergebnisse:
+
+| Anzeige | Bedeutung |
+|---|---|
+| **erreichbar** | Kennung kam zurück – DNS, Port 80 und der ACME-Pfad stimmen |
+| **DNS fehlt** | Der Name löst nicht auf |
+| **nicht erreichbar** | Name löst auf, aber Port 80 antwortet nicht (Firewall, falsche IP, Dienst aus) |
+| **fremder Server** | Es antwortet ein Server, aber nicht dieser – der DNS-Eintrag zeigt auf einen anderen Rechner |
+| **entfällt** | localhost-Host, absichtlich nie von aussen erreichbar |
+
+Auf der Kommandozeile: `sudo vhost check-acme [name]` (Exit-Status 1, wenn eine Domain
+nicht erreichbar ist – damit auch für eine Überwachung brauchbar).
+
+Grenze des Tests: Die Anfrage kommt von diesem Server. Läuft sie über die eigene Leitung
+zurück, kann sie gelingen, obwohl ein fremdes Netz den Port nicht erreicht. „erreichbar"
+ist deshalb ein starkes Indiz, keine Garantie. „fremder Server" dagegen ist verlässlich:
+dann antwortet nachweislich nicht dieser Rechner.
+
 ## Let's Encrypt
 
 1. E-Mail-Adresse in den Einstellungen hinterlegen.
@@ -145,6 +174,7 @@ sudo vhost user-del <name> <user>
 sudo vhost ip-add <name> <ip|cidr>
 sudo vhost ip-del <name> <ip|cidr>
 sudo vhost php <name> on|off                                  # eigener FPM-Pool an/aus
+sudo vhost check-acme [name]                                  # Erreichbarkeit pruefen
 sudo vhost ssl <name> on|off
 sudo vhost set le_email <adresse>
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben

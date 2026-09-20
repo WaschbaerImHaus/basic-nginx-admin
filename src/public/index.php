@@ -17,13 +17,24 @@ use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
+use VhostAdmin\Ssl\CurlAcmeReachability;
+use VhostAdmin\Ssl\ReachabilityResult;
+use VhostAdmin\Ssl\ReachabilityStatus;
+use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Web\AdminPage;
 use VhostAdmin\Web\CommandRunner;
 
 session_start();
 $config = Config::defaults();
 $layout = new VhostLayout($config);
-$page = new AdminPage(new VhostRepository(new Database($config)), new CommandRunner($config), $config, $layout, $_SESSION);
+$page = new AdminPage(
+	new VhostRepository(new Database($config)),
+	new CommandRunner($config),
+	$config,
+	$layout,
+	new ReachabilityChecker(new CurlAcmeReachability()),
+	$_SESSION
+);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 	if (!$page->isValidCsrf((string)($_POST['csrf'] ?? ''))) {
@@ -74,6 +85,23 @@ function badge(bool $on, string $yes, string $no): string
 {
 	return '<span class="badge ' . ($on ? 'on' : 'off') . '">' . h($on ? $yes : $no) . '</span>';
 }
+
+/**
+ * Erreichbarkeitsanzeige: grün, wenn Let's Encrypt den ACME-Pfad erreichen kann,
+ * sonst rot. "entfällt" bleibt grau – ein localhost-Host soll nicht erreichbar sein.
+ */
+function reach(?ReachabilityResult $r): string
+{
+	if ($r === null) {
+		return '<span class="muted">–</span>';
+	}
+	$class = match ($r->status) {
+		ReachabilityStatus::Ok => 'on',
+		ReachabilityStatus::NotApplicable => 'local',
+		default => 'bad',
+	};
+	return '<span class="badge ' . $class . '" title="' . h($r->message) . '">' . h($r->status->label()) . '</span>';
+}
 ?>
 <!doctype html>
 <html lang="de">
@@ -100,6 +128,7 @@ function badge(bool $on, string $yes, string $no): string
 	.badge { display:inline-block; padding:.1em .55em; border-radius:999px; font-size:.78rem; font-weight:600; }
 	.badge.on { background:#dcfce7; color:var(--ok); } .badge.off { background:#eef0f3; color:var(--mut); }
 	.badge.local { background:#e0e7ff; color:#3730a3; }
+	.badge.bad { background:#fee2e2; color:#b91c1c; }
 	form.inline { display:inline; margin:0; }
 	form.row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
 	input[type=text], input[type=password], input[type=email] { padding:.45rem .6rem; border:1px solid #cfd4da; border-radius:6px; font:inherit; min-width:12rem; }
@@ -130,7 +159,7 @@ function badge(bool $on, string $yes, string $no): string
 <?php if (isset($_GET['v']) && !$view): ?>
 	<div class="card">Unbekannter vHost: <code><?= h($_GET['v']) ?></code></div>
 
-<?php elseif ($view): $isDomain = !$view->isLocal(); $users = $page->users($view); $ips = $page->ips($view); $phpUser = $page->phpUser($view); ?>
+<?php elseif ($view): $isDomain = !$view->isLocal(); $users = $page->users($view); $ips = $page->ips($view); $phpUser = $page->phpUser($view); $reach = $page->reachability([$view])[$view->name] ?? null; ?>
 	<div class="card">
 		<dl>
 			<dt>Typ</dt><dd><?= $isDomain ? 'Domain (öffentlich)' : '<span class="badge local">localhost</span> nur lokal auf 127.0.0.1:' . h($view->port) ?></dd>
@@ -195,6 +224,12 @@ function badge(bool $on, string $yes, string $no): string
 
 			<?php if ($isDomain): ?>
 			<div class="card">
+				<h2>Erreichbarkeit <?= reach($reach) ?></h2>
+				<p class="muted"><?= h($reach?->message ?? 'Nicht geprüft.') ?></p>
+				<p class="muted">Geprüft wird bei jedem Aufruf dieser Seite derselbe Pfad, den Let's Encrypt für die Ausstellung abfragt: <code>http://<?= h($view->name) ?>/.well-known/acme-challenge/</code>. Der Test läuft von diesem Server aus – „erreichbar“ ist damit ein starkes Indiz, aber keine Garantie für jedes fremde Netz.</p>
+			</div>
+
+			<div class="card">
 				<h2>Let's Encrypt <?= badge($view->ssl, 'HTTPS aktiv', 'aus') ?></h2>
 				<?php if ($view->ssl): ?>
 					<p class="muted">HTTP wird auf HTTPS umgeleitet. Verlängerung übernimmt der certbot-Timer automatisch.</p>
@@ -202,8 +237,11 @@ function badge(bool $on, string $yes, string $no): string
 				<?php elseif (!$email): ?>
 					<p class="muted">Bitte zuerst auf der Übersicht eine Let's-Encrypt-E-Mail hinterlegen.</p>
 					<button disabled>Zertifikat holen</button>
+				<?php elseif ($reach === null || !$reach->isOk()): ?>
+					<p class="muted">Solange die Domain nicht erreichbar ist, würde die Ausstellung scheitern – und Let's Encrypt zählt jeden Fehlversuch gegen das Kontingent der Domain (fünf pro Stunde). Zuerst DNS und Port 80 klären.</p>
+					<button disabled>Zertifikat holen</button>
 				<?php else: ?>
-					<p class="muted">Die Domain muss per DNS auf diesen Server zeigen und Port 80 muss aus dem Internet erreichbar sein. Der Vorgang dauert einige Sekunden.</p>
+					<p class="muted">Die Erreichbarkeit ist geprüft. Der Vorgang dauert einige Sekunden.</p>
 					<?= form('ssl', ['name' => $view->name, 'state' => 'on'], 'Zertifikat holen & HTTPS einschalten', 'primary') ?>
 				<?php endif ?>
 			</div>
@@ -231,16 +269,18 @@ function badge(bool $on, string $yes, string $no): string
 <?php else: ?>
 	<div class="card">
 		<h2>vHosts</h2>
+		<?php $vhosts = $page->vhosts(); $reachable = $page->reachability($vhosts); ?>
 		<table>
-			<tr><th>Name</th><th>Docroot</th><th>Schutz</th><th>PHP</th><th>HTTPS</th></tr>
+			<tr><th>Name</th><th>Docroot</th><th>Schutz</th><th>PHP</th><th>HTTPS</th><th>Erreichbar</th></tr>
 			<tr>
 				<td>localhost:<?= h($config->adminPort) ?> <span class="badge local">lokal</span> <span class="muted">diese Oberfläche</span></td>
 				<td><code><?= h(__DIR__) ?></code></td>
 				<td><span class="muted">–</span></td>
 				<td><span class="muted">–</span></td>
 				<td><span class="muted">–</span></td>
+				<td><span class="muted">–</span></td>
 			</tr>
-			<?php foreach ($page->vhosts() as $v): ?>
+			<?php foreach ($vhosts as $v): ?>
 			<tr>
 				<td><a href="/?v=<?= h(rawurlencode($v->name)) ?>"><?= h($v->name) ?></a>
 					<?php if ($v->isLocal()): ?> <span class="badge local">lokal</span><?php endif ?></td>
@@ -248,6 +288,7 @@ function badge(bool $on, string $yes, string $no): string
 				<td><?= badge($v->protect, 'aktiv', 'aus') ?></td>
 				<td><?= badge($v->php, 'aktiv', 'aus') ?></td>
 				<td><?= !$v->isLocal() ? badge($v->ssl, 'aktiv', 'aus') : '<span class="muted">–</span>' ?></td>
+				<td><?= reach($reachable[$v->name] ?? null) ?></td>
 			</tr>
 			<?php endforeach ?>
 		</table>

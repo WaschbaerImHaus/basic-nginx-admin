@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 namespace VhostAdmin;
 
+use VhostAdmin\Ssl\CurlAcmeReachability;
 use VhostAdmin\Value\SnippetScope;
 
 final class VhostLayout
@@ -153,6 +154,25 @@ final class VhostLayout
 	public function phpLog(Vhost $vhost): string
 	{
 		return $this->logsDir($vhost) . '/php.log';
+	}
+
+	/**
+	 * Ordner, den nginx für den ACME-Pfad ausliefert.
+	 *
+	 * Liegt unter web/, nicht unter dem Docroot: der ACME-Block setzt "root web/", damit
+	 * die Prüfung auch bei einem Unterverzeichnis als Docroot funktioniert.
+	 */
+	public function acmeDir(Vhost $vhost): string
+	{
+		return $this->webDir($vhost) . '/.well-known/acme-challenge';
+	}
+
+	/**
+	 * Datei mit der Kennung, über die der Erreichbarkeitstest läuft.
+	 */
+	public function healthFile(Vhost $vhost): string
+	{
+		return $this->acmeDir($vhost) . '/' . CurlAcmeReachability::MARKER;
 	}
 
 	/**

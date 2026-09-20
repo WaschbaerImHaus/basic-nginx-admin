@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	protect    INTEGER NOT NULL DEFAULT 1,
 	ssl        INTEGER NOT NULL DEFAULT 0,
 	php        INTEGER NOT NULL DEFAULT 0,
+	health_token TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS auth_users (
@@ -93,6 +94,11 @@ SQL);
 		$columns = array_column($this->pdo()->query('PRAGMA table_info(vhosts)')->fetchAll(), 'name');
 		if (!in_array('php', $columns, true)) {
 			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN php INTEGER NOT NULL DEFAULT 0');
+		}
+		if (!in_array('health_token', $columns, true)) {
+			// Ohne Standardwert: der Wert wird je vHost beim ersten Schreiben der
+			// nginx-Dateien erzeugt (VhostService::ensureHealthMarker()).
+			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN health_token TEXT');
 		}
 	}
 }

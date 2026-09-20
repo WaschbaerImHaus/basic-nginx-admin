@@ -102,6 +102,14 @@ final class VhostRepository
 	}
 
 	/**
+	 * Kennung für den ACME-Marker setzen.
+	 */
+	public function setHealthToken(int $id, string $token): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET health_token = ? WHERE id = ?')->execute([$token, $id]);
+	}
+
+	/**
 	 * Schutz-Benutzer eines vHosts, alphabetisch.
 	 *
 	 * @return list<array{username: string, hash: string}>

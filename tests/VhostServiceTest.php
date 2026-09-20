@@ -13,6 +13,7 @@ namespace Tests;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FakeCertbot;
 use Tests\Support\FakeFpmReloader;
+use Tests\Support\FakeReachability;
 use Tests\Support\FakeSystemUsers;
 use Tests\Support\FakeReloader;
 use Tests\Support\TempDir;
@@ -21,11 +22,13 @@ use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Php\PoolRenderer;
 use VhostAdmin\Value\Cidr;
+use VhostAdmin\Ssl\ReachabilityStatus;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
+use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
@@ -40,6 +43,7 @@ final class VhostServiceTest extends TestCase
 	private FakeReloader $reloader;
 	private FakeFpmReloader $fpmReloader;
 	private FakeSystemUsers $systemUsers;
+	private FakeReachability $reachability;
 	private FakeCertbot $certbot;
 	private VhostLayout $layout;
 	private VhostService $service;
@@ -71,12 +75,14 @@ final class VhostServiceTest extends TestCase
 		$this->reloader = new FakeReloader();
 		$this->fpmReloader = new FakeFpmReloader();
 		$this->systemUsers = new FakeSystemUsers();
+		$this->reachability = new FakeReachability();
 		$this->certbot = new FakeCertbot($this->dir . '/le');
 		$this->layout = new VhostLayout($this->config);
 		$this->service = new VhostService(
 			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
 			$this->reloader, $this->certbot, $this->layout,
-			new PoolRenderer($this->layout), $this->fpmReloader, $this->systemUsers
+			new PoolRenderer($this->layout), $this->fpmReloader, $this->systemUsers,
+			new ReachabilityChecker($this->reachability)
 		);
 	}
 
@@ -764,5 +770,85 @@ final class VhostServiceTest extends TestCase
 		$file = $this->layout->confFile($v);
 		self::assertFileExists($file);
 		self::assertSame('0640', substr(sprintf('%o', fileperms($file)), -4));
+	}
+	// ------------------------------------------------------------------
+	// ACME-Erreichbarkeit
+	// ------------------------------------------------------------------
+
+	public function testRenderCreatesTheAcmeMarkerWithAToken(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('reach.example'), null);
+		$reloaded = $this->repo->byName('reach.example');
+		self::assertNotNull($reloaded->healthToken, 'Beim Anlegen muss eine Kennung entstehen');
+		$marker = $this->layout->healthFile($reloaded);
+		self::assertFileExists($marker);
+		self::assertSame($reloaded->healthToken, trim((string)file_get_contents($marker)));
+	}
+
+	/**
+	 * Die Kennung darf sich nicht bei jedem Schreiben ändern – sonst würde ein gerade
+	 * laufender Test der Oberfläche gegen eine veraltete Kennung prüfen.
+	 */
+	public function testTokenStaysTheSameAcrossRenders(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('reach.example'), null);
+		$first = $this->repo->byName('reach.example')->healthToken;
+		$this->service->render($this->repo->byName('reach.example'));
+		self::assertSame($first, $this->repo->byName('reach.example')->healthToken);
+	}
+
+	/**
+	 * Fehlt der Marker (z.B. weil certbot den Ordner geleert hat), wird er beim nächsten
+	 * Schreiben wieder angelegt.
+	 */
+	public function testMissingMarkerIsRecreated(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('reach.example'), null);
+		$reloaded = $this->repo->byName('reach.example');
+		unlink($this->layout->healthFile($reloaded));
+		$this->service->render($reloaded);
+		self::assertFileExists($this->layout->healthFile($reloaded));
+	}
+
+	/**
+	 * Vor der Zertifikatsausstellung muss die Erreichbarkeit geprüft werden. Ohne diese
+	 * Sperre liefe certbot ins Leere und Let's Encrypt zählt den Fehlversuch gegen das
+	 * Kontingent der Domain.
+	 */
+	public function testEnableSslRefusesWhenTheDomainIsNotReachable(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('reach.example'), null);
+		$this->reachability->status = ReachabilityStatus::WrongServer;
+
+		try {
+			$this->service->enableSsl($this->repo->byName('reach.example'));
+			self::fail('Hätte abgelehnt werden müssen');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('reach.example', $e->getMessage());
+		}
+
+		self::assertFalse($this->repo->byName('reach.example')->ssl, 'SSL darf nicht gesetzt werden');
+		self::assertSame([], $this->certbot->calls, 'certbot darf nicht gelaufen sein');
+	}
+
+	public function testEnableSslProceedsWhenReachable(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('reach.example'), null);
+		$this->reachability->status = ReachabilityStatus::Ok;
+		$this->service->enableSsl($this->repo->byName('reach.example'));
+		self::assertTrue($this->repo->byName('reach.example')->ssl);
+		// Geprüft wurde mit der gespeicherten Kennung dieser Domain.
+		$token = $this->repo->byName('reach.example')->healthToken;
+		self::assertSame([['reach.example' => $token]], $this->reachability->calls);
+	}
+
+	public function testReachabilitySkipsLocalhostHosts(): void
+	{
+		$local = $this->service->createLocal(Port::fromString('3010'), null);
+		$results = $this->service->checkReachability([$this->repo->byName('localhost:3010')]);
+		self::assertSame(ReachabilityStatus::NotApplicable, $results['localhost:3010']->status);
+		self::assertSame([], $this->reachability->calls, 'Für localhost darf keine Anfrage rausgehen');
 	}
 }

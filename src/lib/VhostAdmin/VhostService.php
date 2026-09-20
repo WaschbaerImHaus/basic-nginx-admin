@@ -17,6 +17,9 @@ namespace VhostAdmin;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Nginx\ReloaderInterface;
 use VhostAdmin\Ssl\CertbotInterface;
+use VhostAdmin\Ssl\ReachabilityChecker;
+use VhostAdmin\Ssl\ReachabilityResult;
+use VhostAdmin\Ssl\ReachabilityStatus;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Php\FpmReloaderInterface;
@@ -44,6 +47,7 @@ final class VhostService
 		private readonly PoolRenderer $poolRenderer,
 		private readonly FpmReloaderInterface $fpmReloader,
 		private readonly SystemUsersInterface $systemUsers,
+		private readonly ReachabilityChecker $reachabilityChecker,
 	) {
 	}
 
@@ -224,6 +228,18 @@ final class VhostService
 	 */
 	public function enableSsl(Vhost $vhost): string
 	{
+		// Vor der Ausstellung prüfen, ob Let's Encrypt den ACME-Pfad überhaupt erreichen
+		// kann. Ohne diese Sperre liefe certbot ins Leere, und Let's Encrypt zählt jeden
+		// Fehlversuch gegen das Kontingent der Domain (fünf pro Stunde) – nach einer
+		// Handvoll Versuchen wäre die Domain für eine Stunde gesperrt.
+		$vhost = $this->ensureHealthMarker($vhost);
+		$result = $this->checkReachability([$vhost])[$vhost->name];
+		if (!$result->isOk()) {
+			throw new \RuntimeException(
+				"Kein Zertifikat für \"{$vhost->name}\": " . $result->message
+				. ' Let\'s Encrypt prüft genau diesen Pfad und würde scheitern.'
+			);
+		}
 		if ($vhost->isLocal()) {
 			throw new \RuntimeException("Let's Encrypt nur für echte Domains");
 		}
@@ -381,6 +397,8 @@ final class VhostService
 	 */
 	public function render(Vhost $vhost, bool $reload = true): void
 	{
+		// Kennung und Marker für den Erreichbarkeitstest sicherstellen (idempotent).
+		$vhost = $this->ensureHealthMarker($vhost);
 		if (!is_dir($this->config->authDir)) {
 			mkdir($this->config->authDir, 0750, true);
 			$this->group($this->config->authDir);
@@ -421,6 +439,63 @@ final class VhostService
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Erreichbarkeit einer oder mehrerer vHosts über den ACME-Pfad prüfen.
+	 *
+	 * Die Entscheidung, was geprüft wird, steckt in Ssl\ReachabilityChecker – die
+	 * Oberfläche nutzt dieselbe Logik, ohne über das CLI gehen zu müssen.
+	 *
+	 * @param list<Vhost> $vhosts
+	 * @return array<string, ReachabilityResult>
+	 */
+	public function checkReachability(array $vhosts): array
+	{
+		return $this->reachabilityChecker->check($vhosts);
+	}
+
+	/**
+	 * Legt die Kennung und die Markerdatei im ACME-Pfad an, falls sie fehlen.
+	 *
+	 * Die Kennung bleibt über Neuschreibungen hinweg dieselbe, damit ein gerade
+	 * laufender Test der Oberfläche nicht gegen einen veralteten Wert prüft. Die Datei
+	 * wird wieder angelegt, wenn sie fehlt – certbot räumt den Ordner nach einer
+	 * Ausstellung auf und könnte sie mitnehmen.
+	 *
+	 * @return Vhost der vHost mit gesetzter Kennung
+	 */
+	private function ensureHealthMarker(Vhost $vhost): Vhost
+	{
+		if ($vhost->isLocal()) {
+			return $vhost;
+		}
+		$token = $vhost->healthToken;
+		if ($token === null) {
+			$token = bin2hex(random_bytes(16));
+			$this->repository->setHealthToken((int)$vhost->id, $token);
+			$vhost = $this->repository->byId((int)$vhost->id);
+		}
+		$dir = $this->layout->acmeDir($vhost);
+		if (is_link($dir)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $dir");
+		}
+		if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+			// Kein harter Fehler: ohne Marker fehlt nur die Anzeige, der vHost selbst
+			// funktioniert. Deshalb still aufgeben statt das Schreiben abzubrechen.
+			return $vhost;
+		}
+		$file = $this->layout->healthFile($vhost);
+		if (is_link($file)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $file");
+		}
+		if (!is_file($file) || trim((string)file_get_contents($file)) !== $token) {
+			@file_put_contents($file, $token . "\n");
+		}
+		if (is_file($file)) {
+			@chmod($file, 0644);
+		}
+		return $vhost;
 	}
 
 	/**

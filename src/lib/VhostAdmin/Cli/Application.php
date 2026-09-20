@@ -43,6 +43,7 @@ vhost – nginx-vHosts verwalten
   vhost php <name> on|off
   vhost ssl <name> on|off
   vhost set le_email <adresse>
+  vhost check-acme [name]
   vhost conf-show <name>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
   vhost fix-permissions [name]
@@ -264,6 +265,18 @@ TXT;
 				$this->service->setSnippet($vhost, $snippet);
 				$this->out($snippet->isEmpty() ? "Konfiguration entfernt.\n" : "Konfiguration übernommen.\n");
 				return 0;
+
+			case 'check-acme':
+				// Zum Nachsehen auf der Kommandozeile; die Oberfläche prüft selbst.
+				$targets = isset($positional[0]) ? [$this->service->load($positional[0])] : $this->repository->all();
+				$failed = false;
+				foreach ($this->service->checkReachability($targets) as $domain => $result) {
+					$this->out(str_pad($result->status->value, 14) . str_pad($domain, 34) . $result->message . "\n");
+					$failed = $failed || $result->status === \VhostAdmin\Ssl\ReachabilityStatus::DnsFailed
+						|| $result->status === \VhostAdmin\Ssl\ReachabilityStatus::Unreachable
+						|| $result->status === \VhostAdmin\Ssl\ReachabilityStatus::WrongServer;
+				}
+				return $failed ? 1 : 0;
 
 			case 'conf-show':
 				// Die Oberfläche kommt an conf/ nicht mehr heran (root:<besitzer> 0750) und

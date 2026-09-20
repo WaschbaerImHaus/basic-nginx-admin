@@ -18,12 +18,15 @@ use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\Web\AdminPage;
+use Tests\Support\FakeReachability;
+use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Web\CommandRunner;
 
 final class AdminPageTest extends TestCase
 {
 	private string $dir;
 	private array $session = [];
+	private FakeReachability $reachability;
 	private VhostRepository $repo;
 	private AdminPage $page;
 
@@ -39,8 +42,9 @@ final class AdminPageTest extends TestCase
 		$db = new Database($config);
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
+		$this->reachability = new FakeReachability();
 		$this->session = [];
-		$this->page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), $this->session);
+		$this->page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), new ReachabilityChecker($this->reachability), $this->session);
 	}
 
 	protected function tearDown(): void
@@ -122,7 +126,7 @@ final class AdminPageTest extends TestCase
 			'vhostBinary' => $this->dir . '/gibt-es-nicht.php',
 		]);
 		$session = [];
-		$page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), $session);
+		$page = new AdminPage($this->repo, new CommandRunner($config, ['php']), $config, new VhostLayout($config), new ReachabilityChecker($this->reachability), $session);
 		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
 		self::assertSame('', $page->snippet($v));
 	}

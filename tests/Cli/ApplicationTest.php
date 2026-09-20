@@ -13,6 +13,7 @@ namespace Tests\Cli;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FakeCertbot;
 use Tests\Support\FakeFpmReloader;
+use Tests\Support\FakeReachability;
 use Tests\Support\FakeSystemUsers;
 use Tests\Support\FakeReloader;
 use Tests\Support\TempDir;
@@ -22,6 +23,7 @@ use VhostAdmin\Database;
 use VhostAdmin\Migration\LayoutMigrator;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Php\PoolRenderer;
+use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
@@ -34,6 +36,7 @@ final class ApplicationTest extends TestCase
 	private VhostRepository $repo;
 	private VhostLayout $layout;
 	private VhostService $service;
+	private FakeReachability $reachability;
 
 	protected function setUp(): void
 	{
@@ -55,10 +58,12 @@ final class ApplicationTest extends TestCase
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
 		$this->layout = new VhostLayout($this->config);
+		$this->reachability = new FakeReachability();
 		$this->service = new VhostService(
 			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
 			new FakeReloader(), new FakeCertbot($this->dir . '/le'), $this->layout,
-			new PoolRenderer($this->layout), new FakeFpmReloader(), new FakeSystemUsers()
+			new PoolRenderer($this->layout), new FakeFpmReloader(), new FakeSystemUsers(),
+			new ReachabilityChecker($this->reachability)
 		);
 	}
 

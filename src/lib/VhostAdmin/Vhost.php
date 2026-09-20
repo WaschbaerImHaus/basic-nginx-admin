@@ -35,6 +35,8 @@ final class Vhost
 	 * @param bool      $protect   Verzeichnisschutz aktiv
 	 * @param bool      $ssl       Let's-Encrypt-Zertifikat aktiv (nur Domain)
 	 * @param bool      $php       PHP über einen eigenen FPM-Pool ausliefern
+	 * @param ?string   $healthToken Kennung im ACME-Marker, mit der der Erreichbarkeitstest
+	 *                               belegt, dass die Domain auf diesen Server zeigt
 	 * @param ?string   $createdAt Zeitstempel aus der Datenbank (UTC)
 	 */
 	public function __construct(
@@ -46,6 +48,7 @@ final class Vhost
 		public readonly bool $protect,
 		public readonly bool $ssl,
 		public readonly bool $php = false,
+		public readonly ?string $healthToken = null,
 		public readonly ?string $createdAt = null,
 	) {
 		$this->assertConsistent();
@@ -128,6 +131,7 @@ final class Vhost
 			// Ältere Datenbanken kennen die Spalte nicht; Database::migrateSchema() zieht
 			// sie nach, der Standardwert hier hält den Fall bis dahin aus.
 			(bool)($row['php'] ?? false),
+			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
 		);
 	}

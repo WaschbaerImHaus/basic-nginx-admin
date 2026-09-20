@@ -55,6 +55,21 @@ expect 200 "Schutz aus" -H 'Host: smoke-test.example' http://127.0.0.1/
 # pipefail das Ergebnis fälschlich als Fehler meldet, obwohl grep fündig wurde.
 grep -q '<h1>200</h1>' <<<"$(curl -s -H 'Host: smoke-test.example' http://127.0.0.1/)" && echo "ok   Startseite" || fail "Startseite fehlt"
 expect 000 "unbekannter Host (444)" -H 'Host: nix.example' http://127.0.0.1/
+# ACME-Marker: Grundlage des Erreichbarkeitstests. Muss auch bei aktivem
+# Verzeichnisschutz ohne Anmeldung ausgeliefert werden, sonst kaeme Let's Encrypt nicht durch.
+vhost protect smoke-test.example on >/dev/null
+[ -f /var/www/smoke-test.example/web/.well-known/acme-challenge/vhost-admin-health ] \
+	&& echo "ok   ACME-Marker angelegt" || fail "ACME-Marker fehlt"
+expect 200 "ACME-Pfad trotz Schutz offen" -H 'Host: smoke-test.example' \
+	http://127.0.0.1/.well-known/acme-challenge/vhost-admin-health
+vhost protect smoke-test.example off >/dev/null
+# ".example" loest nie auf: der Test muss das erkennen und benennen, nicht "ok" melden.
+grep -q '^dns ' <<<"$(vhost check-acme smoke-test.example)" \
+	&& echo "ok   Erreichbarkeitstest erkennt fehlendes DNS" \
+	|| fail "check-acme meldet nicht 'dns': $(vhost check-acme smoke-test.example)"
+vhost ssl smoke-test.example on >/dev/null 2>&1 \
+	&& fail "Zertifikat trotz unerreichbarer Domain angefordert" \
+	|| echo "ok   kein Zertifikat fuer unerreichbare Domain"
 vhost ssl smoke-test.example on >/dev/null 2>&1 && fail "SSL ohne E-Mail darf nicht klappen" || echo "ok   SSL ohne E-Mail abgelehnt"
 
 echo "== localhost"

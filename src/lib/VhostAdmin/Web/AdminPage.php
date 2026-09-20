@@ -15,6 +15,7 @@ namespace VhostAdmin\Web;
 
 use VhostAdmin\Config;
 use VhostAdmin\Vhost;
+use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 
@@ -31,9 +32,25 @@ final class AdminPage
 		private readonly CommandRunner $runner,
 		private readonly Config $config,
 		private readonly VhostLayout $layout,
+		private readonly ReachabilityChecker $reachability,
 		array &$session,
 	) {
 		$this->session = &$session;
+	}
+
+	/**
+	 * Erreichbarkeit der übergebenen vHosts über den ACME-Pfad.
+	 *
+	 * Läuft nur beim Aufbau der Seite (Nutzervorgabe vom 2026-09-20: nicht dauernd
+	 * prüfen). Die Abfragen laufen parallel, damit die Seite nicht bei jeder Domain
+	 * nacheinander auf einen Zeitablauf wartet.
+	 *
+	 * @param list<Vhost> $vhosts
+	 * @return array<string, \VhostAdmin\Ssl\ReachabilityResult>
+	 */
+	public function reachability(array $vhosts): array
+	{
+		return $this->reachability->check($vhosts);
 	}
 
 	/**
