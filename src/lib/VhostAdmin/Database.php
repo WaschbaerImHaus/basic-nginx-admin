@@ -8,7 +8,7 @@ declare(strict_types=1);
  * aktiv, damit Benutzer und IPs beim Löschen eines vHosts mitgelöscht werden.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:35
+ * @version Letzte Änderung: 2026-09-20 20:20
  */
 
 namespace VhostAdmin;
@@ -44,6 +44,7 @@ final class Database
 	 */
 	public function initSchema(): void
 	{
+		$this->migrateSchema();
 		$this->pdo()->exec(<<<SQL
 CREATE TABLE IF NOT EXISTS vhosts (
 	id         INTEGER PRIMARY KEY,
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	subdir     TEXT,
 	protect    INTEGER NOT NULL DEFAULT 1,
 	ssl        INTEGER NOT NULL DEFAULT 0,
+	php        INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS auth_users (
@@ -73,5 +75,24 @@ CREATE TABLE IF NOT EXISTS settings (
 	value TEXT NOT NULL
 );
 SQL);
+	}
+	/**
+	 * Zieht Spalten nach, die in älteren Fassungen des Schemas noch fehlten.
+	 *
+	 * "CREATE TABLE IF NOT EXISTS" lässt eine bestehende Tabelle unverändert – eine
+	 * Datenbank aus einer früheren Version bekäme die Spalte sonst nie. Läuft vor dem
+	 * CREATE, weil eine noch gar nicht existierende Tabelle hier einfach übersprungen
+	 * wird (PRAGMA liefert dann eine leere Liste).
+	 */
+	private function migrateSchema(): void
+	{
+		$tables = $this->pdo()->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'vhosts'")->fetchAll();
+		if ($tables === []) {
+			return;
+		}
+		$columns = array_column($this->pdo()->query('PRAGMA table_info(vhosts)')->fetchAll(), 'name');
+		if (!in_array('php', $columns, true)) {
+			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN php INTEGER NOT NULL DEFAULT 0');
+		}
 	}
 }

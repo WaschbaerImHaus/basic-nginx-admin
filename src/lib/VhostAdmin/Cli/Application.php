@@ -40,6 +40,7 @@ vhost – nginx-vHosts verwalten
   vhost user-del <name> <user>
   vhost ip-add <name> <ip|cidr>
   vhost ip-del <name> <ip|cidr>
+  vhost php <name> on|off
   vhost ssl <name> on|off
   vhost set le_email <adresse>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
@@ -215,6 +216,19 @@ TXT;
 				$this->out("IP entfernt.\n");
 				return 0;
 
+			case 'php':
+				$on = $onOff($arg(1, 'on|off'));
+				$vhost = $this->service->load($arg(0, 'Name'));
+				if ($on) {
+					$this->service->enablePhp($vhost);
+					$this->out('PHP aktiviert (eigener Pool ' . $this->layout->phpUser($vhost)
+						. ', Socket ' . $this->layout->phpSocket($vhost) . ").\n");
+				} else {
+					$this->service->disablePhp($vhost);
+					$this->out("PHP deaktiviert.\n");
+				}
+				return 0;
+
 			case 'ssl':
 				$on = $onOff($arg(1, 'on|off'));
 				$vhost = $this->service->load($arg(0, 'Name'));
@@ -240,7 +254,12 @@ TXT;
 
 			case 'conf':
 				$vhost = $this->service->load($arg(0, 'Name'));
-				$snippet = NginxSnippet::fromString((string)stream_get_contents($this->stdin));
+				// Der Bezugsrahmen kommt aus dem Layout: nur damit lassen sich Pfade im
+				// Snippet gegen die Ordner genau dieses vHosts prüfen.
+				$snippet = NginxSnippet::fromString(
+					(string)stream_get_contents($this->stdin),
+					$this->layout->snippetScope($vhost)
+				);
 				$this->service->setSnippet($vhost, $snippet);
 				$this->out($snippet->isEmpty() ? "Konfiguration entfernt.\n" : "Konfiguration übernommen.\n");
 				return 0;

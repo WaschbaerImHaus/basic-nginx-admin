@@ -27,6 +27,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q nginx php-fpm php-cli php-sqlite3 certbot phpunit
 
+# Die eigenen Direktiven und der PHP-Block verweisen auf diese Datei; ohne sie
+# scheitert jeder nginx-Test mit "open() ... failed".
+[ -f /etc/nginx/fastcgi_params ] || { echo "/etc/nginx/fastcgi_params fehlt - ist nginx vollstaendig installiert?" >&2; exit 1; }
+
 echo "== Anwendung nach $APP (Besitzer von /var/www/*: $OWNER)"
 install -d -m 755 "$APP" "$APP/bin" "$APP/templates"
 rm -rf "$APP/lib" "$APP/public"

@@ -16,6 +16,7 @@ use VhostAdmin\Config;
 use VhostAdmin\DirectorySpec;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
+use VhostAdmin\Value\SnippetScope;
 use VhostAdmin\VhostLayout;
 
 final class VhostLayoutTest extends TestCase
@@ -151,5 +152,109 @@ final class VhostLayoutTest extends TestCase
 		} finally {
 			TempDir::remove($dir);
 		}
+	}
+	public function testPhpPathsAndUser(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, true);
+		// Benutzername nach dem ISPConfig-Schema: kurz, stabil, aus der Datenbank-ID.
+		// Ein Name aus der Domain wäre nicht zuverlässig gültig (Länge, Punkte, Bindestriche).
+		self::assertSame('web7', $this->layout->phpUser($v));
+		self::assertSame('/run/php/vhost-example.com.sock', $this->layout->phpSocket($v));
+		self::assertSame('/etc/php/8.5/fpm/pool.d/vhost-example.com.conf', $this->layout->phpPoolFile($v));
+		self::assertSame('/srv/www/example.com/logs/php.log', $this->layout->phpLog($v));
+	}
+
+	public function testPhpPathsForLocalhostUseTheSlug(): void
+	{
+		$v = new Vhost(3, 'localhost:3000', VhostKind::Localhost, 3000, null, false, false, true);
+		self::assertSame('web3', $this->layout->phpUser($v));
+		self::assertSame('/run/php/vhost-localhost-3000.sock', $this->layout->phpSocket($v));
+		self::assertSame('/etc/php/8.5/fpm/pool.d/vhost-localhost-3000.conf', $this->layout->phpPoolFile($v));
+	}
+
+	public function testPhpUserNeedsAnIdentifier(): void
+	{
+		$v = new Vhost(null, 'example.com', VhostKind::Domain, null, null, true, false, true);
+		$this->expectException(\RuntimeException::class);
+		$this->layout->phpUser($v);
+	}
+
+	/**
+	 * Mit PHP gehört web/ dem eigenen Benutzer des Hosts, nicht mehr dem allgemeinen
+	 * Besitzer: PHP läuft als dieser Benutzer und schreibt dort, nginx liest über die
+	 * Gruppe. www-data verliert damit das Schreibrecht, das es ohne PHP hatte.
+	 */
+	public function testWebDirBelongsToThePhpUserWhenPhpIsOn(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, 'public', true, false, true);
+		$byPath = [];
+		foreach ($this->layout->directories($v) as $spec) {
+			$byPath[$spec->path] = $spec;
+		}
+		$web = $byPath['/srv/www/example.com/web'];
+		self::assertSame('web7', $web->owner);
+		self::assertSame('www-data', $web->group);
+		self::assertSame(02750, $web->mode);
+		$sub = $byPath['/srv/www/example.com/web/public'];
+		self::assertSame('web7', $sub->owner);
+		self::assertSame(02750, $sub->mode);
+		// Der Basisordner bleibt beim allgemeinen Besitzer (C2 vom 2026-09-20).
+		self::assertSame('max', $byPath['/srv/www/example.com']->owner);
+		self::assertSame(0755, $byPath['/srv/www/example.com']->mode);
+	}
+
+	public function testWebDirStaysGroupWritableWithoutPhp(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, false);
+		foreach ($this->layout->directories($v) as $spec) {
+			if ($spec->path === '/srv/www/example.com/web') {
+				self::assertSame('max', $spec->owner);
+				self::assertSame(02775, $spec->mode);
+				return;
+			}
+		}
+		self::fail('web/ nicht in den Verzeichnissen');
+	}
+	public function testSnippetScopeCarriesTheVhostBoundaries(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, true);
+		$scope = $this->layout->snippetScope($v);
+		self::assertSame('/srv/www/example.com', $scope->baseDir);
+		self::assertSame('/srv/www/example.com/conf', $scope->confDir);
+		self::assertSame('/srv/www/example.com/logs', $scope->logsDir);
+		self::assertSame('/run/php/vhost-example.com.sock', $scope->phpSocket);
+	}
+
+	/**
+	 * Ohne PHP gibt es keinen erlaubten Socket – sonst liesse sich fastcgi_pass auf
+	 * einen Socket richten, den dieser Host gar nicht hat.
+	 */
+	public function testSnippetScopeHasNoSocketWithoutPhp(): void
+	{
+		$v = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, false);
+		self::assertNull($this->layout->snippetScope($v)->phpSocket);
+	}
+	/**
+	 * logs/ gehört root (nginx schreibt dort als root). Mit PHP muss der eigene
+	 * Benutzer des Hosts trotzdem an seine php.log herankommen – dazu braucht er das
+	 * Durchgangsrecht auf dem Ordner. Lesen kann er die übrigen Logs damit nicht,
+	 * die stehen auf 0640 root:<owner>.
+	 */
+	public function testLogsDirIsTraversableForThePhpUser(): void
+	{
+		$withPhp = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, true);
+		$withoutPhp = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, false);
+		self::assertSame(0751, $this->modeOf($withPhp, '/srv/www/example.com/logs'));
+		self::assertSame(0750, $this->modeOf($withoutPhp, '/srv/www/example.com/logs'));
+	}
+
+	private function modeOf(Vhost $vhost, string $path): int
+	{
+		foreach ($this->layout->directories($vhost) as $spec) {
+			if ($spec->path === $path) {
+				return $spec->mode;
+			}
+		}
+		self::fail("Verzeichnis $path nicht in den Soll-Rechten");
 	}
 }

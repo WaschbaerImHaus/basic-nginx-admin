@@ -130,7 +130,7 @@ function badge(bool $on, string $yes, string $no): string
 <?php if (isset($_GET['v']) && !$view): ?>
 	<div class="card">Unbekannter vHost: <code><?= h($_GET['v']) ?></code></div>
 
-<?php elseif ($view): $isDomain = !$view->isLocal(); $users = $page->users($view); $ips = $page->ips($view); ?>
+<?php elseif ($view): $isDomain = !$view->isLocal(); $users = $page->users($view); $ips = $page->ips($view); $phpUser = $page->phpUser($view); ?>
 	<div class="card">
 		<dl>
 			<dt>Typ</dt><dd><?= $isDomain ? 'Domain (öffentlich)' : '<span class="badge local">localhost</span> nur lokal auf 127.0.0.1:' . h($view->port) ?></dd>
@@ -182,6 +182,17 @@ function badge(bool $on, string $yes, string $no): string
 		</div>
 
 		<div>
+			<div class="card">
+				<h2>PHP <?= badge($view->php, 'aktiv', 'aus') ?></h2>
+				<?php if ($view->php): ?>
+					<p class="muted">PHP läuft in einem eigenen Pool als Benutzer <code><?= h($phpUser) ?></code>; Fehler landen in <code>logs/php.log</code>. Nur dieser Host kommt an seine Dateien.</p>
+					<?= form('php', ['name' => $view->name, 'state' => 'off'], 'PHP abschalten', 'danger', 'PHP für ' . $view->name . ' abschalten? .php-Dateien werden danach mit 404 abgewiesen.') ?>
+				<?php else: ?>
+					<p class="muted">Schaltet einen eigenen php-fpm-Pool mit eigenem Systembenutzer frei. Ohne PHP werden <code>.php</code>-Dateien mit 404 abgewiesen, nie als Text ausgeliefert.</p>
+					<?= form('php', ['name' => $view->name, 'state' => 'on'], 'PHP einschalten', 'primary') ?>
+				<?php endif ?>
+			</div>
+
 			<?php if ($isDomain): ?>
 			<div class="card">
 				<h2>Let's Encrypt <?= badge($view->ssl, 'HTTPS aktiv', 'aus') ?></h2>
@@ -221,10 +232,11 @@ function badge(bool $on, string $yes, string $no): string
 	<div class="card">
 		<h2>vHosts</h2>
 		<table>
-			<tr><th>Name</th><th>Docroot</th><th>Schutz</th><th>HTTPS</th></tr>
+			<tr><th>Name</th><th>Docroot</th><th>Schutz</th><th>PHP</th><th>HTTPS</th></tr>
 			<tr>
 				<td>localhost:<?= h($config->adminPort) ?> <span class="badge local">lokal</span> <span class="muted">diese Oberfläche</span></td>
 				<td><code><?= h(__DIR__) ?></code></td>
+				<td><span class="muted">–</span></td>
 				<td><span class="muted">–</span></td>
 				<td><span class="muted">–</span></td>
 			</tr>
@@ -234,6 +246,7 @@ function badge(bool $on, string $yes, string $no): string
 					<?php if ($v->isLocal()): ?> <span class="badge local">lokal</span><?php endif ?></td>
 				<td><code><?= h($layout->docroot($v)) ?></code></td>
 				<td><?= badge($v->protect, 'aktiv', 'aus') ?></td>
+				<td><?= badge($v->php, 'aktiv', 'aus') ?></td>
 				<td><?= !$v->isLocal() ? badge($v->ssl, 'aktiv', 'aus') : '<span class="muted">–</span>' ?></td>
 			</tr>
 			<?php endforeach ?>

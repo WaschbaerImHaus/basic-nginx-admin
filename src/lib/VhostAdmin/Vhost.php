@@ -16,7 +16,7 @@ declare(strict_types=1);
  * führen, egal wie sie entstanden ist.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:14
+ * @version Letzte Änderung: 2026-09-20 20:20
  */
 
 namespace VhostAdmin;
@@ -34,6 +34,7 @@ final class Vhost
 	 * @param ?string   $subdir    optionales Unterverzeichnis als Docroot
 	 * @param bool      $protect   Verzeichnisschutz aktiv
 	 * @param bool      $ssl       Let's-Encrypt-Zertifikat aktiv (nur Domain)
+	 * @param bool      $php       PHP über einen eigenen FPM-Pool ausliefern
 	 * @param ?string   $createdAt Zeitstempel aus der Datenbank (UTC)
 	 */
 	public function __construct(
@@ -44,6 +45,7 @@ final class Vhost
 		public readonly ?string $subdir,
 		public readonly bool $protect,
 		public readonly bool $ssl,
+		public readonly bool $php = false,
 		public readonly ?string $createdAt = null,
 	) {
 		$this->assertConsistent();
@@ -123,6 +125,9 @@ final class Vhost
 			$row['subdir'] === null || $row['subdir'] === '' ? null : (string)$row['subdir'],
 			(bool)$row['protect'],
 			(bool)$row['ssl'],
+			// Ältere Datenbanken kennen die Spalte nicht; Database::migrateSchema() zieht
+			// sie nach, der Standardwert hier hält den Fall bis dahin aus.
+			(bool)($row['php'] ?? false),
 			$row['created_at'] === null ? null : (string)$row['created_at'],
 		);
 	}

@@ -12,11 +12,14 @@ namespace Tests;
 
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FakeCertbot;
+use Tests\Support\FakeFpmReloader;
+use Tests\Support\FakeSystemUsers;
 use Tests\Support\FakeReloader;
 use Tests\Support\TempDir;
 use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\Php\PoolRenderer;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\NginxSnippet;
@@ -35,6 +38,8 @@ final class VhostServiceTest extends TestCase
 	private Config $config;
 	private VhostRepository $repo;
 	private FakeReloader $reloader;
+	private FakeFpmReloader $fpmReloader;
+	private FakeSystemUsers $systemUsers;
 	private FakeCertbot $certbot;
 	private VhostLayout $layout;
 	private VhostService $service;
@@ -44,6 +49,8 @@ final class VhostServiceTest extends TestCase
 		$this->dir = TempDir::create();
 		mkdir($this->dir . '/avail');
 		mkdir($this->dir . '/enabled');
+		mkdir($this->dir . '/pool.d');
+		mkdir($this->dir . '/run');
 		$this->config = Config::fromArray([
 			'dbPath' => $this->dir . '/db.sqlite',
 			'wwwRoot' => $this->dir . '/www',
@@ -53,16 +60,23 @@ final class VhostServiceTest extends TestCase
 			'authDir' => $this->dir . '/auth',
 			'letsEncryptLive' => $this->dir . '/le',
 			'ipv6' => false,
+			// Pool und Socket ins Temporärverzeichnis, damit die Tests nicht ins echte
+			// /etc/php schreiben und ohne root laufen.
+			'fpmPoolDir' => $this->dir . '/pool.d',
+			'fpmSocketDir' => $this->dir . '/run',
 		]);
 		$db = new Database($this->config);
 		$db->initSchema();
 		$this->repo = new VhostRepository($db);
 		$this->reloader = new FakeReloader();
+		$this->fpmReloader = new FakeFpmReloader();
+		$this->systemUsers = new FakeSystemUsers();
 		$this->certbot = new FakeCertbot($this->dir . '/le');
 		$this->layout = new VhostLayout($this->config);
 		$this->service = new VhostService(
 			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
-			$this->reloader, $this->certbot, $this->layout
+			$this->reloader, $this->certbot, $this->layout,
+			new PoolRenderer($this->layout), $this->fpmReloader, $this->systemUsers
 		);
 	}
 
@@ -616,5 +630,126 @@ final class VhostServiceTest extends TestCase
 
 		self::assertSame("unverändert;\n", file_get_contents($target), 'Ziel des Symlinks darf nicht verändert werden');
 		self::assertSame($before, $this->reloader->calls, 'kein Reload bei verweigertem Schreiben');
+	}
+	// ------------------------------------------------------------------
+	// PHP pro vHost (eigener FPM-Pool, eigener Systembenutzer)
+	// ------------------------------------------------------------------
+
+	public function testEnablePhpCreatesUserPoolAndSocketConfiguration(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->service->enablePhp($v);
+
+		$reloaded = $this->repo->byName('php.example');
+		self::assertTrue($reloaded->php);
+		self::assertSame(
+			[$this->layout->baseDir($reloaded)],
+			array_values($this->systemUsers->created),
+			'Der Systembenutzer muss mit dem Basisordner als Heimatordner angelegt werden'
+		);
+		self::assertArrayHasKey('web' . $reloaded->id, $this->systemUsers->created);
+
+		$pool = $this->layout->phpPoolFile($reloaded);
+		self::assertFileExists($pool);
+		self::assertStringContainsString('user = web' . $reloaded->id, (string)file_get_contents($pool));
+		self::assertSame(1, $this->fpmReloader->reloads, 'php-fpm muss einmal neu geladen werden');
+		// tmp/ für Uploads und php.log müssen existieren, sonst scheitert PHP beim ersten Aufruf.
+		self::assertDirectoryExists($this->layout->baseDir($reloaded) . '/tmp');
+		self::assertFileExists($this->layout->phpLog($reloaded));
+		// Die nginx-Konfiguration muss den Socket jetzt nennen.
+		self::assertStringContainsString(
+			'fastcgi_pass unix:' . $this->layout->phpSocket($reloaded),
+			(string)file_get_contents($this->config->sitesAvailable . '/php.example.conf')
+		);
+	}
+
+	public function testEnablePhpIsIdempotent(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->service->enablePhp($v);
+		$this->service->enablePhp($this->repo->byName('php.example'));
+		self::assertCount(1, $this->systemUsers->created);
+		self::assertSame(1, $this->fpmReloader->reloads, 'Ein zweiter Aufruf darf nichts mehr tun');
+	}
+
+	public function testDisablePhpRemovesThePoolButKeepsTheUser(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->service->enablePhp($v);
+		$reloaded = $this->repo->byName('php.example');
+		$pool = $this->layout->phpPoolFile($reloaded);
+
+		$this->service->disablePhp($reloaded);
+
+		self::assertFalse($this->repo->byName('php.example')->php);
+		self::assertFileDoesNotExist($pool);
+		self::assertSame(2, $this->fpmReloader->reloads);
+		// Der Benutzer bleibt: Dateien könnten ihm noch gehören, und ein erneutes
+		// Einschalten soll ohne neue Kennung auskommen.
+		self::assertArrayHasKey('web' . $reloaded->id, $this->systemUsers->created);
+		// Ohne PHP wieder die 404-Sperre statt fastcgi.
+		$conf = (string)file_get_contents($this->config->sitesAvailable . '/php.example.conf');
+		self::assertStringNotContainsString('fastcgi_pass', $conf);
+		self::assertStringContainsString('return 404;', $conf);
+	}
+
+	/**
+	 * Scheitert das Anlegen des Benutzers, darf PHP nicht als "an" gespeichert werden –
+	 * sonst schriebe die nächste Ausgabe eine Pool-Datei für einen Benutzer, den es
+	 * nicht gibt, und php-fpm verweigerte den Start für ALLE Hosts.
+	 */
+	public function testEnablePhpLeavesNothingBehindWhenTheUserCannotBeCreated(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->systemUsers->fail = true;
+
+		try {
+			$this->service->enablePhp($v);
+			self::fail('Hätte scheitern müssen');
+		} catch (\RuntimeException) {
+			// erwartet
+		}
+
+		self::assertFalse($this->repo->byName('php.example')->php);
+		self::assertFileDoesNotExist($this->layout->phpPoolFile($v));
+		self::assertSame(0, $this->fpmReloader->reloads);
+	}
+
+	/**
+	 * Schlägt php-fpm -t fehl, muss die Pool-Datei zurückgenommen werden – sonst bliebe
+	 * eine kaputte Datei liegen und jeder weitere Reload scheiterte daran.
+	 */
+	public function testEnablePhpRollsBackWhenFpmRefusesTheConfiguration(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->fpmReloader->fail = true;
+
+		try {
+			$this->service->enablePhp($v);
+			self::fail('Hätte scheitern müssen');
+		} catch (\RuntimeException) {
+			// erwartet
+		}
+
+		self::assertFileDoesNotExist($this->layout->phpPoolFile($v));
+		self::assertFalse($this->repo->byName('php.example')->php);
+	}
+	/**
+	 * Wird ein vHost mit eingeschaltetem PHP gelöscht, muss auch sein Pool weg. Bliebe
+	 * die Datei liegen, hielte php-fpm einen Pool für einen Host vor, den es nicht mehr
+	 * gibt – samt Socket, auf den nichts mehr zeigt.
+	 */
+	public function testRemoveAlsoRemovesThePhpPool(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('php.example'), null);
+		$this->service->enablePhp($v);
+		$withPhp = $this->repo->byName('php.example');
+		$pool = $this->layout->phpPoolFile($withPhp);
+		self::assertFileExists($pool);
+
+		$this->service->remove($withPhp);
+
+		self::assertFileDoesNotExist($pool);
+		self::assertNull($this->repo->byName('php.example'));
 	}
 }

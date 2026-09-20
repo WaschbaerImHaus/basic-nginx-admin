@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 09:44
+ * @version Letzte Änderung: 2026-09-20 20:50
  */
 
 namespace VhostAdmin\Nginx;
@@ -88,56 +88,151 @@ final class ConfigRenderer
 
 	/**
 	 * Vollständige Server-Konfiguration des vHosts.
+	 *
+	 * Aufbau nach dem Vorbild von ISPConfig (Nutzerwunsch vom 2026-09-20): Der
+	 * generierte Teil gibt möglichst viel vor, der eigene Bereich des Nutzers steht als
+	 * Letztes im server-Block zwischen den Markern "# >>>>" und "# <<<<". Nur so lässt
+	 * sich ein Fragment aus der conf eines anderen Projekts einsetzen, ohne mit den
+	 * vorgegebenen Direktiven zu kollidieren.
+	 *
+	 * Bewusst kein eigenes "location / { … }": try_files steht stattdessen auf
+	 * Server-Ebene. Ein eingefügtes eigenes "location /" würde sonst mit
+	 * "duplicate location" scheitern – genau der Fall, den copy-paste auslöst.
 	 */
 	public function serverConfig(Vhost $v): string
 	{
-		$root = $this->layout->docroot($v);
-		$accessLog = $this->layout->accessLog($v);
-		$errorLog = $this->layout->errorLog($v);
-		$authInclude = $this->authSnippetPath($v);
-		$customInclude = $this->layout->confDir($v) . '/*.conf';
-		$common = <<<NG
-    root $root;
-    index index.html index.htm;
-    access_log $accessLog;
-    error_log  $errorLog;
-    include $authInclude;
-    include $customInclude;
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-NG;
-
 		if ($v->isLocal()) {
-			$listen = "    listen 127.0.0.1:{$v->port};\n" . ($this->config->ipv6 ? "    listen [::1]:{$v->port};\n" : '');
-			return self::HEADER . "server {\n$listen    server_name localhost;\n$common\n}\n";
+			$listen = "    listen 127.0.0.1:{$v->port};\n"
+				. ($this->config->ipv6 ? "    listen [::1]:{$v->port};\n" : '');
+			return self::HEADER . "server {\n" . $listen . "    server_name localhost;\n\n" . $this->body($v) . "}\n";
 		}
 
-		$acmeRoot = $this->layout->webDir($v);
-		$acme = <<<NG
-    location ^~ /.well-known/acme-challenge/ {
-        auth_basic off;
-        allow all;
-        root $acmeRoot;
-    }
-NG;
 		$listen80 = "    listen 80;\n" . ($this->config->ipv6 ? "    listen [::]:80;\n" : '');
 		if (!$v->ssl) {
-			return self::HEADER . "server {\n$listen80    server_name {$v->name};\n$acme\n$common\n}\n";
+			return self::HEADER . "server {\n" . $listen80 . "    server_name {$v->name};\n\n"
+				. $this->acme($v) . "\n" . $this->body($v) . "}\n";
 		}
 
-		$listen443 = "    listen 443 ssl;\n" . ($this->config->ipv6 ? "    listen [::]:443 ssl;\n" : '') . "    http2 on;\n";
+		// Umleitung im eigenen :80-Block mit return 301. ISPConfig löst das mit
+		// "if ($scheme != https) { rewrite … }" im selben Block; return im eigenen Block
+		// ist billiger, weil nginx dann keine if-Auswertung pro Anfrage braucht.
+		$redirect = self::HEADER
+			. "server {\n" . $listen80 . "    server_name {$v->name};\n\n"
+			. $this->acme($v) . "\n"
+			. "    location / {\n        return 301 https://\$host\$request_uri;\n    }\n}\n\n";
+
+		$listen443 = "    listen 443 ssl;\n" . ($this->config->ipv6 ? "    listen [::]:443 ssl;\n" : '')
+			. "    http2 on;\n"
+			// HTTP/3 braucht QUIC auf demselben Port; dieses nginx ist mit
+			// --with-http_v3_module gebaut. Der Alt-Svc-Header sagt dem Browser, dass er
+			// die Folgeanfragen über h3 stellen darf.
+			. "    listen 443 quic;\n" . ($this->config->ipv6 ? "    listen [::]:443 quic;\n" : '')
+			. "    http3 on;\n"
+			. "    add_header Alt-Svc 'h3=\":443\"; ma=86400';\n";
+		// Bewusst direkt nach /etc/letsencrypt/live und nicht über die Symlinks in cert/:
+		// eine defekte Symlink-Kette würde nginx am Start hindern (siehe
+		// VhostService::linkCertificates(), cert/ ist reine Sichtbarkeit).
 		$live = $this->config->letsEncryptLive . '/' . $v->name;
-		$ssl = <<<NG
-    ssl_certificate     $live/fullchain.pem;
-    ssl_certificate_key $live/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-NG;
-		return self::HEADER
-			. "server {\n$listen80    server_name {$v->name};\n$acme\n    location / {\n        return 301 https://\$host\$request_uri;\n    }\n}\n"
-			. "server {\n$listen443    server_name {$v->name};\n$ssl\n$common\n}\n";
+		$ssl = "    ssl_certificate     $live/fullchain.pem;\n"
+			. "    ssl_certificate_key $live/privkey.pem;\n"
+			. "    ssl_protocols TLSv1.2 TLSv1.3;\n"
+			. "    ssl_prefer_server_ciphers off;\n"
+			. "    ssl_session_cache shared:SSL:10m;\n"
+			. "    ssl_session_timeout 1d;\n";
+
+		// Der ACME-Pfad gehört nur in den :80-Block: http-01 fragt immer über HTTP an, und
+		// dort hat "location ^~" Vorrang vor der Weiterleitung.
+		return $redirect
+			. "server {\n" . $listen443 . "\n    server_name {$v->name};\n\n" . $ssl . "\n"
+			. $this->body($v) . "}\n";
+	}
+
+	/**
+	 * Der ACME-Pfad, immer ohne Verzeichnisschutz, damit certbot durchkommt.
+	 */
+	private function acme(Vhost $v): string
+	{
+		$webDir = $this->layout->webDir($v);
+		return "    location ^~ /.well-known/acme-challenge/ {\n"
+			. "        auth_basic off;\n"
+			. "        allow all;\n"
+			. "        root $webDir;\n"
+			. "    }\n";
+	}
+
+	/**
+	 * Gemeinsamer Teil jedes server-Blocks: Docroot, Logs, Schutz, Standardblöcke,
+	 * PHP und zum Schluss der eigene Bereich des Nutzers.
+	 */
+	private function body(Vhost $v): string
+	{
+		$root = $this->layout->docroot($v);
+		// index.php nur anbieten, wenn PHP auch ausgeliefert wird – sonst würde die
+		// Anfrage auf / an der 404-Sperre unten enden statt bei index.html.
+		$index = $v->php ? 'index.html index.htm index.php' : 'index.html index.htm';
+		$out = "    root $root;\n"
+			. "    index $index;\n"
+			. "    try_files \$uri \$uri/ =404;\n\n"
+			. '    access_log ' . $this->layout->accessLog($v) . ";\n"
+			. '    error_log  ' . $this->layout->errorLog($v) . ";\n\n"
+			. '    include ' . $this->authSnippetPath($v) . ";\n\n"
+			. $this->standardBlocks()
+			. "\n" . $this->phpBlock($v) . "\n";
+
+		// Alles in conf/ gehört dem Nutzer: das Feld "Eigene Direktiven" der Oberfläche
+		// schreibt custom.conf, weitere Dateien (z.B. rewrites.conf) werden mit
+		// eingebunden. Die Glob-Form duldet auch, dass gar keine Datei existiert.
+		$custom = $this->layout->confDir($v) . '/*.conf';
+		return $out
+			. "    # >>>>\n"
+			. "    # ab hier eigene Direktiven (Oberfläche: \"Eigene Direktiven\")\n"
+			. "    include $custom;\n"
+			. "    # <<<<\n";
+	}
+
+	/**
+	 * Standardblöcke aus der Vorlage: versteckte Dateien sperren (ausser
+	 * .well-known), favicon und robots.txt ohne Lograuschen.
+	 */
+	private function standardBlocks(): string
+	{
+		return "    location ~ /\\.(?!well-known/) {\n"
+			. "        deny all;\n"
+			. "        access_log off;\n"
+			. "        log_not_found off;\n"
+			. "    }\n\n"
+			. "    location = /favicon.ico {\n"
+			. "        log_not_found off;\n"
+			. "        access_log off;\n"
+			. "    }\n\n"
+			. "    location = /robots.txt {\n"
+			. "        allow all;\n"
+			. "        log_not_found off;\n"
+			. "        access_log off;\n"
+			. "    }\n";
+	}
+
+	/**
+	 * PHP-Weiterleitung an den eigenen FPM-Pool des vHosts.
+	 *
+	 * Ist PHP aus, wird jede .php-Anfrage mit 404 abgewiesen. Das ist keine Kosmetik:
+	 * ohne diese Sperre lieferte nginx die Datei als Text aus, samt allem, was an
+	 * Zugangsdaten darin steht.
+	 */
+	private function phpBlock(Vhost $v): string
+	{
+		if (!$v->php) {
+			return "    location ~ \\.php\$ {\n        return 404;\n    }\n";
+		}
+		$socket = $this->layout->phpSocket($v);
+		return "    location ~ \\.php\$ {\n"
+			. "        try_files \$uri =404;\n"
+			. '        include ' . $this->config->fastcgiParams . ";\n"
+			. "        fastcgi_pass unix:$socket;\n"
+			. "        fastcgi_index index.php;\n"
+			. "        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;\n"
+			. "        fastcgi_intercept_errors on;\n"
+			. "        fastcgi_read_timeout 300;\n"
+			. "    }\n";
 	}
 }

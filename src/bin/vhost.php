@@ -20,6 +20,9 @@ use VhostAdmin\Database;
 use VhostAdmin\Migration\LayoutMigrator;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Nginx\SystemdReloader;
+use VhostAdmin\Php\PoolRenderer;
+use VhostAdmin\Php\SystemdFpmReloader;
+use VhostAdmin\Php\SystemUsers;
 use VhostAdmin\Ssl\CertbotClient;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
@@ -46,7 +49,8 @@ $repository = new VhostRepository($database);
 $layout = new VhostLayout($config);
 $service = new VhostService(
 	$config, $repository, new ConfigRenderer($config, $layout),
-	new SystemdReloader(), new CertbotClient(), $layout
+	new SystemdReloader(), new CertbotClient(), $layout,
+	new PoolRenderer($layout), new SystemdFpmReloader($config), new SystemUsers()
 );
 $migrator = new LayoutMigrator($config, $repository, $layout);
 

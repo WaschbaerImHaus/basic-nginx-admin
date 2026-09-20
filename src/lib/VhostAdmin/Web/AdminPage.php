@@ -37,6 +37,14 @@ final class AdminPage
 	}
 
 	/**
+	 * Systembenutzer, unter dem PHP dieses vHosts läuft (für die Anzeige).
+	 */
+	public function phpUser(Vhost $vhost): string
+	{
+		return $this->layout->phpUser($vhost);
+	}
+
+	/**
 	 * CSRF-Token der Sitzung; wird beim ersten Zugriff erzeugt.
 	 */
 	public function csrfToken(): string
@@ -76,6 +84,7 @@ final class AdminPage
 			'ip_add' => ['args' => ['ip-add', $name, $field('cidr')], 'stdin' => null],
 			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
+			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
 			'remove' => ['args' => ['remove', $name], 'stdin' => null],
 			'email' => ['args' => ['set', 'le_email', $field('le_email')], 'stdin' => null],
 			'conf' => ['args' => ['conf', $name], 'stdin' => (string)($post['snippet'] ?? '')],

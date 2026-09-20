@@ -4,8 +4,20 @@ declare(strict_types=1);
 /**
  * Wertobjekt: das über die Oberfläche gepflegte nginx-Snippet eines vHosts.
  *
- * Geprüft wird gegen eine Positivliste: Unbekannte Direktiven gelten als verboten.
- * Wichtigste Prüfung ist die Klammerbilanz – ohne sie könnte eine schließende
+ * Geprüft wird gegen eine Sperrliste (Nutzerentscheidung vom 2026-09-20): erlaubt ist
+ * alles, was nicht ausdrücklich aus dem vHost herausführt. Damit lässt sich ein Fragment
+ * aus der Konfiguration eines anderen Projekts per copy-paste einsetzen – eine
+ * Positivliste hatte das verhindert, weil ein solches Fragment regelmäßig "if",
+ * "fastcgi_pass", "include" oder "deny" enthält.
+ *
+ * Eine Sperrliste ist prinzipiell schwächer als eine Positivliste: nginx hat hunderte
+ * Direktiven, Module bringen weitere mit, und was hier nicht aufgezählt ist, ist erlaubt.
+ * Zweite Verteidigungslinie bleibt deshalb "nginx -t" vor jedem Reload samt Rücknahme
+ * der Datei bei einem Fehlschlag (VhostService::setSnippet()). Gesperrt ist genau das,
+ * was den vHost verlässt: fremde Pfade, der Verzeichnisschutz selbst, Ziele auf diesem
+ * Rechner und alles, was Code im nginx-Prozess ausführt.
+ *
+ * Wichtigste Prüfung bleibt die Klammerbilanz – ohne sie könnte eine schließende
  * Klammer den umgebenden server-Block beenden und danach ein eigener server-Block
  * mit beliebigen Direktiven folgen.
  *
@@ -27,31 +39,95 @@ declare(strict_types=1);
  * abweichenden Nachbildung des nginx-Tokenizers.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 15:42
+ * @version Letzte Änderung: 2026-09-20 21:25
  */
 
 namespace VhostAdmin\Value;
 
 final class NginxSnippet
 {
-	/** Direktiven, die unverändert erlaubt sind. */
-	private const ALLOWED = [
-		'client_max_body_size', 'expires', 'add_header', 'more_set_headers', 'charset',
-		'autoindex', 'index', 'error_page', 'rewrite', 'return', 'try_files',
-		'limit_rate', 'limit_rate_after',
-		'gzip', 'gzip_types', 'gzip_min_length', 'gzip_comp_level', 'gzip_proxied',
-		'gzip_vary', 'gzip_disable', 'gzip_buffers', 'gzip_http_version', 'gzip_static',
+	/**
+	 * Direktiven, die den Verzeichnisschutz betreffen. Der wird ausschließlich über die
+	 * Oberfläche verwaltet; "auth_basic off;" im Snippet würde ihn aufheben.
+	 */
+	private const PROTECTION_DIRECTIVES = ['auth_basic', 'auth_basic_user_file', 'satisfy'];
+
+	/**
+	 * Direktiven, die Code im nginx-Prozess ausführen oder Module nachladen könnten.
+	 * Geprüft wird zusätzlich über Präfixe (siehe FORBIDDEN_PREFIXES).
+	 */
+	private const CODE_DIRECTIVES = ['load_module', 'perl', 'perl_set', 'perl_modules', 'perl_require'];
+
+	/** Präfixe, unter denen alles gesperrt ist: Lua, njs und Perl-Einbettung. */
+	private const FORBIDDEN_PREFIXES = ['lua_', 'js_', 'perl_'];
+
+	/** Direktiven, deren Name auf eingebetteten Code hindeutet (z.B. content_by_lua_block). */
+	private const CODE_INFIXES = ['_by_lua', '_by_njs'];
+
+	/** Schreibzugriff über HTTP – hat in einem ausgelieferten Docroot nichts zu suchen. */
+	private const WRITE_DIRECTIVES = ['dav_methods', 'dav_access', 'dav_ext_methods'];
+
+	/**
+	 * Direktiven, deren Argument ein Pfad innerhalb des vHosts sein muss, samt dem
+	 * Ordner, der die Grenze bildet ("base", "conf" oder "logs").
+	 */
+	private const PATH_DIRECTIVES = [
+		'root' => 'base',
+		'alias' => 'base',
+		'disable_symlinks' => null,
+		'include' => 'conf',
+		'access_log' => 'logs',
+		'error_log' => 'logs',
+		'fastcgi_temp_path' => 'base',
+		'client_body_temp_path' => 'base',
+		'proxy_temp_path' => 'base',
 	];
 
 	/**
-	 * Präfixe, unter denen alle Direktiven erlaubt sind.
-	 * proxy_* umfasst etwa 60 legitime Direktiven, eröffnet keinen Ausbruchsweg
-	 * und unbekannte Namen lehnt nginx -t ohnehin ab.
+	 * Direktiven, die auf einen Server verweisen. Das Ziel darf nicht dieser Rechner
+	 * sein (die Oberfläche läuft ohne eigene Anmeldung) und als Unix-Socket nur der
+	 * eigene FPM-Socket des vHosts.
 	 */
-	private const ALLOWED_PREFIXES = ['proxy_'];
+	private const PASS_DIRECTIVES = [
+		'proxy_pass', 'fastcgi_pass', 'uwsgi_pass', 'scgi_pass', 'grpc_pass', 'memcached_pass',
+	];
 
-	/** Einzige Direktive, die einen Block öffnen darf. */
-	private const BLOCK_DIRECTIVE = 'location';
+	/** Direktiven, die Dateien ausserhalb des vHosts einlesen würden. */
+	private const FORBIDDEN_DIRECTIVES = [
+		'ssl_certificate', 'ssl_certificate_key', 'ssl_trusted_certificate', 'ssl_client_certificate',
+		'ssl_password_file', 'ssl_dhparam',
+	];
+
+	/**
+	 * fastcgi_param & Co. mit diesen Namen bestimmen, welche Datei PHP ausführt bzw.
+	 * als Docroot sieht – zeigen sie aus dem vHost heraus, liesse sich damit der
+	 * PHP-Code der Oberfläche ausführen.
+	 */
+	private const PATH_PARAMS = ['SCRIPT_FILENAME', 'DOCUMENT_ROOT', 'SCRIPT_NAME'];
+
+	/**
+	 * Direktiven, die die Bindung oder Identität des vHosts verändern würden.
+	 *
+	 * "listen" ist der wichtigste Fall: damit könnte ein localhost-Host zusätzlich
+	 * öffentlich lauschen ("listen 0.0.0.0:8081;") und die zugesicherte Eigenschaft
+	 * "localhost-Hosts sind nie über das Internet erreichbar" wäre aufgehoben.
+	 * "server_name" liesse einen Host die Anfragen eines anderen abfangen.
+	 * Die übrigen gehören in den Hauptteil von nginx.conf, nicht in einen server-Block.
+	 */
+	private const IDENTITY_DIRECTIVES = [
+		'listen', 'server_name', 'server', 'user', 'worker_processes', 'pid', 'events', 'http', 'stream', 'upstream',
+	];
+
+	/**
+	 * "allow" würde in einem location-Block die geerbten Regeln des Verzeichnisschutzes
+	 * ersetzen und – zusammen mit dem "satisfy any" des Schutzes – den Zugang ohne
+	 * Passwort öffnen. IP-Freigaben gehören deshalb in die Oberfläche, die sie verwaltet.
+	 * "deny" bleibt erlaubt: es kann nur einschränken.
+	 */
+	private const ACCESS_DIRECTIVES = ['allow'];
+
+	/** Direktiven, die einen Block öffnen dürfen. */
+	private const BLOCK_DIRECTIVES = ['location', 'if', 'limit_except'];
 
 	private const MAX_BYTES = 65536;
 	private const MAX_DEPTH = 2;
@@ -67,9 +143,11 @@ final class NginxSnippet
 	 * Kommentare und Escapes, und validiert jede Anweisung auf Direktivenliste,
 	 * Klammern und Verschachtelungstiefe.
 	 *
+	 * @param ?SnippetScope $scope Pfadgrenzen des vHosts; ohne Bezugsrahmen werden
+	 *                             pfadgebundene Direktiven grundsätzlich abgelehnt
 	 * @throws \InvalidArgumentException mit Zeilennummer und beanstandeter Direktive
 	 */
-	public static function fromString(string $text): self
+	public static function fromString(string $text, ?SnippetScope $scope = null): self
 	{
 		if (strlen($text) > self::MAX_BYTES) {
 			throw new \InvalidArgumentException('Das Snippet ist größer als 64 KB.');
@@ -166,10 +244,15 @@ final class NginxSnippet
 						$argument = trim((string)($parts[1] ?? ''));
 						if ($directive !== '') {
 							if ($char === '{') {
+								// Erst die namensbasierten Sperren, damit z.B.
+								// "content_by_lua_block" den passenden Grund nennt und nicht
+								// nur "darf keinen Block öffnen".
+								self::assertDirectiveNameAllowed($directive, $tokenLine);
 								// Block-Direktive
-								if ($directive !== self::BLOCK_DIRECTIVE) {
+								if (!in_array($directive, self::BLOCK_DIRECTIVES, true)) {
 									throw new \InvalidArgumentException(
-										"Zeile $tokenLine: nur \"location\" darf einen Block öffnen, nicht \"$directive\"."
+										"Zeile $tokenLine: \"$directive\" darf keinen Block öffnen – erlaubt sind "
+										. implode(', ', self::BLOCK_DIRECTIVES) . '.'
 									);
 								}
 								$depth++;
@@ -180,12 +263,7 @@ final class NginxSnippet
 								}
 							} else {
 								// Normale Direktive (Semikolon)
-								if (!self::isAllowed($directive)) {
-									throw new \InvalidArgumentException("Zeile $tokenLine: Direktive \"$directive\" ist nicht erlaubt.");
-								}
-								if ($directive === 'proxy_pass') {
-									self::assertProxyPassTargetAllowed($argument, $tokenLine);
-								}
+								self::assertDirectiveAllowed($directive, $argument, $tokenLine, $scope);
 							}
 						}
 					} elseif ($char === ';') {
@@ -193,7 +271,8 @@ final class NginxSnippet
 					} elseif ($char === '{' && $token === '') {
 						// Öffnende Klammer ohne Direktive: Fehler
 						throw new \InvalidArgumentException(
-							"Zeile $line: öffnende Klammer ohne Direktive (nur \"location\" ist erlaubt)."
+							"Zeile $line: öffnende Klammer ohne Direktive (erlaubt sind "
+							. implode(', ', self::BLOCK_DIRECTIVES) . ').'
 						);
 					}
 				}
@@ -460,18 +539,220 @@ final class NginxSnippet
 	}
 
 	/**
-	 * Steht die Direktive auf der Positivliste oder unter einem erlaubten Präfix?
+	 * Kern der Sperrliste: erlaubt ist alles, was hier nicht beanstandet wird.
+	 *
+	 * @param ?SnippetScope $scope Pfadgrenzen; null = pfadgebundene Direktiven ablehnen
+	 * @throws \InvalidArgumentException mit Zeilennummer und Grund
 	 */
-	private static function isAllowed(string $directive): bool
+	private static function assertDirectiveAllowed(string $directive, string $argument, int $line, ?SnippetScope $scope): void
 	{
-		if (in_array($directive, self::ALLOWED, true)) {
+		self::assertDirectiveNameAllowed($directive, $line);
+		if (in_array($directive, self::PASS_DIRECTIVES, true)) {
+			self::assertPassTargetAllowed($directive, $argument, $line, $scope);
+			return;
+		}
+		if (array_key_exists($directive, self::PATH_DIRECTIVES)) {
+			self::assertPathAllowed($directive, $argument, $line, $scope);
+			return;
+		}
+		if (self::isPathParam($directive, $argument)) {
+			self::assertParamPathAllowed($directive, $argument, $line, $scope);
+		}
+	}
+
+	/**
+	 * Sperren, die sich allein am Namen der Direktive entscheiden.
+	 *
+	 * @throws \InvalidArgumentException mit Zeilennummer und Grund
+	 */
+	private static function assertDirectiveNameAllowed(string $directive, int $line): void
+	{
+		if (in_array($directive, self::IDENTITY_DIRECTIVES, true)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – Bindung und Name des vHosts werden über die Oberfläche verwaltet."
+			);
+		}
+		if (in_array($directive, self::ACCESS_DIRECTIVES, true)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – IP-Freigaben werden über die Oberfläche verwaltet "
+				. '(sonst liesse sich der Verzeichnisschutz damit umgehen).'
+			);
+		}
+		if (in_array($directive, self::PROTECTION_DIRECTIVES, true)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – der Verzeichnisschutz wird über die Oberfläche verwaltet."
+			);
+		}
+		if (self::isCodeDirective($directive)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – damit liesse sich Code im nginx-Prozess ausführen."
+			);
+		}
+		if (in_array($directive, self::WRITE_DIRECTIVES, true)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – das erlaubte Schreibzugriff über HTTP."
+			);
+		}
+		if (in_array($directive, self::FORBIDDEN_DIRECTIVES, true)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist nicht erlaubt – Zertifikate und Schlüssel verwaltet die Oberfläche."
+			);
+		}
+	}
+
+	/**
+	 * Deutet der Name auf eingebetteten Code hin (Lua, njs, Perl)?
+	 */
+	private static function isCodeDirective(string $directive): bool
+	{
+		if (in_array($directive, self::CODE_DIRECTIVES, true)) {
 			return true;
 		}
-		foreach (self::ALLOWED_PREFIXES as $prefix) {
+		foreach (self::FORBIDDEN_PREFIXES as $prefix) {
 			if (str_starts_with($directive, $prefix)) {
 				return true;
 			}
 		}
+		foreach (self::CODE_INFIXES as $infix) {
+			if (str_contains($directive, $infix)) {
+				return true;
+			}
+		}
 		return false;
+	}
+
+	/**
+	 * Ist das eine *_param-Direktive, die einen Pfad für PHP festlegt?
+	 */
+	private static function isPathParam(string $directive, string $argument): bool
+	{
+		if (!in_array($directive, ['fastcgi_param', 'uwsgi_param', 'scgi_param'], true)) {
+			return false;
+		}
+		$name = strtoupper((string)(preg_split('/\s+/', trim($argument), 2)[0] ?? ''));
+		return in_array($name, self::PATH_PARAMS, true);
+	}
+
+	/**
+	 * Prüft den Pfad einer *_param-Direktive (SCRIPT_FILENAME & Co.).
+	 *
+	 * Werte mit nginx-Variablen wie "$document_root$fastcgi_script_name" sind in
+	 * Ordnung: $document_root ist der über "root" gesetzte Pfad, der selbst schon
+	 * gegen den vHost geprüft wurde.
+	 */
+	private static function assertParamPathAllowed(string $directive, string $argument, int $line, ?SnippetScope $scope): void
+	{
+		$parts = preg_split('/\s+/', trim($argument), 2);
+		$name = strtoupper((string)($parts[0] ?? ''));
+		$value = self::unquote(trim((string)($parts[1] ?? '')));
+		if ($value === '' || str_contains($value, '$')) {
+			return;
+		}
+		if (!str_starts_with($value, '/')) {
+			return;
+		}
+		if ($scope === null) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive $name\" mit festem Pfad ist hier nicht prüfbar und deshalb nicht erlaubt."
+			);
+		}
+		if (!SnippetScope::isInside($value, $scope->baseDir)) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive $name\" zeigt mit \"$value\" ausserhalb von {$scope->baseDir} – "
+				. 'damit liesse sich fremder PHP-Code ausführen.'
+			);
+		}
+	}
+
+	/**
+	 * Prüft eine pfadgebundene Direktive gegen die Grenzen des vHosts.
+	 */
+	private static function assertPathAllowed(string $directive, string $argument, int $line, ?SnippetScope $scope): void
+	{
+		$boundaryKey = self::PATH_DIRECTIVES[$directive];
+		if ($boundaryKey === null) {
+			return;
+		}
+		$value = self::unquote(trim($argument));
+		// "access_log off;" und "error_log ... <stufe>;" schreiben nirgendwohin.
+		if ($value === 'off' || $value === '') {
+			return;
+		}
+		// Nur der erste Wert ist der Pfad (z.B. "access_log <pfad> <format>;").
+		$path = (string)(preg_split('/\s+/', $value, 2)[0] ?? '');
+		if ($path === 'off') {
+			return;
+		}
+		if (str_contains($path, '$')) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" mit einer Variable im Pfad ist nicht erlaubt – der Pfad muss beim Speichern feststehen."
+			);
+		}
+		if ($scope === null) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" ist ohne bekannte Pfadgrenzen des vHosts nicht erlaubt."
+			);
+		}
+		$boundary = match ($boundaryKey) {
+			'conf' => $scope->confDir,
+			'logs' => $scope->logsDir,
+			default => $scope->baseDir,
+		};
+		if (SnippetScope::isInside($path, $boundary)) {
+			return;
+		}
+		$hint = match ($boundaryKey) {
+			'conf' => "nur Dateien in conf/ ($boundary) dürfen eingebunden werden",
+			'logs' => "nur Dateien in logs/ ($boundary) sind erlaubt",
+			default => "der Pfad muss innerhalb von $boundary liegen",
+		};
+		throw new \InvalidArgumentException(
+			"Zeile $line: \"$directive $path\" zeigt ausserhalb des vHosts – $hint."
+		);
+	}
+
+	/**
+	 * Prüft das Ziel einer *_pass-Direktive: nicht dieser Rechner, und als Unix-Socket
+	 * nur der eigene FPM-Socket dieses vHosts.
+	 */
+	private static function assertPassTargetAllowed(string $directive, string $argument, int $line, ?SnippetScope $scope): void
+	{
+		if ($argument === '') {
+			throw new \InvalidArgumentException("Zeile $line: \"$directive\" ohne Ziel.");
+		}
+		if (str_contains($argument, '$')) {
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" mit einer Variable im Ziel ist nicht erlaubt, das Ziel muss beim Speichern feststehen."
+			);
+		}
+		$target = self::unquote($argument);
+		if (stripos($target, 'unix:') === 0) {
+			$socket = substr($target, 5);
+			// nginx erlaubt "unix:/pfad:/uri" – nur der Teil vor einem ":" ist der Socket.
+			$socket = explode(':', $socket, 2)[0];
+			if ($scope?->phpSocket !== null && SnippetScope::normalize($socket) === SnippetScope::normalize($scope->phpSocket)) {
+				return;
+			}
+			throw new \InvalidArgumentException(
+				"Zeile $line: \"$directive\" darf als Unix-Socket nur den eigenen FPM-Socket dieses vHosts nutzen"
+				. ($scope?->phpSocket !== null ? " ({$scope->phpSocket})" : ' – PHP ist für diesen Host aus')
+				. '. Ein fremder Socket liesse sich nutzen, um PHP unter einem anderen Benutzer auszuführen.'
+			);
+		}
+		$host = self::proxyPassTargetHost($target);
+		if ($host !== null) {
+			self::assertHostNotOwnMachine($host, $line);
+		}
+	}
+
+	/**
+	 * Entfernt umschließende Anführungszeichen, falls vorhanden.
+	 */
+	private static function unquote(string $value): string
+	{
+		if (strlen($value) >= 2 && ($value[0] === '"' || $value[0] === "'") && str_ends_with($value, $value[0])) {
+			return substr($value, 1, -1);
+		}
+		return $value;
 	}
 }

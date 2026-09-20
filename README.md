@@ -33,9 +33,79 @@ Schreibende Aktionen laufen nie direkt in der Oberfläche, sondern immer über d
 
 Beim Anlegen entsteht in `web/` eine bunte `index.html` („200“), sofern noch keine liegt. `web/` gehört dem bei der Installation gewählten Benutzer und der Gruppe `www-data` (`www-data` darf ausschließlich hier schreiben); `conf/`, `cert/`, `logs/` gehören root, `private/` dem Benutzer allein.
 
+## Aufbau der generierten Konfiguration
+
+Der Generator schreibt einen vollständigen `server`-Block und lässt am Ende Platz für
+eigene Direktiven – wie bei ISPConfig. Vorgegeben sind `listen`, `server_name`, `root`,
+`index`, `try_files`, die Logpfade, der Verzeichnisschutz, die Sperre für versteckte
+Dateien, `favicon.ico`, `robots.txt`, der ACME-Pfad und der PHP-Block. Bei Hosts mit
+Zertifikat kommen HTTP/2, HTTP/3 (QUIC mit `Alt-Svc`) und die TLS-Einstellungen dazu;
+Port 80 leitet dann per `return 301` auf HTTPS um.
+
+Der eigene Bereich steht als Letztes im Block:
+
+```
+    # >>>>
+    # ab hier eigene Direktiven (Oberfläche: "Eigene Direktiven")
+    include /var/www/<domain>/conf/*.conf;
+    # <<<<
+```
+
+Alles in `[domain]/conf/` wird dort eingebunden – das Textfeld der Oberfläche schreibt
+`custom.conf`, eine selbst angelegte `rewrites.conf` kommt ebenso mit hinein.
+
+Absichtlich **kein** generiertes `location / { … }`: `try_files` steht stattdessen auf
+Server-Ebene. So lässt sich ein eigenes `location /` einsetzen, ohne dass nginx mit
+`duplicate location "/"` abbricht – genau der Fall, der beim Kopieren einer fremden
+Konfiguration auftritt.
+
 ## Eigene nginx-Direktiven
 
-Auf der Detailseite eines vHosts gibt es unter „Eigene nginx-Direktiven“ ein Textfeld. Erlaubt sind unter anderem `client_max_body_size`, `expires`, `add_header`, `gzip*`, `rewrite`, `return`, `try_files`, `error_page`, `proxy_*` und `location`-Blöcke – Direktiven, die Docroot, Zertifikat oder Verzeichnisschutz betreffen, werden abgelehnt (Positivliste in `Value\NginxSnippet`). Schlägt die Prüfung fehl oder lässt `nginx -t` das Ergebnis nicht zu, bleibt die bisherige Fassung aktiv und die Meldung erscheint im roten Kasten. Gespeichert wird das Snippet in `[domain]/conf/custom.conf`.
+Auf der Detailseite eines vHosts gibt es unter „Eigene nginx-Direktiven“ ein Textfeld.
+Geprüft wird gegen eine **Sperrliste**: erlaubt ist alles, was nicht aus dem vHost
+herausführt. Ein Fragment aus der Konfiguration eines anderen Projekts – mit `if`,
+`location`, `limit_except`, `fastcgi_*`, `deny`, `try_files`, `sub_filter` und so weiter –
+lässt sich damit einsetzen, ohne es umzuschreiben.
+
+Abgelehnt wird (jeweils mit Zeilennummer und Grund):
+
+| Direktive | Grund |
+|---|---|
+| `root`, `alias` | Pfad muss innerhalb von `/var/www/<domain>/` liegen |
+| `include` | nur Dateien in `[domain]/conf/` |
+| `access_log`, `error_log` | nur Dateien in `[domain]/logs/` (oder `off`) |
+| `auth_basic`, `auth_basic_user_file`, `satisfy`, `allow` | Verzeichnisschutz und IP-Freigaben verwaltet die Oberfläche; `auth_basic off` bzw. `allow` in einem `location` würden ihn aufheben |
+| `listen`, `server_name` | Bindung und Name des Hosts; mit `listen` könnte ein localhost-Host öffentlich werden |
+| `proxy_pass`, `fastcgi_pass`, `uwsgi_pass`, `scgi_pass`, `grpc_pass`, `memcached_pass` | Ziel darf nicht dieser Rechner sein (die Oberfläche läuft ohne eigene Anmeldung); als Unix-Socket nur der eigene FPM-Socket des Hosts |
+| `fastcgi_param SCRIPT_FILENAME`/`DOCUMENT_ROOT` | Pfad muss im vHost liegen, sonst liesse sich fremder PHP-Code ausführen |
+| `dav_methods`, `dav_access` | Schreibzugriff über HTTP |
+| `perl*`, `lua*`, `*_by_lua*`, `js_*`, `load_module` | Code-Ausführung im nginx-Prozess |
+| `ssl_certificate` und Verwandte | Zertifikate verwaltet die Oberfläche |
+
+Eine unbekannte Direktive ist erlaubt und wird an nginx weitergegeben. Schlägt `nginx -t`
+fehl, bleibt die bisherige Fassung aktiv und die Meldung erscheint im roten Kasten.
+Gespeichert wird das Snippet in `[domain]/conf/custom.conf`.
+
+## PHP
+
+Jeder vHost kann PHP ausliefern – über einen **eigenen php-fpm-Pool mit eigenem
+Systembenutzer** (`web<id>`, Schema wie bei ISPConfig). Umschalten auf der Detailseite
+oder mit `sudo vhost php <name> on|off`.
+
+Warum ein eigener Pool je Host und nicht der mitgelieferte: der läuft als `www-data`, und
+`www-data` darf per sudoers das `vhost`-CLI als root aufrufen. PHP einer Website in diesem
+Pool wäre damit root auf dem Rechner. Mit eigener Kennung je Host kommt Website-PHP an
+diese Rechte nicht heran – geprüft wird das im Smoke-Test.
+
+- Pool: `/etc/php/<version>/fpm/pool.d/vhost-<name>.conf`, Socket
+  `/run/php/vhost-<name>.sock` (nur `www-data` darf ihn öffnen)
+- `open_basedir` grenzt PHP auf `web/`, `private/` und ein eigenes `tmp/` ein; die Dateien
+  anderer Hosts, die Datenbank und die Oberfläche sind unerreichbar
+- PHP-Fehler landen in `[domain]/logs/php.log`, nie im Browser
+- Ist PHP aus, werden `.php`-Anfragen mit 404 abgewiesen – niemals als Text ausgeliefert,
+  sonst stünde der Quellcode samt Zugangsdaten offen
+- Beim Abschalten bleibt der Systembenutzer bestehen: von PHP angelegte Dateien könnten
+  ihm noch gehören, und eine später neu angelegte Kennung könnte dieselbe UID bekommen
 
 ## Logdateien
 
@@ -67,6 +137,7 @@ printf 'passwort\n' | sudo vhost user-add <name> <user>
 sudo vhost user-del <name> <user>
 sudo vhost ip-add <name> <ip|cidr>
 sudo vhost ip-del <name> <ip|cidr>
+sudo vhost php <name> on|off                                  # eigener FPM-Pool an/aus
 sudo vhost ssl <name> on|off
 sudo vhost set le_email <adresse>
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben

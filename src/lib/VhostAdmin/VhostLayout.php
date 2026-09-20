@@ -15,10 +15,12 @@ declare(strict_types=1);
  * oder Einträge darin ersetzen, auch den root-eigenen conf/-Ordner.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 10:34
+ * @version Letzte Änderung: 2026-09-20 20:38
  */
 
 namespace VhostAdmin;
+
+use VhostAdmin\Value\SnippetScope;
 
 final class VhostLayout
 {
@@ -110,6 +112,66 @@ final class VhostLayout
 	}
 
 	/**
+	 * Systembenutzer, unter dem PHP dieses vHosts läuft.
+	 *
+	 * Schema "web<id>" wie bei ISPConfig: kurz (Linux-Benutzernamen sollen 32 Zeichen
+	 * nicht überschreiten), stabil über Umbenennungen hinweg und immer gültig – aus
+	 * einem Domainnamen abgeleitete Namen wären das nicht (Punkte, Länge, Ziffern am
+	 * Anfang). Warum überhaupt ein eigener Benutzer je Host: der gemeinsame Pool läuft
+	 * als www-data, und www-data darf per sudoers das vhost-CLI als root aufrufen –
+	 * PHP einer Website in diesem Pool wäre also root auf dem Rechner.
+	 *
+	 * @throws \RuntimeException wenn der vHost noch keine ID hat (nicht gespeichert)
+	 */
+	public function phpUser(Vhost $vhost): string
+	{
+		if ($vhost->id === null) {
+			throw new \RuntimeException('PHP-Benutzername verlangt einen gespeicherten vHost (keine ID vorhanden).');
+		}
+		return 'web' . $vhost->id;
+	}
+
+	/**
+	 * Unix-Socket des eigenen FPM-Pools dieses vHosts.
+	 */
+	public function phpSocket(Vhost $vhost): string
+	{
+		return $this->config->fpmSocketDir . '/vhost-' . $vhost->slug() . '.sock';
+	}
+
+	/**
+	 * Pool-Datei dieses vHosts unter pool.d.
+	 */
+	public function phpPoolFile(Vhost $vhost): string
+	{
+		return $this->config->fpmPoolDir . '/vhost-' . $vhost->slug() . '.conf';
+	}
+
+	/**
+	 * PHP-Fehlerlog dieses vHosts (liegt bei den übrigen Logs).
+	 */
+	public function phpLog(Vhost $vhost): string
+	{
+		return $this->logsDir($vhost) . '/php.log';
+	}
+
+	/**
+	 * Pfadgrenzen für die Prüfung der eigenen Direktiven dieses vHosts.
+	 *
+	 * Der FPM-Socket wird nur mitgegeben, wenn PHP für den Host an ist – sonst darf
+	 * fastcgi_pass auf gar keinen Unix-Socket zeigen.
+	 */
+	public function snippetScope(Vhost $vhost): SnippetScope
+	{
+		return new SnippetScope(
+			$this->baseDir($vhost),
+			$this->confDir($vhost),
+			$this->logsDir($vhost),
+			$vhost->php ? $this->phpSocket($vhost) : null,
+		);
+	}
+
+	/**
 	 * Alle anzulegenden Verzeichnisse mit ihren Soll-Rechten, Eltern vor Kindern.
 	 *
 	 * @return list<DirectorySpec>
@@ -118,6 +180,12 @@ final class VhostLayout
 	{
 		$owner = $this->config->wwwOwner;
 		$group = $this->config->wwwGroup;
+		// Mit PHP gehört web/ dem eigenen Benutzer des Hosts: PHP schreibt dort als dieser
+		// Benutzer, nginx liest über die Gruppe. www-data verliert das Schreibrecht, das es
+		// ohne PHP hat – ohne PHP schreibt dort niemand ausser root, der Modus bleibt aber
+		// aus Bestandsgründen gruppenbeschreibbar.
+		$webOwner = $vhost->php ? $this->phpUser($vhost) : $owner;
+		$webMode = $vhost->php ? 02750 : 02775;
 		$specs = [
 			// Basisordner gehört ausschließlich dem Besitzer (Gruppe = Besitzer, 0755):
 			// www-data braucht hier nur Durchqueren, um nach web/ zu gelangen, nicht
@@ -125,16 +193,20 @@ final class VhostLayout
 			// oder Einträge ersetzen – auch den root-eigenen conf/-Ordner (C2, Review vom
 			// 2026-09-20). Geschrieben wird hier nur von root (Anlegen der Unterordner).
 			new DirectorySpec($this->baseDir($vhost), $owner, $owner, 0755, 'Basisordner des vHosts (nicht gruppenbeschreibbar)'),
-			new DirectorySpec($this->webDir($vhost), $owner, $group, 02775, 'Docroot (wird ausgeliefert)'),
+			new DirectorySpec($this->webDir($vhost), $webOwner, $group, $webMode, 'Docroot (wird ausgeliefert)'),
 			new DirectorySpec($this->confDir($vhost), 'root', $group, 0750, 'nginx-Snippet der Oberfläche'),
 			new DirectorySpec($this->certDir($vhost), 'root', $owner, 0750, 'Symlinks auf die Zertifikate'),
 			new DirectorySpec($this->privateDir($vhost), $owner, $owner, 0750, 'nicht ausgelieferte Dateien'),
-			new DirectorySpec($this->logsDir($vhost), 'root', $owner, 0750, 'Logdateien dieses vHosts'),
+			// Mit PHP zusätzlich für andere durchquerbar (0751): PHP läuft als eigener
+			// Benutzer und schreibt selbst in logs/php.log – ohne Durchgangsrecht käme es
+			// nicht an die Datei. Lesen kann es die übrigen Logs dadurch nicht, die
+			// stehen auf 0640 root:<owner>.
+			new DirectorySpec($this->logsDir($vhost), 'root', $owner, $vhost->php ? 0751 : 0750, 'Logdateien dieses vHosts'),
 		];
 		$path = $this->webDir($vhost);
 		foreach ($vhost->subdir !== null ? explode('/', $vhost->subdir) : [] as $segment) {
 			$path .= '/' . $segment;
-			$specs[] = new DirectorySpec($path, $owner, $group, 02775, 'Unterordner des Docroots');
+			$specs[] = new DirectorySpec($path, $webOwner, $group, $webMode, 'Unterordner des Docroots');
 		}
 		return $specs;
 	}

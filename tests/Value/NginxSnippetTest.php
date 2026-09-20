@@ -13,6 +13,7 @@ namespace Tests\Value;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use VhostAdmin\Value\NginxSnippet;
+use VhostAdmin\Value\SnippetScope;
 
 final class NginxSnippetTest extends TestCase
 {
@@ -56,6 +57,15 @@ final class NginxSnippetTest extends TestCase
 	}
 
 	/** @return iterable<string, array{string, string}> */
+	/**
+	 * Was auch unter der Sperrliste vom 2026-09-20 abgelehnt bleibt.
+	 *
+	 * Nicht mehr enthalten, weil jetzt absichtlich erlaubt: "deny" (kann nur
+	 * einschränken), "if"/"limit_except" (in fremden confs alltäglich) und unbekannte
+	 * Direktiven – die fängt "nginx -t" vor dem Reload ab, samt Rücknahme der Datei.
+	 * "allow" bleibt gesperrt, weil es in einem location-Block die geerbten Regeln des
+	 * Verzeichnisschutzes ersetzt und mit dessen "satisfy any" den Zugang öffnen würde.
+	 */
 	public static function forbiddenSnippets(): iterable
 	{
 		yield 'root' => ["root /etc;\n", 'root'];
@@ -66,14 +76,11 @@ final class NginxSnippetTest extends TestCase
 		yield 'auth_basic' => ["auth_basic off;\n", 'auth_basic'];
 		yield 'satisfy' => ["satisfy any;\n", 'satisfy'];
 		yield 'allow' => ["allow all;\n", 'allow'];
-		yield 'deny' => ["deny all;\n", 'deny'];
 		yield 'include' => ["include /etc/passwd;\n", 'include'];
 		yield 'access_log' => ["access_log /tmp/x.log;\n", 'access_log'];
 		yield 'error_log' => ["error_log /tmp/x.log;\n", 'error_log'];
 		yield 'load_module' => ["load_module modules/x.so;\n", 'load_module'];
 		yield 'user' => ["user root;\n", 'user'];
-		yield 'if' => ["if (\$host) {\n\treturn 404;\n}\n", 'if'];
-		yield 'unbekannt' => ["gibtsnicht an;\n", 'gibtsnicht'];
 	}
 
 	#[DataProvider('forbiddenSnippets')]
@@ -209,11 +216,15 @@ final class NginxSnippetTest extends TestCase
 		self::assertSame($text2, NginxSnippet::fromString($text2)->value);
 	}
 
-	public function testRejectsGzipPrefixedForbiddenDirective(): void
+	/**
+	 * Unter der Sperrliste ist eine unbekannte Direktive erlaubt – die Positivliste
+	 * hatte sie noch abgelehnt. Abgefangen wird sie von "nginx -t" vor dem Reload,
+	 * das die Datei bei einem Fehlschlag zurücknimmt (VhostService::setSnippet()).
+	 */
+	public function testUnknownDirectivesArePassedOnToNginxForChecking(): void
 	{
-		$this->expectException(\InvalidArgumentException::class);
-		$this->expectExceptionMessage('gzipfoo');
-		NginxSnippet::fromString("gzipfoo bar;");
+		self::assertSame("gibtsnicht bar;", NginxSnippet::fromString("gibtsnicht bar;")->value);
+		self::assertSame("gzipfoo bar;", NginxSnippet::fromString("gzipfoo bar;")->value);
 	}
 
 	public function testAcceptsProxyDirectives(): void
@@ -339,5 +350,141 @@ final class NginxSnippetTest extends TestCase
 	{
 		$this->expectException(\InvalidArgumentException::class);
 		NginxSnippet::fromString("location /leak {\n\tadd_header X-B v#; root /etc;\nexpires 1d; }\n");
+	}
+	// ------------------------------------------------------------------
+	// Sperrliste statt Positivliste (Nutzerwunsch vom 2026-09-20): erlaubt ist alles,
+	// was nicht ausdrücklich aus dem vHost herausführt. Ziel ist, ein Fragment aus der
+	// conf eines anderen Projekts per copy-paste einsetzen zu können.
+	// ------------------------------------------------------------------
+
+	private static function scope(): SnippetScope
+	{
+		return new SnippetScope(
+			'/var/www/a.de',
+			'/var/www/a.de/conf',
+			'/var/www/a.de/logs',
+			'/run/php/vhost-a.de.sock',
+		);
+	}
+
+	/**
+	 * Der eigentliche Zweck der Umstellung: ein Fragment im ISPConfig-Stil geht durch.
+	 */
+	public function testAcceptsAFragmentCopiedFromAnotherProject(): void
+	{
+		$snippet = <<<'NG'
+		location ~ \.(?:css|js|woff2)$ {
+		    expires 30d;
+		    add_header Cache-Control "public, immutable";
+		}
+		if ($request_method !~ ^(GET|HEAD|POST)$) {
+		    return 405;
+		}
+		location @php {
+		    try_files $uri =404;
+		    fastcgi_index index.php;
+		    fastcgi_intercept_errors on;
+		    fastcgi_read_timeout 1200;
+		}
+		location / {
+		    try_files $uri $uri/ /index.php?$args;
+		}
+		limit_except GET HEAD {
+		    deny all;
+		}
+		location = /health {
+		    return 200 "ok";
+		}
+		NG;
+		self::assertSame($snippet, NginxSnippet::fromString($snippet, self::scope())->value);
+	}
+
+	/**
+	 * Direktiven, die die Positivliste früher abgelehnt hat und die jetzt erlaubt sind.
+	 *
+	 * @return iterable<string, array{string}>
+	 */
+	public static function nowAllowedDirectives(): iterable
+	{
+		yield 'sub_filter' => ["sub_filter 'a' 'b';\n"];
+		yield 'deny' => ["deny 192.0.2.1;\n"];
+		yield 'log_not_found' => ["log_not_found off;\n"];
+		yield 'internal' => ["internal;\n"];
+		yield 'fastcgi_read_timeout' => ["fastcgi_read_timeout 300;\n"];
+		yield 'if-Block' => ["if (\$http_user_agent ~* bot) {\n    return 403;\n}\n"];
+		yield 'limit_except' => ["limit_except GET {\n    deny all;\n}\n"];
+		yield 'access_log off' => ["access_log off;\n"];
+		yield 'root im eigenen vHost' => ["root /var/www/a.de/web/andere;\n"];
+		yield 'include aus conf/' => ["include /var/www/a.de/conf/rewrites.conf;\n"];
+		yield 'error_log in logs/' => ["error_log /var/www/a.de/logs/extra.log;\n"];
+		yield 'eigener FPM-Socket' => ["fastcgi_pass unix:/run/php/vhost-a.de.sock;\n"];
+		yield 'fremder Rechner als Ziel' => ["proxy_pass http://192.0.2.10:8080/;\n"];
+	}
+
+	#[DataProvider('nowAllowedDirectives')]
+	public function testAllowsDirectivesThatDoNotLeaveTheVhost(string $snippet): void
+	{
+		self::assertSame($snippet, NginxSnippet::fromString($snippet, self::scope())->value);
+	}
+
+	/**
+	 * Was weiterhin gesperrt bleibt, weil es aus dem vHost herausführt.
+	 *
+	 * @return iterable<string, array{string, string}>
+	 */
+	public static function stillForbidden(): iterable
+	{
+		yield 'root ausserhalb' => ["root /etc;\n", 'ausserhalb'];
+		yield 'root im Nachbar-vHost' => ["root /var/www/b.de/web;\n", 'ausserhalb'];
+		yield 'root mit ..' => ["root /var/www/a.de/../b.de/web;\n", 'ausserhalb'];
+		yield 'alias ausserhalb' => ["alias /root/.ssh;\n", 'ausserhalb'];
+		yield 'include ausserhalb conf/' => ["include /etc/nginx/nginx.conf;\n", 'conf/'];
+		yield 'include aus web/' => ["include /var/www/a.de/web/evil.conf;\n", 'conf/'];
+		yield 'access_log ausserhalb logs/' => ["access_log /var/www/a.de/web/a.log;\n", 'logs/'];
+		yield 'auth_basic abschalten' => ["auth_basic off;\n", 'Verzeichnisschutz'];
+		yield 'auth_basic_user_file' => ["auth_basic_user_file /tmp/x;\n", 'Verzeichnisschutz'];
+		yield 'satisfy' => ["satisfy any;\n", 'Verzeichnisschutz'];
+		yield 'fremder Unix-Socket' => ["fastcgi_pass unix:/run/php/php8.5-fpm.sock;\n", 'Socket'];
+		yield 'fastcgi_pass auf die Oberflaeche' => ["fastcgi_pass 127.0.0.1:8080;\n", 'eigenen Rechner'];
+		yield 'uwsgi_pass auf Loopback' => ["uwsgi_pass http://localhost:8080/;\n", 'eigenen Rechner'];
+		yield 'SCRIPT_FILENAME ausserhalb' => ["fastcgi_param SCRIPT_FILENAME /var/www/localhost-8080/web/index.php;\n", 'ausserhalb'];
+		yield 'DOCUMENT_ROOT ausserhalb' => ["fastcgi_param DOCUMENT_ROOT /etc;\n", 'ausserhalb'];
+		yield 'dav_methods' => ["dav_methods PUT DELETE;\n", 'Schreibzugriff'];
+		yield 'perl' => ["perl My::handler;\n", 'Code'];
+		yield 'lua' => ["content_by_lua_block { os.execute('id') }\n", 'Code'];
+		yield 'load_module' => ["load_module modules/ngx_http_x.so;\n", 'Code'];
+		yield 'ssl_certificate' => ["ssl_certificate /etc/ssl/x.pem;\n", 'nicht erlaubt'];
+	}
+
+	#[DataProvider('stillForbidden')]
+	public function testRejectsDirectivesThatLeaveTheVhost(string $snippet, string $expectedInMessage): void
+	{
+		try {
+			NginxSnippet::fromString($snippet, self::scope());
+			self::fail('Snippet hätte abgelehnt werden müssen: ' . trim($snippet));
+		} catch (\InvalidArgumentException $e) {
+			self::assertStringContainsString($expectedInMessage, $e->getMessage());
+			self::assertMatchesRegularExpression('/Zeile \d+/', $e->getMessage(), 'Die Meldung muss die Zeile nennen');
+		}
+	}
+
+	/**
+	 * Ohne Bezugsrahmen bleiben pfadgebundene Direktiven gesperrt: lieber ablehnen als
+	 * ungeprüft zulassen.
+	 */
+	public function testPathBoundDirectivesAreRejectedWithoutAScope(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		NginxSnippet::fromString("root /var/www/a.de/web;\n");
+	}
+
+	/**
+	 * Die Klammerbilanz bleibt die wichtigste Prüfung – sonst liesse sich der
+	 * server-Block verlassen und ein eigener aufmachen.
+	 */
+	public function testStillRefusesToLeaveTheServerBlockWithTheBlocklist(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		NginxSnippet::fromString("}\nserver {\n    listen 81;\n    root /etc;\n}\n", self::scope());
 	}
 }

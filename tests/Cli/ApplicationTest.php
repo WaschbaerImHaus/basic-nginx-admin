@@ -12,6 +12,8 @@ namespace Tests\Cli;
 
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FakeCertbot;
+use Tests\Support\FakeFpmReloader;
+use Tests\Support\FakeSystemUsers;
 use Tests\Support\FakeReloader;
 use Tests\Support\TempDir;
 use VhostAdmin\Cli\Application;
@@ -19,6 +21,7 @@ use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\Migration\LayoutMigrator;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\Php\PoolRenderer;
 use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
@@ -38,11 +41,15 @@ final class ApplicationTest extends TestCase
 		mkdir($this->dir . '/avail');
 		mkdir($this->dir . '/enabled');
 		mkdir($this->dir . '/nginxlogs');
+		mkdir($this->dir . '/pool.d');
+		mkdir($this->dir . '/run');
 		$this->config = Config::fromArray([
 			'dbPath' => $this->dir . '/db.sqlite', 'wwwRoot' => $this->dir . '/www',
 			'sitesAvailable' => $this->dir . '/avail', 'sitesEnabled' => $this->dir . '/enabled',
 			'authDir' => $this->dir . '/auth', 'letsEncryptLive' => $this->dir . '/le', 'ipv6' => false,
 			'backupDir' => $this->dir . '/backups',
+			// Pool und Socket ins Temporärverzeichnis (nicht ins echte /etc/php).
+			'fpmPoolDir' => $this->dir . '/pool.d', 'fpmSocketDir' => $this->dir . '/run',
 		]);
 		$db = new Database($this->config);
 		$db->initSchema();
@@ -50,7 +57,8 @@ final class ApplicationTest extends TestCase
 		$this->layout = new VhostLayout($this->config);
 		$this->service = new VhostService(
 			$this->config, $this->repo, new ConfigRenderer($this->config, $this->layout),
-			new FakeReloader(), new FakeCertbot($this->dir . '/le'), $this->layout
+			new FakeReloader(), new FakeCertbot($this->dir . '/le'), $this->layout,
+			new PoolRenderer($this->layout), new FakeFpmReloader(), new FakeSystemUsers()
 		);
 	}
 
@@ -364,5 +372,27 @@ final class ApplicationTest extends TestCase
 		foreach (['vhost conf <name>', 'vhost fix-permissions', 'vhost migrate-layout'] as $line) {
 			self::assertStringContainsString($line, $out);
 		}
+	}
+	public function testPhpCommandTogglesTheFlagAndReportsSocket(): void
+	{
+		$this->runCli(['add', 'php.example']);
+		[$code, $out] = $this->runCli(['php', 'php.example', 'on']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('PHP aktiviert', $out);
+		self::assertStringContainsString('vhost-php.example.sock', $out);
+		self::assertTrue($this->repo->byName('php.example')->php);
+
+		[$code, $out] = $this->runCli(['php', 'php.example', 'off']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('PHP deaktiviert', $out);
+		self::assertFalse($this->repo->byName('php.example')->php);
+	}
+
+	public function testPhpCommandNeedsOnOrOff(): void
+	{
+		$this->runCli(['add', 'php.example']);
+		[$code] = $this->runCli(['php', 'php.example', 'vielleicht']);
+		self::assertSame(1, $code);
+		self::assertFalse($this->repo->byName('php.example')->php);
 	}
 }

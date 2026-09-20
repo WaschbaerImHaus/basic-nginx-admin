@@ -19,6 +19,9 @@ use VhostAdmin\Nginx\ReloaderInterface;
 use VhostAdmin\Ssl\CertbotInterface;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
+use VhostAdmin\Php\FpmReloaderInterface;
+use VhostAdmin\Php\PoolRenderer;
+use VhostAdmin\Php\SystemUsersInterface;
 use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
@@ -38,6 +41,9 @@ final class VhostService
 		private readonly ReloaderInterface $reloader,
 		private readonly CertbotInterface $certbot,
 		private readonly VhostLayout $layout,
+		private readonly PoolRenderer $poolRenderer,
+		private readonly FpmReloaderInterface $fpmReloader,
+		private readonly SystemUsersInterface $systemUsers,
 	) {
 	}
 
@@ -85,6 +91,12 @@ final class VhostService
 	 */
 	public function remove(Vhost $vhost, bool $purge = false): void
 	{
+		// Zuerst PHP abschalten: sonst bliebe die Pool-Datei liegen und php-fpm hielte
+		// einen Pool samt Socket für einen vHost vor, den es nicht mehr gibt.
+		if ($vhost->php) {
+			$this->disablePhp($vhost);
+			$vhost = $this->repository->byId((int)$vhost->id);
+		}
 		$files = [
 			$this->config->sitesEnabled . '/' . $vhost->slug() . '.conf',
 			$this->renderer->serverConfigPath($vhost),
@@ -409,6 +421,121 @@ final class VhostService
 	}
 
 	/**
+	 * PHP für einen vHost einschalten: Systembenutzer, Pool, Rechte, nginx.
+	 *
+	 * Reihenfolge ist hier sicherheitsrelevant und nicht beliebig:
+	 *  1. Systembenutzer anlegen. Fehlt er, verweigert php-fpm den Start des Pools mit
+	 *     "Unable to find user" – und zwar des gesamten Dienstes, womit auch alle
+	 *     anderen Hosts kein PHP mehr hätten.
+	 *  2. Kennzeichen in der Datenbank setzen, damit Layout und Renderer ab jetzt den
+	 *     eigenen Benutzer und den Socket dieses Hosts liefern.
+	 *  3. tmp/ und php.log anlegen, Rechte setzen (web/ gehört jetzt dem neuen Benutzer).
+	 *  4. Pool schreiben und php-fpm neu laden. Scheitert das, wird die Pool-Datei
+	 *     zurückgenommen und das Kennzeichen wieder zurückgesetzt – sonst bliebe eine
+	 *     kaputte Pool-Datei liegen, an der jeder weitere Reload scheitert.
+	 *  5. nginx neu schreiben, damit .php an den Socket geht statt 404 zu liefern.
+	 *
+	 * Mehrfach aufrufbar: ist PHP schon an, passiert nichts.
+	 *
+	 * @throws \RuntimeException wenn Benutzer, Pool oder Reload scheitern
+	 */
+	public function enablePhp(Vhost $vhost): void
+	{
+		if ($vhost->php) {
+			return;
+		}
+		$user = $this->layout->phpUser($vhost);
+		if (!$this->systemUsers->exists($user)) {
+			$this->systemUsers->create($user, $this->layout->baseDir($vhost));
+		}
+
+		$this->repository->setPhp((int)$vhost->id, true);
+		$withPhp = $this->repository->byId((int)$vhost->id);
+
+		$pool = $this->layout->phpPoolFile($withPhp);
+		$poolExistedBefore = $this->readIfExists($pool);
+		try {
+			$this->preparePhpDirectories($withPhp);
+			$this->applyPermissions($withPhp);
+			$this->writePoolFile($withPhp);
+			$this->fpmReloader->reload();
+		} catch (\Throwable $e) {
+			// Alles zurück auf "PHP aus": Pool weg, Kennzeichen zurück, Rechte wieder
+			// auf den allgemeinen Besitzer.
+			$this->restoreFile($pool, $poolExistedBefore);
+			$this->repository->setPhp((int)$vhost->id, false);
+			$this->applyPermissions($this->repository->byId((int)$vhost->id));
+			throw $e;
+		}
+		$this->render($withPhp);
+	}
+
+	/**
+	 * PHP wieder abschalten: Pool entfernen, Rechte zurück, nginx neu schreiben.
+	 *
+	 * Der Systembenutzer bleibt bestehen. Ihn zu löschen wäre riskant: Dateien in
+	 * private/ oder von PHP angelegte Dateien könnten ihm noch gehören und hätten
+	 * danach einen Besitzer, den es nicht mehr gibt (eine später neu angelegte
+	 * Kennung könnte dieselbe UID bekommen und käme an diese Dateien).
+	 */
+	public function disablePhp(Vhost $vhost): void
+	{
+		if (!$vhost->php) {
+			return;
+		}
+		$pool = $this->layout->phpPoolFile($vhost);
+		if (file_exists($pool)) {
+			unlink($pool);
+		}
+		$this->fpmReloader->reload();
+		$this->repository->setPhp((int)$vhost->id, false);
+		$withoutPhp = $this->repository->byId((int)$vhost->id);
+		$this->applyPermissions($withoutPhp);
+		$this->render($withoutPhp);
+	}
+
+	/**
+	 * Legt die Ordner und Dateien an, die PHP zum Laufen braucht.
+	 *
+	 * tmp/ ist das eigene Temporärverzeichnis (open_basedir lässt /tmp nicht zu, damit
+	 * Hosts sich nicht über gemeinsame Dateien in die Quere kommen). php.log muss dem
+	 * PHP-Benutzer gehören, weil PHP selbst hineinschreibt – nicht der php-fpm-Master.
+	 */
+	private function preparePhpDirectories(Vhost $vhost): void
+	{
+		$user = $this->layout->phpUser($vhost);
+		$tmp = $this->layout->baseDir($vhost) . '/tmp';
+		if (!is_dir($tmp) && !is_link($tmp)) {
+			mkdir($tmp, 0700, true);
+		}
+		$this->ownAs($tmp, $user, $user, 0700);
+
+		$log = $this->layout->phpLog($vhost);
+		if (!file_exists($log) && !is_link($log)) {
+			touch($log);
+		}
+		$this->ownAs($log, $user, $this->config->wwwOwner, 0640);
+	}
+
+	/**
+	 * Schreibt die Pool-Datei; sie gehört root und ist für andere nicht lesbar.
+	 *
+	 * @throws \RuntimeException wenn das Schreiben scheitert
+	 */
+	private function writePoolFile(Vhost $vhost): void
+	{
+		$pool = $this->layout->phpPoolFile($vhost);
+		$dir = dirname($pool);
+		if (!is_dir($dir)) {
+			throw new \RuntimeException("Pool-Verzeichnis von php-fpm fehlt: $dir (ist php-fpm installiert?)");
+		}
+		if (@file_put_contents($pool, $this->poolRenderer->render($vhost)) === false) {
+			throw new \RuntimeException("Pool-Datei konnte nicht geschrieben werden: $pool");
+		}
+		$this->ownAs($pool, 'root', 'root', 0640);
+	}
+
+	/**
 	 * Soll-Rechte aller Verzeichnisse eines vHosts neu setzen.
 	 *
 	 * Für den CLI-Befehl "fix-permissions" nach manuellen Eingriffen.
@@ -578,6 +705,30 @@ final class VhostService
 				throw new \RuntimeException("Kann Besitzer von $path nicht auf \"{$this->config->wwwOwner}\" setzen");
 			}
 			chgrp($path, $this->config->wwwGroup);
+		}
+		chmod($path, $mode);
+	}
+
+	/**
+	 * Besitzer/Gruppe/Rechte mit ausdrücklich genannten Namen setzen; ohne root nur die Rechte.
+	 *
+	 * Für die PHP-Dateien: die gehören nicht dem allgemeinen Besitzer, sondern dem
+	 * eigenen Benutzer des vHosts (siehe own() für den Regelfall).
+	 *
+	 * @throws \RuntimeException wenn $path ein Symlink ist oder chown() als root fehlschlägt
+	 */
+	private function ownAs(string $path, string $owner, string $group, int $mode): void
+	{
+		if (is_link($path)) {
+			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $path");
+		}
+		if ($this->isRoot()) {
+			if (!@chown($path, $owner)) {
+				throw new \RuntimeException("Kann Besitzer von $path nicht auf \"$owner\" setzen");
+			}
+			if (!@chgrp($path, $group)) {
+				throw new \RuntimeException("Kann Gruppe von $path nicht auf \"$group\" setzen");
+			}
 		}
 		chmod($path, $mode);
 	}

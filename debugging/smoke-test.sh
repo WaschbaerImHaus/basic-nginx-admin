@@ -27,8 +27,10 @@ cleanup() {
 	vhost remove localhost:3999 --purge >/dev/null 2>&1
 	vhost remove smoke-ui.example --purge >/dev/null 2>&1
 	vhost remove smoke-conf.example --purge >/dev/null 2>&1
+	vhost remove smoke-php.example --purge >/dev/null 2>&1
 	rm -rf /var/www/smoke-test.example /var/www/smoke-ui.example /var/www/localhost-3999
-	rm -rf /var/www/smoke-conf.example
+	rm -rf /var/www/smoke-conf.example /var/www/smoke-php.example
+	rm -f /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf
 	[ -n "$JAR" ] && rm -f "$JAR"
 	set -e
 }
@@ -102,6 +104,32 @@ for sub in web conf cert private logs; do
 	[ -d "/var/www/smoke-conf.example/$sub" ] || fail "Ordner $sub fehlt"
 done
 echo "ok   Struktur vollständig"
+
+echo "== PHP"
+vhost add smoke-php.example >/dev/null
+vhost protect smoke-php.example off >/dev/null
+printf '<?php echo "USER=", posix_getpwuid(posix_geteuid())["name"], "\\n"; ?>\n' > /var/www/smoke-php.example/web/t.php
+# Ohne PHP darf die Datei NICHT als Text kommen: darin stehen sonst Zugangsdaten offen.
+expect 404 "PHP aus: .php abgewiesen" -H 'Host: smoke-php.example' http://127.0.0.1/t.php
+vhost php smoke-php.example on >/dev/null
+[ -f /etc/php/8.5/fpm/pool.d/vhost-smoke-php.example.conf ] || ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null || fail "Pool-Datei fehlt"
+echo "ok   Pool angelegt"
+# PHP muss unter dem eigenen Benutzer des Hosts laufen, nie als www-data: www-data darf
+# per sudoers das vhost-CLI als root aufrufen, Website-PHP käme damit an root.
+OUT=$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/t.php)
+grep -q '^USER=web' <<<"$OUT" && echo "ok   PHP laeuft als eigener Benutzer ($OUT)" || fail "PHP laeuft nicht als eigener Benutzer: $OUT"
+grep -q 'USER=www-data' <<<"$OUT" && fail "PHP laeuft als www-data - das waere root ueber sudoers" || true
+# open_basedir muss den Zugriff auf die Oberfläche und andere Hosts verhindern.
+printf '<?php var_dump(@file_get_contents("/var/lib/vhost-admin/vhosts.sqlite")); ?>\n' > /var/www/smoke-php.example/web/esc.php
+grep -q 'bool(false)' <<<"$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/esc.php)" && echo "ok   open_basedir haelt" || fail "PHP kommt an die Datenbank der Oberflaeche"
+# Eigene Direktiven im ISPConfig-Stil müssen angenommen werden (copy-paste-Fall).
+printf 'location = /health {\n    return 200 "ok";\n}\nif ($request_method !~ ^(GET|HEAD|POST)$) {\n    return 405;\n}\n' | vhost conf smoke-php.example >/dev/null
+grep -q 'health' /var/www/smoke-php.example/conf/custom.conf && echo "ok   fremdes Fragment angenommen" || fail "Fragment abgelehnt"
+# Und was aus dem vHost herausführt, muss scheitern.
+echo 'root /etc;' | vhost conf smoke-php.example >/dev/null 2>&1 && fail "root /etc wurde angenommen" || echo "ok   root /etc abgelehnt"
+echo 'listen 0.0.0.0:8081;' | vhost conf smoke-php.example >/dev/null 2>&1 && fail "listen wurde angenommen" || echo "ok   listen abgelehnt"
+vhost php smoke-php.example off >/dev/null
+ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 
 echo "== Aufräumen"
 # Die eigentliche Entfernung übernimmt cleanup() (auch schon über den trap

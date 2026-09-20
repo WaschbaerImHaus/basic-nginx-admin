@@ -76,6 +76,16 @@ final class VhostRepositoryTest extends TestCase
 		self::assertTrue($reloaded->ssl);
 	}
 
+	public function testPhpFlagDefaultsToOffAndCanBeToggled(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		self::assertFalse($v->php, 'PHP muss bei einem neuen vHost aus sein');
+		$this->repo->setPhp($v->id, true);
+		self::assertTrue($this->repo->byId($v->id)->php);
+		$this->repo->setPhp($v->id, false);
+		self::assertFalse($this->repo->byId($v->id)->php);
+	}
+
 	public function testUsersUpsertAndDelete(): void
 	{
 		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);

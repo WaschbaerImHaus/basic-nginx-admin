@@ -2,6 +2,10 @@
 
 ## Implementiert
 
+- **Generierte Konfiguration im ISPConfig-Stil** (2026-09-20): viel vorgegeben, eigener Bereich am Ende des `server`-Blocks zwischen `# >>>>`/`# <<<<`. Zusätzlich Dotfile-Sperre, `favicon.ico`, `robots.txt`, HTTP/3 mit QUIC und `Alt-Svc` bei Hosts mit Zertifikat. `try_files` bewusst auf Server-Ebene statt in einem generierten `location /`, damit ein eingefügtes eigenes `location /` nicht mit "duplicate location" scheitert.
+- **Sperrliste statt Positivliste für eigene Direktiven** (2026-09-20): erlaubt ist alles, was nicht aus dem vHost herausführt – ein Fragment aus einem anderen Projekt lässt sich per copy-paste einsetzen.
+- **PHP pro vHost** (2026-09-20): eigener php-fpm-Pool mit eigenem Systembenutzer `web<id>`, `open_basedir` auf den vHost begrenzt, Fehlerlog in `[domain]/logs/php.log`, Schalter in der Oberfläche und `vhost php <name> on|off`. Ohne PHP werden `.php`-Dateien mit 404 abgewiesen statt als Text ausgeliefert.
+
 - Domains und localhost-Hosts mit Docroot unter `/var/www/`, optional mit Unterordner
 - Bunte Startseite „200“ beim Anlegen
 - Verzeichnisschutz je Host: Benutzer (SHA-512-crypt) und IP-Freigaben, Logik „IP oder Login“, ganz abschaltbar
@@ -15,6 +19,12 @@
 - `vhost migrate-layout` bringt bestehende vHosts auf die neue Struktur (Zwischenordner `.web-migrating`, bricht bei Kollisionen ab, keine Datenverluste bei Abbruch); `vhost fix-permissions [name]` setzt die Soll-Rechte laut `VhostLayout` erneut
 
 ## Offen
+
+- Mehrere PHP-Versionen pro Host wählbar machen (aktuell immer die höchste installierte).
+- Pool-Kennwerte (`pm.max_children` u.a.) pro Host einstellbar; derzeit für alle gleich (`ondemand`, 10).
+- `rewrites.conf` als eigenes Textfeld in der Oberfläche (die Datei wird schon eingebunden, gepflegt wird sie per Hand).
+- gzip-Vorgaben zentral in `nginx.conf` setzen.
+- Systembenutzer eines gelöschten vHosts aufräumen (bleibt derzeit absichtlich bestehen, siehe SECURITY_RISKS.md).
 
 - `www.`-Alias für Domains (heute nur als separate Domain mit eigenem Docroot möglich)
 - PHP-FPM für normale vHosts (heute nur statische Dateien)

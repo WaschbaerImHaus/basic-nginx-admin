@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Einziger Ort mit SQL. Liefert immer Vhost-Objekte, nie rohe Zeilen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:40
+ * @version Letzte Änderung: 2026-09-20 20:20
  */
 
 namespace VhostAdmin;
@@ -91,6 +91,14 @@ final class VhostRepository
 	public function setSsl(int $id, bool $on): void
 	{
 		$this->db->pdo()->prepare('UPDATE vhosts SET ssl = ? WHERE id = ?')->execute([(int)$on, $id]);
+	}
+
+	/**
+	 * PHP-Kennzeichen setzen.
+	 */
+	public function setPhp(int $id, bool $on): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET php = ? WHERE id = ?')->execute([(int)$on, $id]);
 	}
 
 	/**

@@ -53,4 +53,27 @@ final class DatabaseTest extends TestCase
 		$db->initSchema();
 		self::assertSame(0, (int)$db->pdo()->query('SELECT COUNT(*) FROM vhosts')->fetchColumn());
 	}
+	/**
+	 * Eine Datenbank aus einer älteren Fassung hat die Spalte "php" noch nicht.
+	 * initSchema() legt sie nach, statt an "CREATE TABLE IF NOT EXISTS" zu scheitern.
+	 */
+	public function testInitSchemaAddsPhpColumnToOlderDatabase(): void
+	{
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/alt.sqlite']));
+		// Schema in der alten Fassung anlegen: ohne Spalte "php".
+		$db->pdo()->exec(
+			'CREATE TABLE vhosts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, '
+			. "kind TEXT NOT NULL CHECK (kind IN ('domain', 'localhost')), port INTEGER, "
+			. 'subdir TEXT, protect INTEGER NOT NULL DEFAULT 1, ssl INTEGER NOT NULL DEFAULT 0, '
+			. "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+		);
+		$db->pdo()->exec("INSERT INTO vhosts (name, kind) VALUES ('alt.de', 'domain')");
+
+		$db->initSchema();
+
+		$columns = array_column($db->pdo()->query('PRAGMA table_info(vhosts)')->fetchAll(), 'name');
+		self::assertContains('php', $columns);
+		$row = $db->pdo()->query("SELECT php FROM vhosts WHERE name = 'alt.de'")->fetch();
+		self::assertSame(0, (int)$row['php'], 'Bestehende Hosts behalten PHP aus');
+	}
 }
