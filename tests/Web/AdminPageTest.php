@@ -191,4 +191,61 @@ final class AdminPageTest extends TestCase
 		self::assertSame(['127.0.0.1'], $this->page->ips($v));
 		self::assertSame('x@y.de', $this->page->letsEncryptEmail());
 	}
+	/**
+	 * Seite, deren CLI-Aufruf immer scheitert (Programm gibt es nicht) – damit lässt
+	 * sich der Weg "Direktiven abgelehnt" prüfen, ohne echte Direktiven zu brauchen.
+	 */
+	private function pageWithFailingCli(): AdminPage
+	{
+		$config = Config::fromArray([
+			'dbPath' => $this->dir . '/db.sqlite',
+			'wwwRoot' => $this->dir . '/www',
+			'vhostBinary' => $this->dir . '/gibt-es-nicht.php',
+		]);
+		return new AdminPage(
+			$this->repo,
+			new CommandRunner($config, ['php']),
+			$config,
+			new VhostLayout($config),
+			new ReachabilityChecker($this->reachability),
+			$this->session
+		);
+	}
+
+	/**
+	 * Wird ein Snippet abgelehnt, muss der eingegebene Text erhalten bleiben – sonst
+	 * tippt man wegen eines Fehlers in Zeile 3 die ganze Datei neu.
+	 */
+	public function testRejectedSnippetIsKeptForTheNextPageView(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$page = $this->pageWithFailingCli();
+		$page->handlePost(['action' => 'conf', 'name' => 'a.de', 'snippet' => "expires 1d;\nkaputt\n"]);
+
+		self::assertSame("expires 1d;\nkaputt\n", $page->draft($v));
+		// Nur einmal: nach dem Anzeigen ist der Entwurf verbraucht.
+		self::assertNull($page->draft($v));
+	}
+
+	public function testDraftIsNotShownForADifferentVhost(): void
+	{
+		$a = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$b = $this->repo->insert('b.de', VhostKind::Domain, null, null, true);
+		$page = $this->pageWithFailingCli();
+		$page->handlePost(['action' => 'conf', 'name' => 'a.de', 'snippet' => "kaputt\n"]);
+
+		self::assertNull($page->draft($b), 'Der Entwurf gehört zu a.de');
+		self::assertSame("kaputt\n", $page->draft($a));
+	}
+
+	/**
+	 * Bei erfolgreicher Übernahme gibt es nichts aufzubewahren – sonst überschriebe ein
+	 * alter Entwurf später die gespeicherte Fassung im Textfeld.
+	 */
+	public function testNoDraftIsKeptWhenTheSnippetWasAccepted(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->page->handlePost(['action' => 'conf', 'name' => 'a.de', 'snippet' => "expires 1d;\n"]);
+		self::assertNull($this->page->draft($v));
+	}
 }

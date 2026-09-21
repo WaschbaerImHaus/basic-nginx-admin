@@ -54,6 +54,22 @@ final class AdminPage
 	}
 
 	/**
+	 * Abgelehnter Direktiven-Entwurf dieses vHosts, falls es einen gibt.
+	 *
+	 * Wird beim Lesen verbraucht (wie die Meldung): nach dem Anzeigen im Textfeld darf
+	 * er die gespeicherte Fassung nicht noch einmal überdecken.
+	 */
+	public function draft(Vhost $vhost): ?string
+	{
+		$draft = $this->session['draft'] ?? null;
+		if (!is_array($draft) || ($draft['name'] ?? null) !== $vhost->name) {
+			return null;
+		}
+		unset($this->session['draft']);
+		return (string)$draft['text'];
+	}
+
+	/**
 	 * Systembenutzer, unter dem PHP dieses vHosts läuft (für die Anzeige).
 	 */
 	public function phpUser(Vhost $vhost): string
@@ -139,6 +155,19 @@ final class AdminPage
 			return '/';
 		}
 		[$code, $output] = $this->runner->run($command['args'], $command['stdin']);
+		// Abgelehnte Direktiven aufbewahren, damit der eingegebene Text beim nächsten
+		// Seitenaufruf wieder im Textfeld steht. Ohne das wäre nach einem Tippfehler in
+		// Zeile 3 die ganze Eingabe verloren.
+		if ($action === 'conf') {
+			if ($code === 0) {
+				unset($this->session['draft']);
+			} else {
+				$this->session['draft'] = [
+					'name' => (string)($post['name'] ?? ''),
+					'text' => (string)($post['snippet'] ?? ''),
+				];
+			}
+		}
 		$this->session['flash'] = [
 			$code === 0 ? 'ok' : 'err',
 			$output !== '' ? $output : ($code === 0 ? 'Erledigt.' : "Fehler (Exit $code)"),

@@ -24,7 +24,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (374 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (383 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -44,6 +44,8 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - **Entfernen läuft zweistufig**: `remove` ohne Option setzt `deleted_at`, nimmt den Host sofort aus `sites-enabled` (nginx antwortet nicht mehr) und lässt alles andere stehen; `purgeDue()` entfernt nach `Config::$removalGraceMinutes` (60) endgültig, angestossen vom Timer `vhost-admin-purge.timer`. `render()` hält einen vorgemerkten Host gesperrt – sonst würde `install.sh` ihn wiederbeleben. `--now`/`--purge` sind die ausdrücklichen Sofortwege.
 - Dateien unter `/var/www` löscht nur `--purge`. Auch nach Ablauf der Frist bleiben sie liegen; das ist Absicht und darf nicht „aufgeräumt" werden.
 - In einer Pipe kann der Leser jederzeit abbrechen (`| head`, `| grep -q`). `Cli\Application::out()` behandelt das als Normalfall, nicht als Fehler – siehe BUGS.md.
+- Die Oberfläche lädt **nichts aus dem Netz** – keine Schriften, keine Skripte, keine Symbole. Sie läuft lokal; jede externe Anfrage wäre eine Nebenwirkung, die dort niemand erwartet.
+- Der Editor richtet Zeilennummern nur aus, solange das Textfeld `wrap="off"` hat. Mit Zeilenumbruch laufen Nummern und Zeilen auseinander.
 - `NginxSnippet` prüft gegen eine **Sperrliste** (seit 2026-09-20), nicht mehr gegen eine Positivliste. Erlaubt ist alles, was nicht aus dem vHost herausführt; Pfade werden gegen `VhostLayout::snippetScope()` geprüft. Neue Sperren immer dort ergänzen, nie im Renderer.
 - `NginxSnippet` bildet den nginx-Tokenizer nach. Jede Abweichung von nginx ist eine potenzielle Lücke: `#`/`"`/`'` wirken nur am Tokenanfang, und Hostvergleiche laufen **immer** über `inet_pton()`/Namensauflösung, nie über Zeichenketten – dieselbe Adresse hat zu viele Schreibweisen (`2130706433`, `0177.0.0.1`, `::ffff:0:0`).
 - **`conf/` ist für alle außer root schreibgeschützt** (`root:<wwwOwner> 0750`, Datei `0640`) – Nutzervorgabe vom 2026-09-20: „das editieren muss ausschließlich über den admin passieren". Der Besitzer der Website darf nur lesen, `www-data` gar nichts; die Oberfläche holt den Text über `vhost conf-show`. Diese Rechte nie aufweichen, sonst gäbe es einen zweiten Weg, auf dem ungeprüfte Direktiven entstehen.

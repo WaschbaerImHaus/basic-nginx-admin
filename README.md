@@ -24,6 +24,26 @@ Alternativ aus dem Build-Paket: `tar xzf vhost-admin.tar.gz && sudo vhost-admin/
 
 Schreibende Aktionen laufen nie direkt in der Oberfläche, sondern immer über das CLI `vhost` (per sudoers), abgesichert mit CSRF-Token.
 
+## Aufbau
+
+Die Oberfläche nutzt die volle Fensterbreite. Links steht dauerhaft die Liste aller
+vHosts mit ihrem Zustand – erreichbar, HTTPS, Verzeichnisschutz, PHP – sodass ein
+Wechsel zwischen Hosts einen Klick kostet. Rechts der Arbeitsbereich: auf breiten
+Fenstern der Direktiven-Editor links und die Schalter daneben, auf schmalen
+untereinander.
+
+Maschinenwerte (Domains, Pfade, Direktiven) stehen durchgehend in Festbreitenschrift.
+Schriften kommen ausschliesslich vom System: eine lokale Verwaltungsoberfläche soll
+keine Anfragen ins Netz auslösen. Helles und dunkles Farbschema richten sich nach der
+Einstellung des Betriebssystems.
+
+Der Editor für die eigenen Direktiven hat Zeilennummern, füllt gut die halbe
+Fensterhöhe und lässt sich an der unteren Kante grösser ziehen. Der Tabulator rückt
+ein, statt den Fokus weiterzusetzen. Wird eine Direktive abgelehnt, bleibt der
+eingegebene Text erhalten, die beanstandete Zeile wird in den Zeilennummern rot
+markiert und der Editor springt dorthin – man korrigiert die eine Zeile, statt alles
+neu zu tippen.
+
 ## Pfade
 
 | Host | Struktur |
