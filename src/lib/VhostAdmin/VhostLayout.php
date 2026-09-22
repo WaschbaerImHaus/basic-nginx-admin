@@ -220,7 +220,17 @@ final class VhostLayout
 			// bewusst NICHT: die Oberfläche holt den Text über das CLI, nicht aus der Datei.
 			new DirectorySpec($this->confDir($vhost), 'root', $owner, 0750, 'nginx-Snippet (nur root schreibt)'),
 			new DirectorySpec($this->certDir($vhost), 'root', $owner, 0750, 'Symlinks auf die Zertifikate'),
-			new DirectorySpec($this->privateDir($vhost), $owner, $owner, 0750, 'nicht ausgelieferte Dateien'),
+			// private/ steht in open_basedir des php-fpm-Pools – ohne Leserecht wäre diese
+			// Freigabe wirkungslos. Mit PHP ist die Gruppe deshalb der PHP-Benutzer: Er
+			// liest, was dort für ihn liegt (Konfiguration, ausgewertete Daten), schreiben
+			// darf weiterhin nur der Besitzer, und für alle anderen bleibt der Ordner zu.
+			new DirectorySpec(
+				$this->privateDir($vhost),
+				$owner,
+				$vhost->php ? $this->phpUser($vhost) : $owner,
+				0750,
+				'nicht ausgelieferte Dateien (mit PHP für den Pool lesbar)'
+			),
 			// Mit PHP zusätzlich für andere durchquerbar (0751): PHP läuft als eigener
 			// Benutzer und schreibt selbst in logs/php.log – ohne Durchgangsrecht käme es
 			// nicht an die Datei. Lesen kann es die übrigen Logs dadurch nicht, die

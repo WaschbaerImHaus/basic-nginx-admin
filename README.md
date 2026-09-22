@@ -246,6 +246,13 @@ weiter.
 > ist, beträfe das sonst jede Domain, für die es kein `www` gibt. Ist der Nebenname nicht
 > erreichbar, gilt das Zertifikat nur für den Hauptnamen und der Aufruf sagt das.
 
+> **Nachträglich erweitern:** Wer die Umleitung erst einschaltet, wenn das Zertifikat
+> schon da ist, braucht `vhost cert-extend <name>` (in der Oberfläche der Knopf
+> „Zertifikat um www.… erweitern“). `vhost ssl <name> on` überspringt certbot bei
+> vorhandenem Zertifikat bewusst und würde den Namen nie nachtragen. Vor dem Antrag
+> werden beide Namen einzeln geprüft; ist einer nicht erreichbar, bricht der Befehl ab,
+> ohne einen Fehlversuch bei Let's Encrypt zu verbrauchen.
+
 ## Erreichbarkeit
 
 Jeder vHost hat unter `web/.well-known/acme-challenge/vhost-admin-health` eine Datei mit
@@ -320,6 +327,7 @@ sudo vhost ip-del <name> <ip|cidr>
 sudo vhost php <name> on|off                                  # eigener FPM-Pool an/aus
 sudo vhost check-acme [name]                                  # Erreichbarkeit pruefen
 sudo vhost ssl <name> on|off
+sudo vhost cert-extend <name>                                 # www.<domain> ins bestehende Zertifikat nachtragen
 sudo vhost set le_email <adresse>
 sudo vhost set hsts on|off                                   # HSTS wirkt im Browser nach
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
@@ -377,3 +385,38 @@ Der Entwurf der Ansicht selbst liegt in
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`
+
+## Honigtopf-Ansicht
+
+Ein vHost kann eine Ansicht bekommen, die zeigt, was an Angriffen und Scans auf einem
+anderen (dem „Honigtopf") ankommt – je Kalendertag, mit Detailansichten.
+
+```bash
+sudo vhost php <ansichtshost> on                              # die Ansicht ist PHP
+sudo vhost protect <ansichtshost> on                          # sie gehoert nicht ins Netz
+sudo ./honeypot/install-dashboard.sh <ansichtshost> <honigtopf-host> [weitere ...]
+```
+
+Das Skript legt die Ansicht in den Docroot, die Auswertungsklassen nach
+`private/honeypot-lib/`, trägt die Hosts in `/etc/default/vhost-admin-honeypot` ein und
+wertet einmal aus. Danach läuft die Auswertung täglich um 07:20
+(`vhost-admin-honeypot.timer`); ein Lauf von Hand:
+
+```bash
+sudo php /opt/vhost-admin/honeypot/analyse.php --dashboard=<ansichtshost> <honigtopf-host>
+```
+
+**Warum zwei Schritte statt einer Live-Ansicht:** Die Logs gehören root und sollen für
+den Webserver unlesbar bleiben. Die Auswertung rechnet deshalb als root und legt nur das
+Ergebnis dort ab, wo die Ansicht es lesen darf (`private/honeypot/`).
+
+**Was die Ansicht zeigt:** Tagesbilanz mit Vortagsvergleich, Tagesverlauf, wonach gesucht
+wurde (Beutegruppen statt einzelner Pfade), womit gesucht wurde (nennt sich / tarnt sich /
+nennt nichts), das robots.txt-Signal, Anfragen die gar kein Webzugriff waren,
+Anmeldeversuche und daraus abgeleitete Vorschläge. Dahinter jeweils die vollständige
+Liste mit Filtern.
+
+**Was sie bewusst nicht zeigt:** alles, was auf der Client-Adresse beruhen würde. Vor
+diesem Rechner sitzt eine Adressumsetzung; jede Anfrage von aussen erscheint im Log als
+`10.200.0.1`, ein `X-Forwarded-For` liegt nicht an. „Eindeutige Besucher", Herkunftsländer
+oder Top-Angreifer wären deshalb erfunden. Unterschieden wird nach Verhalten.

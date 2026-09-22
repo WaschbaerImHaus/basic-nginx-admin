@@ -284,4 +284,29 @@ final class VhostLayoutTest extends TestCase
 		}
 		self::fail("Verzeichnis $path nicht in den Soll-Rechten");
 	}
+
+	/**
+	 * open_basedir des php-fpm-Pools erlaubt private/ ausdrücklich – ohne Leserecht war
+	 * diese Freigabe aber wirkungslos: Der Ordner gehörte dem Menschen allein
+	 * (0750 besitzer:besitzer), der PHP-Benutzer kam nicht einmal hinein. Mit PHP liest
+	 * er über die Gruppe; geschrieben wird dort weiterhin nur vom Besitzer.
+	 */
+	public function testPrivateDirBecomesReadableForThePhpUserWhenPhpIsOn(): void
+	{
+		$without = $this->specFor(
+			new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, false),
+			'/srv/www/example.com/private'
+		);
+		self::assertSame('max', $without->group, 'ohne PHP bleibt der Ordner privat');
+
+		$with = $this->specFor(
+			new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, true),
+			'/srv/www/example.com/private'
+		);
+		self::assertSame('max', $with->owner, 'schreiben darf weiterhin nur der Besitzer');
+		self::assertSame('web7', $with->group, 'PHP liest über die Gruppe');
+		self::assertSame(0750, $with->mode);
+		self::assertSame(0, $with->mode & 0020, 'PHP darf in private/ nicht schreiben');
+		self::assertSame(0, $with->mode & 0007, 'für alle anderen bleibt der Ordner zu');
+	}
 }

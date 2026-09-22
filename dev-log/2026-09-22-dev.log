@@ -17,3 +17,39 @@
 2026-09-22 16:17  www-Umleitung nach Nutzervorgabe nachgezogen: Voreinstellung immer auf die nackte Domain, "aus" gibt es nicht mehr, und den Schalter nur bei Hauptdomains. Dafuer DomainName::isMainDomain() - die Unterscheidung braeuchte eigentlich die Public Suffix List (ueber 9000 Eintraege, woechentlich gepflegt); stattdessen deckt eine kurze Liste der gelaeufigen zweiteiligen Endungen example.co.uk und Verwandte ab. Ein Irrtum kostet dort nichts Ernstes: Der Schalter wird dann nicht angeboten, die Domain funktioniert unveraendert. Bestandsdatenbanken werden von "none" auf "bare" gezogen, und insert() setzt den Wert jetzt ausdruecklich - der Spaltenstandard einer alten Datenbank waere sonst weiterhin "none".
 2026-09-22 16:17  Die Nebenwirkung der Voreinstellung war der eigentliche Aufwand: Mit "bare" als Standard haette enableSsl() fuer JEDE Hauptdomain zusaetzlich www.<domain> beantragt. certbot prueft jeden angegebenen Namen einzeln - einer ohne DNS-Eintrag laesst den gesamten Antrag scheitern, auch fuer den Hauptnamen. Aus einer Voreinstellung waere damit ein Fehlschlag fuer jede Domain ohne www geworden. Jetzt prueft enableSsl() den Nebennamen vorher ueber den ACME-Marker (ReachabilityChecker::checkName()) und nimmt ihn nur bei Erfolg mit; andernfalls gilt das Zertifikat nur fuer den Hauptnamen und die Ausgabe sagt das.
 2026-09-22 16:17  Am System: nginx -t gruen; "vhost www bienchen.mfsvr.de www" wird mit Begruendung abgelehnt (Unterdomain), mfsvr.de laesst sich weiter umstellen; mfsvr.de hat drei server-Bloecke (:80 beide Namen, :443 Nebenname, :443 kanonisch), bienchen zwei (:80 Umleitung, :443). http://www.mfsvr.de/ leitet weiterhin auf https://mfsvr.de/. Nebenbei zwei eigene frueheren Aussagen korrigiert: bienchen.mfsvr.de loest inzwischen auf (gleiche Adresse wie mfsvr.de) und hat ein eigenes Zertifikat - beide Hosts liefern HTTPS aus (mfsvr.de 200, bienchen 401 wegen Verzeichnisschutz).
+
+2026-09-22 17:35 - Build 10: Zertifikat nachtragen + Honigtopf-Ansicht
+Gemeldeter Fehler: Der Hinweis "Zertifikat unvollstaendig" verwies auf einen Knopf
+"Zertifikat holen", den es bei aktivem HTTPS nicht gibt. Der Knopf allein haette aber
+auch nichts geholfen: enableSsl() ueberspringt certbot, sobald fullchain.pem existiert.
+Also ein eigener Weg - VhostService::extendCertificate(), CLI "vhost cert-extend", Knopf
+direkt im Hinweis. certbot bekommt jetzt --cert-name (sonst legt es bei geaenderter
+Namensliste die zweite Reihe <domain>-0001 an, waehrend nginx fest auf live/<domain>
+zeigt) und --expand (sonst bricht es nicht-interaktiv mit "Please specify --expand" ab).
+Geprueft: "vhost cert-extend bienchen.mfsvr.de" wird korrekt abgelehnt (keine
+Hauptdomain), der Knopf steht in der Oberflaeche, mfsvr.de deckt www.mfsvr.de noch nicht
+ab (SAN nur DNS:mfsvr.de) - www.mfsvr.de loest auf, der Antrag wuerde also durchgehen.
+Ausgestellt wurde bewusst nichts: das ist ein Griff nach aussen und gehoert dem Nutzer.
+
+Honigtopf-Ansicht auf bienchen.mfsvr.de gebaut, nach der Spec vom Vormittag. Aufbau:
+Die Auswertung laeuft als root (nur root liest die Logs) und legt je Kalendertag einen
+JSON-Bericht nach /var/www/bienchen.mfsvr.de/private/honeypot/<host>/<datum>.json; die
+Ansicht liest ausschliesslich diese Fassung. Dabei zwei Dinge aufgefallen, die nur am
+echten Log sichtbar waren:
+  1. Der Abstand robots.txt -> /admin war negativ (-12543 s). Ursache: access.log wird
+     vor access.log.1 gelesen, innerhalb eines Tages standen die Eintraege verkehrt
+     herum. LogParser sortiert jetzt je Tag nach Zeitstempel.
+  2. logrotate schneidet um 06:20, nicht um Mitternacht - access.log.1 enthaelt zwei
+     Kalendertage. Die alte Auswertung zaehlte je Datei und schrieb damit bis zu sechs
+     Stunden dem falschen Tag zu. Gruppiert wird jetzt nach dem Datum in der Zeile.
+Ausserdem: private/ stand in open_basedir des Pools, war fuer den Pool-Benutzer aber
+nicht lesbar (0750 besitzer:besitzer). Die Freigabe lief ins Leere. Mit eingeschaltetem
+PHP ist die Gruppe jetzt der Pool-Benutzer; geschrieben wird dort weiterhin nur vom
+Besitzer.
+Geprueft als web3 mit demselben open_basedir wie der Pool: alle sieben Ansichten
+rendern ohne Warnung, Uebersicht 11 kB, Ereignisliste 286 Zeilen; Pfad-Spielereien
+("host=../etc") fallen auf den ersten gueltigen Host zurueck. nginx: bienchen liefert
+ohne Anmeldung 401 (Verzeichnisschutz steht), mfsvr.de 200. Die Platzhalterseite
+index.html lag vor index.php und haette die Ansicht verdeckt - sie liegt jetzt als
+index.html.platzhalter daneben.
+483 Tests gruen.

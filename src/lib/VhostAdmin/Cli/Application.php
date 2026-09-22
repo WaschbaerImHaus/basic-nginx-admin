@@ -46,6 +46,7 @@ vhost – nginx-vHosts verwalten
   vhost ip-del <name> <ip|cidr>
   vhost php <name> on|off
   vhost ssl <name> on|off
+  vhost cert-extend <name>              (www.<domain> in ein bestehendes Zertifikat nachtragen)
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
@@ -349,6 +350,16 @@ TXT;
 				$target = SubDirectory::fromString($positional[1] ?? null);
 				$this->service->setSubdirectory($vhost, $target);
 				$this->out('Docroot: ' . $this->layout->docroot($this->service->load($vhost->name)) . "\n");
+				return 0;
+
+			case 'cert-extend':
+				// Trägt den Nebennamen in ein bestehendes Zertifikat nach. Eigener Befehl,
+				// weil "ssl on" certbot bei vorhandenem Zertifikat bewusst überspringt.
+				$output = $this->service->extendCertificate($this->service->load($arg(0, 'Name')));
+				if ($output !== '') {
+					$this->out($output . "\n");
+				}
+				$this->out("Zertifikat erweitert.\n");
 				return 0;
 
 			case 'cert-covers':

@@ -5,6 +5,9 @@
 set -euo pipefail
 
 JAR=""
+# Projektverzeichnis (das Skript liegt in debugging/). Wird fuer die Vorlagen der
+# Honigtopf-Ansicht gebraucht, falls der Lauf aus dem Projekt statt aus /opt kommt.
+PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 fail() { echo "FEHLER: $*" >&2; exit 1; }
 expect() { # expect <erwartet> <beschreibung> <curl-args...>
@@ -187,6 +190,46 @@ grep -q 'health' /var/www/smoke-php.example/conf/custom.conf && echo "ok   fremd
 # Und was aus dem vHost herausführt, muss scheitern.
 echo 'root /etc;' | vhost conf smoke-php.example >/dev/null 2>&1 && fail "root /etc wurde angenommen" || echo "ok   root /etc abgelehnt"
 echo 'listen 0.0.0.0:8081;' | vhost conf smoke-php.example >/dev/null 2>&1 && fail "listen wurde angenommen" || echo "ok   listen abgelehnt"
+# private/ steht in open_basedir und muss mit PHP auch wirklich lesbar sein - genau
+# darauf liegt die Honigtopf-Ansicht auf. Geschrieben werden darf dort nichts, und
+# ausgeliefert schon gar nicht.
+vhost fix-permissions smoke-php.example >/dev/null
+printf 'geheimnis\n' > /var/www/smoke-php.example/private/probe.txt
+chown "$(stat -c '%U' /var/www/smoke-php.example/private)" /var/www/smoke-php.example/private/probe.txt
+chmod 640 /var/www/smoke-php.example/private/probe.txt
+chgrp "$(stat -c '%G' /var/www/smoke-php.example/private)" /var/www/smoke-php.example/private/probe.txt
+printf '<?php var_dump(trim((string)@file_get_contents(__DIR__."/../private/probe.txt"))); ?>\n' > /var/www/smoke-php.example/web/priv.php
+grep -q 'geheimnis' <<<"$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/priv.php)" \
+	&& echo "ok   private/ ist fuer den Pool lesbar" || fail "PHP kommt nicht an private/ - die Honigtopf-Ansicht faende ihre Berichte nicht"
+printf '<?php var_dump(@file_put_contents(__DIR__."/../private/schreib.txt", "x")); ?>\n' > /var/www/smoke-php.example/web/privw.php
+grep -q 'bool(false)' <<<"$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/privw.php)" \
+	&& echo "ok   private/ bleibt fuer PHP schreibgeschuetzt" || fail "PHP darf in private/ schreiben"
+
+# Die Honigtopf-Ansicht selbst: Dateien und Klassen an ihren Platz, ein Tagesbericht
+# dazu, und die Seite muss durch nginx und php-fpm hindurch erscheinen.
+# Die Vorlage liegt je nach Aufrufort im Projekt oder in der Installation.
+LIBSRC=/opt/vhost-admin/lib/Honeypot; [ -d "$PROJECT/src/lib/Honeypot" ] && LIBSRC="$PROJECT/src/lib/Honeypot"
+PAGESRC=/opt/vhost-admin/public/honeypot; [ -d "$PROJECT/src/public/honeypot" ] && PAGESRC="$PROJECT/src/public/honeypot"
+HP=/var/www/smoke-php.example
+PUSER=$(stat -c '%U' "$HP/private"); PGROUP=$(stat -c '%G' "$HP/private")
+WUSER=$(stat -c '%U' "$HP/web"); WGROUP=$(stat -c '%G' "$HP/web")
+install -d -m 750 -o "$PUSER" -g "$PGROUP" "$HP/private/honeypot-lib/Honeypot" "$HP/private/honeypot/smoke.example"
+install -m 640 -o "$PUSER" -g "$PGROUP" "$LIBSRC"/*.php "$HP/private/honeypot-lib/Honeypot/"
+printf '{"date":"2026-01-01","complete":true,"requests":7,"status":{"404":5},"hours":{"07":7},"agents":{"scanner":7},"notFound":{"/.env":5},"loot":{"Zugangsdaten":5},"events":[{"time":"07:00:00","method":"GET","path":"/.env","status":"404","agent":"scanner","group":"Zugangsdaten","probe":"","request":"GET /.env HTTP/1.1"}]}\n' \
+	> "$HP/private/honeypot/smoke.example/2026-01-01.json"
+chown "$PUSER:$PGROUP" "$HP/private/honeypot/smoke.example/2026-01-01.json"
+chmod 640 "$HP/private/honeypot/smoke.example/2026-01-01.json"
+install -d -m 2775 -o "$WUSER" -g "$WGROUP" "$HP/web/hp"
+for f in index.php detail.php bootstrap.php style.css; do
+	install -m 644 -o "$WUSER" -g "$WGROUP" "$PAGESRC/$f" "$HP/web/hp/$f"
+done
+OUT=$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/hp/)
+grep -q 'Honigtopf' <<<"$OUT" || fail "Honigtopf-Ansicht erscheint nicht: $(head -c 200 <<<"$OUT")"
+grep -q 'Sondierungen' <<<"$OUT" || fail "Honigtopf-Ansicht ohne Kennzahlen"
+echo "ok   Honigtopf-Ansicht liefert aus"
+grep -q '\.env' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/?ansicht=pfade')" \
+	&& echo "ok   Detailansicht liefert aus" || fail "Detailansicht ohne Inhalt"
+
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 

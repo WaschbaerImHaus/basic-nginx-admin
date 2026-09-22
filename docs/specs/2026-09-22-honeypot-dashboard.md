@@ -198,3 +198,29 @@ schreibt (`honeypot/analyse.php`, siehe unten). Grund: Die Logs gehören root un
 - **Köderformulare, die Zugangsdaten mitschreiben:** Wer Zugangsdaten einsammelt, betreibt
   keinen Honigtopf mehr, sondern eine Falle mit fremden Daten darin. `/admin/` bleibt eine
   schlichte Seite; die Anfrage allein ist das Signal.
+
+---
+
+## Umgesetzt am 2026-09-22 (Build 10)
+
+Die Ansicht liegt unter `src/public/honeypot/` (`index.php`, `detail.php`, `bootstrap.php`,
+`style.css`), die Auswertung unter `src/lib/Honeypot/`. Eingerichtet wird sie mit
+`honeypot/install-dashboard.sh <ansichtshost> <honigtopf-host>`.
+
+Alle sieben Kacheln sind gebaut. Dazu kamen fünf Detailansichten, die die Spec noch nicht
+vorsah: alle gesuchten Pfade mit Filter nach Beutegruppe, alle Kennungen mit ihrer Klasse,
+die Rohdaten der Nicht-HTTP-Anfragen, die Anmeldeversuche und eine Ereignisliste mit
+Filtern (Sondierungen / kein Webzugriff / robots.txt und /admin) und Volltextsuche.
+
+Zwei Annahmen der Spec haben sich an den echten Daten als falsch erwiesen:
+
+1. **„Vortag" ist nicht gleich `access.log.1`.** logrotate schneidet um 06:20, nicht um
+   Mitternacht; die Datei enthält zwei Kalendertage. Gruppiert wird deshalb nach dem
+   Datum *in der Zeile*.
+2. **Die Einträge kommen nicht chronologisch an.** `access.log` wird vor `access.log.1`
+   gelesen. Ohne Sortierung je Tag ergab der Abstand robots.txt → `/admin/` einen
+   negativen Wert (gemessen: −12543 s).
+
+Ergänzt gegenüber der Spec: `CONNECT` zählt jetzt zu „kein Webzugriff" (syntaktisch HTTP,
+sucht aber einen offenen Proxy), eine verstümmelte `GET`-Anfrage mit Status 400 dagegen
+nicht – sie war HTTP, nur fehlerhaft.

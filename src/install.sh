@@ -37,6 +37,12 @@ rm -rf "$APP/lib" "$APP/public"
 cp -r "$SRC/lib" "$APP/lib"
 find "$APP/lib" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m 644 "$SRC/bootstrap.php" "$APP/bootstrap.php"
+# Die Honigtopf-Ansicht wird nicht hier ausgeliefert, sondern von
+# honeypot/install-dashboard.sh in den Docroot ihres vHosts kopiert. Hier liegt nur
+# die Vorlage.
+install -d -m 755 "$APP/public"
+cp -r "$SRC/public/honeypot" "$APP/public/honeypot"
+find "$APP/public" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m 644 "$SRC"/templates/index.html "$APP/templates/"
 install -m 755 "$SRC"/bin/vhost.php "$APP/bin/"
 install -m 755 "$SRC"/bin/vhost /usr/local/sbin/vhost
@@ -103,6 +109,10 @@ install -m 644 "$SRC/etc/vhost-admin-honeypot.timer" /etc/systemd/system/vhost-a
 if [ -f "$SRC/../honeypot/analyse.php" ]; then
 	install -d -m 755 "$APP/honeypot" "$APP/research/honeypot"
 	install -m 755 "$SRC/../honeypot/analyse.php" "$APP/honeypot/analyse.php"
+	for script in install-site.sh install-dashboard.sh; do
+		[ -f "$SRC/../honeypot/$script" ] && install -m 755 "$SRC/../honeypot/$script" "$APP/honeypot/$script"
+	done
+	[ -d "$SRC/../honeypot/site" ] && cp -r "$SRC/../honeypot/site" "$APP/honeypot/"
 else
 	echo "Hinweis: honeypot/analyse.php fehlt im Paket - die taegliche Auswertung bleibt leer." >&2
 fi
@@ -122,6 +132,18 @@ systemctl enable --now vhost-admin-honeypot.timer >/dev/null
 # schreibt). Ohne diesen Schritt bliebe ein Bestandshost auf den alten Rechten.
 /usr/local/sbin/vhost fix-permissions
 /usr/local/sbin/vhost render
+
+# Honigtopf-Ansicht auffrischen, falls eine eingerichtet ist. Sie traegt eine Kopie der
+# Auswertungsklassen in ihrem privaten Bereich (open_basedir laesst sie nicht an
+# /opt/vhost-admin); ohne diesen Schritt bliebe die Kopie nach einem Update alt.
+# shellcheck disable=SC1091
+[ -f /etc/default/vhost-admin-honeypot ] && . /etc/default/vhost-admin-honeypot
+if [ -n "${HONEYPOT_DASHBOARD:-}" ] && [ -n "${HONEYPOT_HOSTS:-}" ] && [ -x "$APP/honeypot/install-dashboard.sh" ]; then
+	# shellcheck disable=SC2086
+	"$APP/honeypot/install-dashboard.sh" "$HONEYPOT_DASHBOARD" $HONEYPOT_HOSTS >/dev/null \
+		&& echo "Honigtopf-Ansicht aufgefrischt: $HONEYPOT_DASHBOARD" \
+		|| echo "Hinweis: Honigtopf-Ansicht konnte nicht aufgefrischt werden." >&2
+fi
 
 echo
 echo "Fertig."

@@ -567,8 +567,10 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 			<?php if ($view->ssl && !$page->certificateCoversAlias($view)): ?>
 				<p class="hint"><?= mark('bad', 'Zertifikat unvollständig') ?> Das Zertifikat deckt
 					<span class="mono"><?= h($alias) ?></span> noch nicht ab. Wer diesen Namen über HTTPS aufruft, bekommt
-					einen Zertifikatsfehler, bevor die Umleitung greift. Einmal „Zertifikat holen“ unten holt eines für
-					beide Namen.</p>
+					einen Zertifikatsfehler, bevor die Umleitung greift.</p>
+				<?= form('cert_extend', ['name' => $view->name], 'Zertifikat um ' . $alias . ' erweitern', 'primary') ?>
+				<p class="hint">Vor dem Antrag wird geprüft, ob beide Namen erreichbar sind – ein fehlender ließe den
+					ganzen Antrag scheitern. Der Vorgang dauert einige Sekunden.</p>
 			<?php endif ?>
 		</div>
 		<?php endif ?>

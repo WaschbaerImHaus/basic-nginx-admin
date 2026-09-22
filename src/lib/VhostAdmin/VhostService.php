@@ -602,6 +602,53 @@ final class VhostService
 	 * Prüft die Renewal-Konfiguration von certbot, nicht das Zertifikat selbst: dort
 	 * steht, für welche Namen es ausgestellt wurde.
 	 */
+	/**
+	 * Trägt den Nebennamen (www.<domain>) in ein bereits bestehendes Zertifikat nach.
+	 *
+	 * enableSsl() überspringt certbot, sobald fullchain.pem existiert – richtig, damit
+	 * ein Wiedereinschalten nicht jedes Mal ein neues Zertifikat beantragt. Genau deshalb
+	 * braucht der Nachtrag einen eigenen Weg: Wer die www-Umleitung erst nach der
+	 * Ausstellung einschaltet, hätte sonst dauerhaft ein Zertifikat, das den umgeleiteten
+	 * Namen nicht abdeckt (gemeldet am 2026-09-22).
+	 *
+	 * @return string Ausgabe von certbot
+	 * @throws \RuntimeException wenn es nichts zu erweitern gibt oder der Nebenname fehlt
+	 */
+	public function extendCertificate(Vhost $vhost): string
+	{
+		$alias = $vhost->aliasName();
+		if ($alias === null) {
+			throw new \RuntimeException("\"{$vhost->name}\" hat keinen Nebennamen – nichts zu erweitern.");
+		}
+		if (!$vhost->ssl) {
+			throw new \RuntimeException(
+				"Für \"{$vhost->name}\" ist HTTPS aus. Der normale Weg (\"Zertifikat holen\") deckt beide Namen ab."
+			);
+		}
+		$email = $this->letsEncryptEmail()
+			?? throw new \RuntimeException("Keine Let's-Encrypt-E-Mail hinterlegt (Einstellungen / \"vhost set le_email ...\")");
+
+		// Beide Namen einzeln prüfen, bevor certbot läuft. certbot prüft jeden Namen
+		// selbst, und ein einziger nicht erreichbarer Name lässt den GESAMTEN Antrag
+		// scheitern – samt Kontingentverbrauch für den Hauptnamen (fünf Fehlversuche
+		// pro Stunde). Ein Abbruch hier kostet dagegen nichts.
+		$vhost = $this->ensureHealthMarker($vhost);
+		foreach ([$vhost->name, $alias] as $name) {
+			$result = $this->reachabilityChecker->checkName($name, $vhost->healthToken);
+			if (!$result->isOk()) {
+				throw new \RuntimeException(
+					"Kein erweitertes Zertifikat: \"$name\" ist nicht erreichbar (" . $result->status->label() . '). '
+					. 'Let\'s Encrypt prüft jeden Namen einzeln – ein fehlender lässt den ganzen Antrag scheitern.'
+				);
+			}
+		}
+
+		$output = $this->certbot->obtain($vhost->name, $this->layout->webDir($vhost), $email, [$alias]);
+		$this->linkCertificates($vhost);
+		$this->render($this->load($vhost->name));
+		return $output;
+	}
+
 	public function certificateCoversAlias(Vhost $vhost): bool
 	{
 		$alias = $vhost->aliasName();

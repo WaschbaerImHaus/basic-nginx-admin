@@ -12,12 +12,14 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - www-Umleitung: `sudo vhost www <name> bare|www`, voreingestellt `bare`. Kein „aus“, und **nur für Hauptdomains** (`DomainName::isMainDomain()`). Es gibt **nie** ein Verzeichnis `www.<domain>`.
 - Der Nebenname kommt nur ins Zertifikat, **wenn er erreichbar ist**: certbot prüft jeden Namen einzeln, und einer ohne DNS-Eintrag lässt den ganzen Antrag scheitern – auch für den Hauptnamen. Diese Prüfung nie weglassen, sie hängt direkt an der Voreinstellung.
 - Docroot-Unterordner ändern: `sudo vhost subdir <name> [unterordner]` – der Inhalt zieht mit, `.well-known/` bleibt unter `web/` (der ACME-Pfad hängt an `web/`, nicht am Docroot).
+- Zertifikat um den Nebennamen erweitern: `sudo vhost cert-extend <name>` – `ssl on` überspringt certbot bei vorhandenem Zertifikat bewusst, trägt den www-Namen also nie nach.
+- Honigtopf-Ansicht einrichten: `sudo ./honeypot/install-dashboard.sh <ansichtshost> <honigtopf-host> [weitere ...]`; Auswertung von Hand: `sudo php honeypot/analyse.php --dashboard=<ansichtshost> <host>`
 - Fertige Konfiguration ansehen: `sudo vhost show <name>` (setzt Auth-Snippet und eigene Direktiven in den server-Block ein)
 - PHP pro vHost: `sudo vhost php <name> on|off`" (eigener FPM-Pool als `web<id>`)
 
 ## Struktur
 - `src/lib/VhostAdmin/` – Klassen (Namespace `VhostAdmin`, Autoloader `src/bootstrap.php`)
-  - `Config` Pfade/Ports (inkl. `backupDir`) · `Database` PDO/Schema · `Value/*` validierende Wertobjekte, u. a. `Value\NginxSnippet` (Positivliste erlaubter Direktiven, Tokenizer über `;`/`{`/`}` mit nginx-treuer Behandlung von `#`/`"`/`'` **nur am Tokenanfang**, prüft die Klammerbilanz und lehnt `proxy_pass` auf den eigenen Rechner ab – per Adressvergleich, nicht per Zeichenkette) · `Vhost` Entität (hat **keine** Pfadmethoden mehr) · `VhostKind` Enum · `VhostRepository` SQL
+  - `Config` Pfade/Ports (inkl. `backupDir`) · `Database` PDO/Schema · `Value/*` validierende Wertobjekte, u. a. `Value\NginxSnippet` (Sperrliste, siehe Regeln; Tokenizer über `;`/`{`/`}` mit nginx-treuer Behandlung von `#`/`"`/`'` **nur am Tokenanfang**, prüft die Klammerbilanz und lehnt `proxy_pass` auf den eigenen Rechner ab – per Adressvergleich, nicht per Zeichenkette) · `Vhost` Entität (hat **keine** Pfadmethoden mehr) · `VhostKind` Enum · `VhostRepository` SQL
   - `VhostLayout` – einzige Quelle für die Pfade **und** Soll-Rechte je vHost (`web/`, `conf/`, `cert/`, `private/`, `logs/`); liefert `DirectorySpec`-Objekte (Pfad, Owner, Gruppe, Modus, Beschreibung)
   - `Migration\LayoutMigrator` – bringt vHosts aus der alten flachen Struktur auf `web/conf/cert/private/logs`; verschiebt über den Zwischenordner `.web-migrating`, bricht bei Kollisionen mit Ausnahme ab statt zu überschreiben
   - `Php\PoolRenderer` php-fpm-Pool je vHost · `Php\FpmReloaderInterface`/`Php\SystemdFpmReloader` Reload von php-fpm · `Php\SystemUsersInterface`/`Php\SystemUsers` Systembenutzer `web<id>` anlegen
@@ -26,9 +28,11 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Ssl\CertbotInterface`/`Ssl\CertbotClient` Zertifikatsbeschaffung · `Ssl\ReachabilityChecker` + `Ssl\AcmeReachabilityInterface`/`Ssl\CurlAcmeReachability` Erreichbarkeitstest über den ACME-Marker (parallel per curl_multi)
   - `VhostService` Anwendungsfälle (verbindet Repository, Renderer, Reloader, certbot, Layout)
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
+- `src/lib/Honeypot/` – Auswertung der Honigtopf-Logs (Namespace `Honeypot`, eigener Autoloader in `src/bootstrap.php`, hängt bewusst **nicht** an `VhostAdmin`): `LogEntry`/`LogParser` (Zeilen zerlegen, nach Kalendertag gruppieren und **je Tag nach Zeit sortieren**), `LootClassifier`, `LoginAttempts`, `DayReport` (Kennzahlen eines Tages, zugleich JSON-Austauschformat), `ReportStore` (Ablage, prüft Host und Datum streng), `Suggestions`
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
+- `src/public/honeypot/` – Vorlage der Honigtopf-Ansicht (`index.php`, `detail.php`, `bootstrap.php`, `style.css`); `honeypot/install-dashboard.sh` kopiert sie in den Docroot des Ansichtshosts und die Klassen nach `private/honeypot-lib/`
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (427 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (483 Tests, Stand 2026-09-22 nach Honigtopf-Ansicht); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -55,9 +59,18 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - `NginxSnippet` bildet den nginx-Tokenizer nach. Jede Abweichung von nginx ist eine potenzielle Lücke: `#`/`"`/`'` wirken nur am Tokenanfang, und Hostvergleiche laufen **immer** über `inet_pton()`/Namensauflösung, nie über Zeichenketten – dieselbe Adresse hat zu viele Schreibweisen (`2130706433`, `0177.0.0.1`, `::ffff:0:0`).
 - **`conf/` ist für alle außer root schreibgeschützt** (`root:<wwwOwner> 0750`, Datei `0640`) – Nutzervorgabe vom 2026-09-20: „das editieren muss ausschließlich über den admin passieren". Der Besitzer der Website darf nur lesen, `www-data` gar nichts; die Oberfläche holt den Text über `vhost conf-show`. Diese Rechte nie aufweichen, sonst gäbe es einen zweiten Weg, auf dem ungeprüfte Direktiven entstehen.
 - Ändern sich Soll-Rechte, muss `install.sh` sie bei bestehenden Hosts nachziehen (`vhost fix-permissions` läuft dort vor `render`) – sonst bleibt ein Bestandshost auf den alten Rechten.
-- Das Snippet in `conf/custom.conf` wird nie von Hand gepflegt, sondern ausschließlich über die Oberfläche; `NginxSnippet` prüft gegen eine Positivliste inklusive Klammerbilanz.
+- Das Snippet in `conf/custom.conf` wird nie von Hand gepflegt, sondern ausschließlich über die Oberfläche; `NginxSnippet` prüft es inklusive Klammerbilanz.
 
 ## Bewusste Abweichungen von der globalen CLAUDE.md
 - Kein Windows/ARM-Cross-Build, kein Windows-Setup, keine `.pid`: Linux-spezifische nginx/systemd/sudoers-Verwaltung ohne eigenen Daemon.
 - Domains binden öffentlich (0.0.0.0:80/443) – Nutzerentscheidung vom 2026-09-17, weil Let's Encrypt und Webauftritt es erfordern. localhost-Hosts und Oberfläche binden nur 127.0.0.1.
 - PHP-Projekt: gepusht werden nur vollständige Builds (`build.sh`).
+
+## Honigtopf (Ansicht unter einem eigenen vHost)
+- Die Ansicht **rechnet nichts selbst**. Die Logs gehören root und sollen für den Webserver unlesbar bleiben; die Auswertung läuft als root (`vhost-admin-honeypot.timer`, täglich 07:20) und legt je Kalendertag einen JSON-Bericht nach `<ansichtshost>/private/honeypot/<host>/<datum>.json`. Diese Trennung nie aufweichen.
+- Die Ansicht kommt wegen `open_basedir` **nicht** an `/opt/vhost-admin`. Klassen und Berichte liegen deshalb als Kopie unter `private/` – `install.sh` frischt beides bei jedem Update auf, sofern `HONEYPOT_DASHBOARD` in `/etc/default/vhost-admin-honeypot` steht. Wer die Klassen ändert, muss den Installer laufen lassen, sonst arbeitet die Ansicht mit einer alten Kopie.
+- **Es gibt keine Client-Adresse.** Vor dem Rechner sitzt eine Adressumsetzung; jede Anfrage von aussen erscheint als `10.200.0.1`, ein `X-Forwarded-For` liegt nicht an. Keine Kennzahl auf dieser Grundlage bauen – „eindeutige Besucher", Herkunft, Top-Angreifer wären erfunden. Unterschieden wird nach Verhalten (Werkzeug, gesuchte Pfade, Zeitmuster, Protokolltreue).
+- logrotate schneidet um **06:20**, nicht um Mitternacht: `access.log.1` enthält zwei Kalendertage. Deshalb wird nach dem Datum **in der Zeile** gruppiert, und die Einträge eines Tages werden sortiert – gelesen wird die neuere Datei zuerst, sonst wäre jede Messung „was kam danach" negativ (belegt am 2026-09-22).
+- nginx liefert `index.html` vor `index.php`: Eine Platzhalterseite im Docroot verdeckt die Ansicht. `install-dashboard.sh` legt sie beiseite.
+- `robots.txt` wird auf dem Honigtopf **protokolliert** (nur `log_not_found off`). Ein `/admin/`-Abruf **nach** dem Lesen der `robots.txt` ist die schärfste Aussage der Seite; ohne ist es blosses Raten. `access_log off` an dieser Stelle würde genau das Signal vernichten.
+- Keine Köderformulare, die Zugangsdaten mitschreiben: Wer fremde Zugangsdaten einsammelt, betreibt keinen Honigtopf mehr. `/admin/` bleibt eine schlichte Seite, die Anfrage allein ist das Signal.

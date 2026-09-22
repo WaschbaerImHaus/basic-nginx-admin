@@ -171,6 +171,7 @@ final class AdminPage
 			'ip_add' => ['args' => ['ip-add', $name, $field('cidr')], 'stdin' => null],
 			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
+			'cert_extend' => ['args' => ['cert-extend', $name], 'stdin' => null],
 			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
 			'www' => ['args' => ['www', $name, $field('mode')], 'stdin' => null],
 			// Leeres Feld = Docroot ist web/ selbst; das CLI erwartet dann kein Argument.

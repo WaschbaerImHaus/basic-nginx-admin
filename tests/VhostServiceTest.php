@@ -1190,4 +1190,77 @@ final class VhostServiceTest extends TestCase
 		$this->service->enableSsl($this->repo->byName('shop.um.example'));
 		self::assertSame([[]], $this->certbot->alsoFor);
 	}
+
+	/**
+	 * Der gemeldete Fehler vom 2026-09-22: Die Oberfläche wies auf ein unvollständiges
+	 * Zertifikat hin und verwies auf einen Knopf „Zertifikat holen“ – den es bei bereits
+	 * aktivem HTTPS gar nicht gibt. Schlimmer noch: enableSsl() überspringt certbot, sobald
+	 * fullchain.pem existiert, hätte den Nebennamen also auch mit Knopf nie nachgetragen.
+	 * Dafür gibt es jetzt einen eigenen Weg, der certbot auch bei vorhandenem Zertifikat ruft.
+	 */
+	public function testExtendCertificateRequestsBothNamesAlthoughCertificateExists(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->service->enableSsl($this->repo->byName('um.example'));
+		$this->certbot->calls = [];
+		$this->certbot->alsoFor = [];
+
+		$this->service->extendCertificate($this->repo->byName('um.example'));
+
+		self::assertSame([['www.um.example']], $this->certbot->alsoFor, 'der Nebenname muss mitbeantragt werden');
+		self::assertSame(
+			[['um.example', $this->dir . '/www/um.example/web', 'admin@example.com']],
+			$this->certbot->calls,
+			'derselbe Webroot wie bei der Erstausstellung'
+		);
+	}
+
+	/**
+	 * Ein Nebenname ohne DNS-Eintrag lässt den GESAMTEN certbot-Antrag scheitern, auch
+	 * für den Hauptnamen – und jeder Fehlversuch zählt gegen das Kontingent der Domain.
+	 * Darum muss die Erweiterung vorher abbrechen, ohne certbot überhaupt zu rufen.
+	 */
+	public function testExtendCertificateRefusesUnreachableAliasWithoutCallingCertbot(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->service->enableSsl($this->repo->byName('um.example'));
+		$this->certbot->calls = [];
+		$this->reachability->statusByName['www.um.example'] = ReachabilityStatus::DnsFailed;
+
+		try {
+			$this->service->extendCertificate($this->repo->byName('um.example'));
+			self::fail('eine nicht erreichbare Nebendomain muss abgelehnt werden');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('www.um.example', $e->getMessage());
+		}
+		self::assertSame([], $this->certbot->calls, 'kein Fehlversuch bei Let\'s Encrypt');
+	}
+
+	/**
+	 * Ohne aktives HTTPS gibt es kein Zertifikat zum Erweitern – dann ist der normale
+	 * Weg („Zertifikat holen“) der richtige, der beide Namen ohnehin abdeckt.
+	 */
+	public function testExtendCertificateRefusesWhenSslIsOff(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$this->service->createDomain(DomainName::fromString('um.example'), null);
+
+		$this->expectException(\RuntimeException::class);
+		$this->service->extendCertificate($this->repo->byName('um.example'));
+	}
+
+	/**
+	 * Eine Unterdomain hat keinen Nebennamen; es gibt nichts zu erweitern.
+	 */
+	public function testExtendCertificateRefusesForSubdomain(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$this->service->createDomain(DomainName::fromString('shop.um.example'), null);
+		$this->service->enableSsl($this->repo->byName('shop.um.example'));
+
+		$this->expectException(\RuntimeException::class);
+		$this->service->extendCertificate($this->repo->byName('shop.um.example'));
+	}
 }

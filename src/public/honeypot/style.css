@@ -1,0 +1,121 @@
+/*
+ * Gestaltung der Honigtopf-Ansicht.
+ *
+ * Dieselben Farbmarken wie die Verwaltungsoberfläche, dieselbe Regel: nichts aus dem
+ * Netz – keine Schriften, keine Skripte, keine Symbole. Eine Seite, die Scanner
+ * beobachtet, darf nicht selbst bei Dritten anklopfen.
+ *
+ * @author Kurt Ingwer
+ * @version Letzte Änderung: 2026-09-22 18:00
+ */
+
+:root {
+	--ground:#eef1f5; --surface:#fff; --sunken:#e7ebf1;
+	--ink:#16202b; --muted:#5e6b7a; --line:#d3dae3; --line-soft:#e4e9ef;
+	--act:#2b4acb; --ok:#17734a; --warn:#8a5a00; --bad:#b3261e; --hive:#8a5a00;
+	--mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+	--sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ground:#10151b; --surface:#171d25; --sunken:#0c1117;
+		--ink:#dde4ec; --muted:#8d9aab; --line:#2a333f; --line-soft:#222a34;
+		--act:#8ea4ff; --ok:#57c88d; --warn:#d9a441; --bad:#ef7a72; --hive:#d9a441;
+	}
+}
+
+* { box-sizing:border-box; }
+body {
+	margin:0; background:var(--ground); color:var(--ink);
+	font:15px/1.55 var(--sans);
+}
+a { color:var(--act); }
+code, .mono { font-family:var(--mono); font-size:.92em; }
+
+/* ---------- Kopfzeile ---------- */
+.top {
+	display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap;
+	padding:.7rem 1.25rem; background:var(--surface); border-bottom:1px solid var(--line);
+	position:sticky; top:0; z-index:2;
+}
+.top .name { font-weight:600; font-size:1rem; text-decoration:none; color:var(--ink); }
+.top .name .hive { color:var(--hive); }
+.top .where { color:var(--muted); font-size:.85rem; font-family:var(--mono); }
+.top .spacer { flex:1; }
+.top form { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color:var(--muted); }
+select, input[type=search] {
+	font:inherit; font-size:.85rem; padding:.25rem .4rem;
+	background:var(--surface); color:var(--ink);
+	border:1px solid var(--line); border-radius:4px;
+}
+button {
+	font:inherit; font-size:.85rem; padding:.28rem .7rem; border-radius:4px;
+	border:1px solid var(--line); background:var(--sunken); color:var(--ink); cursor:pointer;
+}
+button.primary { background:var(--act); border-color:var(--act); color:#fff; }
+
+.work { padding:1.25rem; }
+.crumb { margin:0 0 .9rem; font-size:.87rem; color:var(--muted); }
+
+/* ---------- Kacheln ---------- */
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(21rem,1fr)); gap:1rem; align-items:start; }
+.tile {
+	background:var(--surface); border:1px solid var(--line); border-radius:6px;
+	padding:.9rem 1.05rem;
+}
+.tile.wide { grid-column:1/-1; }
+.tile > h2 {
+	font-size:.8rem; font-weight:600; color:var(--muted); margin:0 0 .7rem;
+	text-transform:uppercase; letter-spacing:.04em;
+	display:flex; gap:.5rem; align-items:baseline; justify-content:space-between;
+}
+.tile > h2 a { font-size:.9em; text-transform:none; letter-spacing:0; }
+.hint { color:var(--muted); font-size:.85rem; margin:.7rem 0 0; }
+
+/* ---------- Zahlen ---------- */
+.figures { display:flex; flex-wrap:wrap; gap:1.4rem; }
+.figure .value { font-size:1.9rem; line-height:1.1; font-variant-numeric:tabular-nums; }
+.figure .label { font-size:.8rem; color:var(--muted); }
+.figure .value.bad { color:var(--bad); }
+.figure .value.warn { color:var(--warn); }
+.delta { font-size:.8rem; color:var(--muted); }
+
+/* ---------- Balkenlisten ---------- */
+.bars { display:grid; grid-template-columns:auto 1fr auto; gap:.3rem .7rem; align-items:center; }
+.bars .key { font-size:.87rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:16rem; }
+.bars .key.mono { font-family:var(--mono); font-size:.8rem; }
+.bars .track { background:var(--sunken); border-radius:2px; height:.7rem; overflow:hidden; }
+.bars .fill { background:var(--act); height:100%; border-radius:2px; }
+.bars .fill.warn { background:var(--warn); }
+.bars .fill.bad { background:var(--bad); }
+.bars .num { font-family:var(--mono); font-size:.8rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+/* ---------- Tagesverlauf ---------- */
+.hours { display:flex; align-items:flex-end; gap:2px; height:5.5rem; }
+.hours .h { flex:1; background:var(--sunken); border-radius:2px 2px 0 0; position:relative; min-height:2px; }
+.hours .h .f { position:absolute; bottom:0; left:0; right:0; background:var(--act); border-radius:2px 2px 0 0; }
+.scale { display:flex; justify-content:space-between; font-size:.72rem; color:var(--muted); font-family:var(--mono); margin-top:.25rem; }
+
+/* ---------- Tabellen ---------- */
+table { border-collapse:collapse; width:100%; font-size:.87rem; }
+th, td { text-align:left; padding:.3rem .55rem .3rem 0; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+th { font-size:.75rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+td.num, th.num { text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+td.mono { font-family:var(--mono); font-size:.82rem; word-break:break-all; }
+tr.probe td { color:var(--warn); }
+tr.violation td { color:var(--bad); }
+
+.tag {
+	display:inline-block; padding:.05em .45em; border-radius:3px;
+	font-size:.72rem; font-weight:600; font-family:var(--mono); border:1px solid;
+	color:var(--muted); border-color:var(--line);
+}
+.tag.bad { color:var(--bad); border-color:color-mix(in srgb, var(--bad) 35%, transparent); }
+.tag.warn { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 35%, transparent); }
+.tag.ok { color:var(--ok); border-color:color-mix(in srgb, var(--ok) 35%, transparent); }
+
+.filters { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin-bottom:.9rem; }
+.empty { color:var(--muted); font-size:.9rem; }
+.note { max-width:70ch; }
+ul.suggestions { margin:0; padding-left:1.1rem; }
+ul.suggestions li { margin-bottom:.5rem; max-width:80ch; }
