@@ -41,10 +41,20 @@ final class ReportStore
 		if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
 			throw new \RuntimeException("Kann Berichtsordner nicht anlegen: $dir");
 		}
+		$file = $dir . '/' . $report->date . '.json';
 		$json = json_encode($report, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-		if (file_put_contents($dir . '/' . $report->date . '.json', $json) === false) {
-			throw new \RuntimeException('Kann Bericht nicht schreiben: ' . $dir . '/' . $report->date . '.json');
+		if (file_put_contents($file, $json) === false) {
+			throw new \RuntimeException("Kann Bericht nicht schreiben: $file");
 		}
+		// Feste Rechte statt der Maske des aufrufenden Dienstes: Geschrieben wird als
+		// root, gelesen vom Benutzer des php-fpm-Pools über die Gruppe des Ordners.
+		// Ohne diesen Schritt läge die Datei je nach Maske für alle offen oder für die
+		// Gruppe unlesbar.
+		$group = filegroup($dir);
+		if ($group !== false) {
+			@chgrp($file, $group);
+		}
+		@chmod($file, 0640);
 	}
 
 	/**

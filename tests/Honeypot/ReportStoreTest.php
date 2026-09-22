@@ -97,4 +97,18 @@ final class ReportStoreTest extends TestCase
 		$this->store->save('mfsvr.de', DayReport::fromEntries('2026-09-21', $entries, 0, [], true));
 		self::assertSame(1, $this->store->load('mfsvr.de', '2026-09-21')?->requests);
 	}
+
+	/**
+	 * Geschrieben wird als root (nur root liest die Logs), gelesen vom Benutzer des
+	 * php-fpm-Pools über die Gruppe des Ordners. Ohne feste Rechte entstünde die Datei
+	 * mit der Maske des Dienstes – je nach Einstellung für alle lesbar oder für die
+	 * Gruppe gar nicht.
+	 */
+	public function testWritesTheReportWithFixedPermissionsAndTheDirectoryGroup(): void
+	{
+		$this->store->save('mfsvr.de', $this->report('2026-09-21'));
+		$file = $this->dir . '/mfsvr.de/2026-09-21.json';
+		self::assertSame('0640', sprintf('%04o', (fileperms($file) ?: 0) & 07777));
+		self::assertSame(filegroup($this->dir . '/mfsvr.de'), filegroup($file));
+	}
 }
