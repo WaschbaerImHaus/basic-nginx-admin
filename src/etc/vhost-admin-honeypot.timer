@@ -1,0 +1,12 @@
+[Unit]
+Description=vhost-admin: Honigtopf-Logs einmal taeglich auswerten
+
+[Timer]
+# Kurz nach der Logrotation (die laeuft ueblicherweise gegen 00:00 bis 06:00), damit
+# access.log.1 den vollstaendigen Vortag enthaelt.
+OnCalendar=*-*-* 07:20
+AccuracySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

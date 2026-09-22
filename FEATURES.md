@@ -2,6 +2,8 @@
 
 ## Implementiert
 
+- **Honigtopf und tägliche Log-Auswertung** (2026-09-22): statische Honigtopf-Seite mit `robots.txt` und eigenem Favicon (`honeypot/`), tägliche Auswertung von `access.log` und `error.log` samt Vortagsvergleich (`honeypot/analyse.php`, systemd-Timer 07:20), Bericht nach `research/honeypot/<datum>.md` mit abgeleiteten Werkzeugvorschlägen. Entwurf der Ansicht: `docs/specs/2026-09-22-honeypot-dashboard.md`.
+
 - **www-Umleitung je Domain** (2026-09-22): Schalter „aus / auf <domain> / auf www.<domain>“ in der Oberfläche und `vhost www <name> none|www|bare`. Beide Namen zeigen auf denselben Docroot; ein Verzeichnis `www.<domain>` entsteht nie. certbot beantragt den Nebennamen mit, und die Oberfläche warnt, solange ein vorhandenes Zertifikat ihn noch nicht abdeckt.
 
 - **Fertige Konfiguration ansehen** (2026-09-22): `vhost show <name>` und ein Abschnitt in der Oberfläche zeigen den erzeugten `server`-Block mit eingesetztem Verzeichnisschutz und eigenen Direktiven als einen Text – mit Zeilennummern und hervorgehobenem eigenem Abschnitt. Systemdateien wie `fastcgi_params` bleiben als Verweis stehen.
@@ -33,6 +35,8 @@
 - `vhost migrate-layout` bringt bestehende vHosts auf die neue Struktur (Zwischenordner `.web-migrating`, bricht bei Kollisionen ab, keine Datenverluste bei Abbruch); `vhost fix-permissions [name]` setzt die Soll-Rechte laut `VhostLayout` erneut
 
 ## Offen
+
+- Honigtopf-Ansicht unter `bienchen.mfsvr.de` nach der Spec bauen (die Spec liegt vor, die Datenquelle auch). Voraussetzung: `bienchen.mfsvr.de` muss per DNS auf diesen Server zeigen – tut es derzeit nicht.
 
 - Mehrere PHP-Versionen pro Host wählbar machen (aktuell immer die höchste installierte).
 - Pool-Kennwerte (`pm.max_children` u.a.) pro Host einstellbar; derzeit für alle gleich (`ondemand`, 10).

@@ -95,12 +95,25 @@ echo "== Datenbank und nginx-Configs"
 # aufruft; hier nur, damit "vhost init" gleich in ein passendes Verzeichnis schreibt.
 install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
+# Taegliche Auswertung der Honigtopf-Logs. Die Liste der Hosts steht in
+# /etc/default/vhost-admin-honeypot und wird bei einem Update nicht ueberschrieben.
+install -m 644 "$SRC/etc/vhost-admin-honeypot.service" /etc/systemd/system/vhost-admin-honeypot.service
+install -m 644 "$SRC/etc/vhost-admin-honeypot.timer" /etc/systemd/system/vhost-admin-honeypot.timer
+[ -f /etc/default/vhost-admin-honeypot ] || printf 'HONEYPOT_HOSTS=""\n' > /etc/default/vhost-admin-honeypot
+if [ -f "$SRC/../honeypot/analyse.php" ]; then
+	install -d -m 755 "$APP/honeypot" "$APP/research/honeypot"
+	install -m 755 "$SRC/../honeypot/analyse.php" "$APP/honeypot/analyse.php"
+else
+	echo "Hinweis: honeypot/analyse.php fehlt im Paket - die taegliche Auswertung bleibt leer." >&2
+fi
+
 # Zeitgeber, der abgelaufene Loeschvormerkungen endgueltig entfernt. Ohne ihn bliebe
 # ein entfernter vHost unbegrenzt gesperrt liegen, statt nach der Frist zu verschwinden.
 install -m 644 "$SRC/etc/vhost-admin-purge.service" /etc/systemd/system/vhost-admin-purge.service
 install -m 644 "$SRC/etc/vhost-admin-purge.timer" /etc/systemd/system/vhost-admin-purge.timer
 systemctl daemon-reload
 systemctl enable --now vhost-admin-purge.timer >/dev/null
+systemctl enable --now vhost-admin-honeypot.timer >/dev/null
 
 /usr/local/sbin/vhost migrate-layout
 # Rechte bestehender vHosts auf den aktuellen Stand bringen. Nötig, weil sich die

@@ -320,6 +320,37 @@ sudo vhost migrate-layout                                     # alte vHosts (ohn
 
 localhost-Hosts lassen sich nur über die Kommandozeile anlegen; die Oberfläche listet sie nur.
 
+## Honigtopf
+
+`honeypot/` enthält die statischen Dateien für einen Host, der als Honigtopf dient
+(Startseite, `robots.txt`, selbst entworfenes Favicon als SVG und ICO, eine schlichte
+Seite unter `/admin/`). Ablegen mit:
+
+```
+sudo ./honeypot/install-site.sh <vhost-name>
+```
+
+Die `robots.txt` gibt nur `/` und das Favicon frei und nennt `/admin/` ausdrücklich als
+ausgeschlossen. Wer darüber hinausgeht, tut das absichtlich – und `/robots.txt` wird
+protokolliert, damit genau das sichtbar wird.
+
+`honeypot/analyse.php` wertet `access.log` und `error.log` des laufenden Tages und des
+Vortags aus und schreibt einen Bericht nach `research/honeypot/<datum>.md`: Sondierungen
+nach Beutegruppen, Kennungen (inklusive Erkennung durchgewechselter User-Agents),
+Anfragen die gar kein HTTP waren, das robots.txt-Signal, Anmeldeversuche, Tagesverlauf –
+und daraus abgeleitete Vorschläge, welche Werkzeuge in der Ansicht lohnen.
+
+Der systemd-Timer `vhost-admin-honeypot.timer` startet das täglich um 07:20, kurz nach
+der Logrotation. Welche Hosts ausgewertet werden, steht in
+`/etc/default/vhost-admin-honeypot`:
+
+```
+HONEYPOT_HOSTS="mfsvr.de"
+```
+
+Der Entwurf der Ansicht selbst liegt in
+`docs/specs/2026-09-22-honeypot-dashboard.md`.
+
 ## Umzug auf einen anderen Server
 
 `/var/lib/vhost-admin`, `/var/www` und `/etc/letsencrypt` mitnehmen, dann `sudo ./install.sh` – die nginx-Konfigurationen werden aus der Datenbank neu erzeugt. `install.sh` sichert vorhandene Hosts zuvor automatisch nach `/var/backups/` und ruft danach `vhost migrate-layout` auf, das jeden noch nicht umgestellten vHost auf die aktuelle Struktur (`web/conf/cert/private/logs`) bringt – auch ein frisch mitgenommener alter Stand landet also automatisch in der neuen Struktur.

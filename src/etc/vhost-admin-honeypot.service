@@ -1,0 +1,12 @@
+[Unit]
+Description=vhost-admin: taegliche Auswertung der Honigtopf-Logs
+Documentation=file:///opt/vhost-admin/docs/specs/2026-09-22-honeypot-dashboard.md
+
+[Service]
+Type=oneshot
+# Die Hosts stehen in der Umgebungsdatei, damit der Dienst nicht angefasst werden muss,
+# wenn ein Honigtopf dazukommt oder wegfaellt.
+EnvironmentFile=-/etc/default/vhost-admin-honeypot
+ExecStart=/bin/sh -c '/usr/bin/php /opt/vhost-admin/honeypot/analyse.php ${HONEYPOT_HOSTS}'
+ProtectSystem=full
+ReadWritePaths=/opt/vhost-admin/research

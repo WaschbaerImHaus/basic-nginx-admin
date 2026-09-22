@@ -19,7 +19,7 @@ echo "Build $BUILD"
 echo "== Paket"
 mkdir -p build
 rm -f build/vhost-admin.tar.gz
-tar --transform 's,^,vhost-admin/,' -czf build/vhost-admin.tar.gz src install.sh README.md
+tar --transform 's,^,vhost-admin/,' -czf build/vhost-admin.tar.gz src honeypot docs install.sh README.md
 ls -la build/vhost-admin.tar.gz
 
 echo "== Git"
