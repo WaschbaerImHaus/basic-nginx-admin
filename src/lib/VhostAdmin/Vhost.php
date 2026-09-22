@@ -35,6 +35,8 @@ final class Vhost
 	 * @param bool      $protect   Verzeichnisschutz aktiv
 	 * @param bool      $ssl       Let's-Encrypt-Zertifikat aktiv (nur Domain)
 	 * @param bool      $php       PHP über einen eigenen FPM-Pool ausliefern
+	 * @param string    $wwwMode   "none", "www" (auf www.<domain> umleiten) oder "bare"
+	 *                             (auf <domain> umleiten)
 	 * @param ?string   $healthToken Kennung im ACME-Marker, mit der der Erreichbarkeitstest
 	 *                               belegt, dass die Domain auf diesen Server zeigt
 	 * @param ?string   $deletedAt Zeitpunkt (UTC), zu dem das Entfernen angestossen wurde;
@@ -50,6 +52,7 @@ final class Vhost
 		public readonly bool $protect,
 		public readonly bool $ssl,
 		public readonly bool $php = false,
+		public readonly string $wwwMode = 'none',
 		public readonly ?string $healthToken = null,
 		public readonly ?string $deletedAt = null,
 		public readonly ?string $createdAt = null,
@@ -134,10 +137,34 @@ final class Vhost
 			// Ältere Datenbanken kennen die Spalte nicht; Database::migrateSchema() zieht
 			// sie nach, der Standardwert hier hält den Fall bis dahin aus.
 			(bool)($row['php'] ?? false),
+			in_array($row['www_mode'] ?? 'none', ['none', 'www', 'bare'], true) ? (string)($row['www_mode'] ?? 'none') : 'none',
 			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
 			($row['deleted_at'] ?? null) === null || $row['deleted_at'] === '' ? null : (string)$row['deleted_at'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
 		);
+	}
+
+	/**
+	 * Der Name, auf den umgeleitet wird – bei "none" der Name selbst.
+	 *
+	 * Es gibt nie ein Verzeichnis "www.<domain>": Beide Namen zeigen auf denselben
+	 * Docroot, nur die Umleitung unterscheidet sie.
+	 */
+	public function canonicalName(): string
+	{
+		return $this->wwwMode === 'www' ? 'www.' . $this->name : $this->name;
+	}
+
+	/**
+	 * Der Name, der umgeleitet wird; null, wenn kein www-Umgang eingestellt ist.
+	 */
+	public function aliasName(): ?string
+	{
+		return match ($this->wwwMode) {
+			'www' => $this->name,
+			'bare' => 'www.' . $this->name,
+			default => null,
+		};
 	}
 
 	/**

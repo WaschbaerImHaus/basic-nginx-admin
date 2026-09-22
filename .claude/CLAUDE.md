@@ -9,6 +9,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - localhost-Host anlegen: `sudo vhost add-local <port> [--subdir DIR]` (die Oberfläche kann das absichtlich nicht)
 - Snippet setzen, Rechte reparieren, alte vHosts nachziehen: `sudo vhost conf <name>` (stdin), `sudo vhost fix-permissions [name]`, `sudo vhost migrate-layout`
+- www-Umleitung: `sudo vhost www <name> none|www|bare`. Es gibt **nie** ein Verzeichnis `www.<domain>` – beide Namen zeigen auf denselben Docroot. Bei HTTPS muss das Zertifikat beide Namen abdecken, sonst Zertifikatsfehler vor der Umleitung.
 - Docroot-Unterordner ändern: `sudo vhost subdir <name> [unterordner]` – der Inhalt zieht mit, `.well-known/` bleibt unter `web/` (der ACME-Pfad hängt an `web/`, nicht am Docroot).
 - Fertige Konfiguration ansehen: `sudo vhost show <name>` (setzt Auth-Snippet und eigene Direktiven in den server-Block ein)
 - PHP pro vHost: `sudo vhost php <name> on|off`" (eigener FPM-Pool als `web<id>`)
@@ -26,7 +27,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (404 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (415 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)

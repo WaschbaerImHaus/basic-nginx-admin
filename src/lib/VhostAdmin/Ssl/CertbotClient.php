@@ -24,12 +24,19 @@ final class CertbotClient implements CertbotInterface
 	 * @return string Ausgabe des Werkzeugs (für die Anzeige in der Oberfläche)
 	 * @throws \RuntimeException wenn kein Zertifikat ausgestellt wurde
 	 */
-	public function obtain(string $domain, string $webroot, string $email): string
+	public function obtain(string $domain, string $webroot, string $email, array $alsoFor = []): string
 	{
+		// Jeder Name braucht ein eigenes "-d". Wird auf www.<domain> umgeleitet, muss
+		// auch dieser Name im Zertifikat stehen: Wer ihn über HTTPS aufruft, bekommt
+		// sonst einen Zertifikatsfehler, bevor die Umleitung überhaupt greift.
+		$names = '';
+		foreach (array_merge([$domain], $alsoFor) as $name) {
+			$names .= ' -d ' . escapeshellarg($name);
+		}
 		$command = sprintf(
-			'certbot certonly --webroot -w %s -d %s -n --agree-tos --no-eff-email -m %s --keep-until-expiring 2>&1',
+			'certbot certonly --webroot -w %s%s -n --agree-tos --no-eff-email -m %s --keep-until-expiring 2>&1',
 			escapeshellarg($webroot),
-			escapeshellarg($domain),
+			$names,
 			escapeshellarg($email)
 		);
 		exec($command, $output, $code);

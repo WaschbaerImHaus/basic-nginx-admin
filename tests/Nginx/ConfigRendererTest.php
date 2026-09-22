@@ -381,4 +381,93 @@ final class ConfigRendererTest extends TestCase
 			'Die Dotfile-Sperre muss vor den Cache-Regeln stehen'
 		);
 	}
+	// ------------------------------------------------------------------
+	// www-Umleitung
+	// ------------------------------------------------------------------
+
+	/**
+	 * Ohne eingestellten www-Umgang bleibt alles wie bisher: ein Name, kein
+	 * zusätzlicher Block.
+	 */
+	public function testNoWwwHandlingByDefault(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringNotContainsString('www.example.com', $out);
+		self::assertSame(1, substr_count($out, 'server {'));
+	}
+
+	/**
+	 * "bare": www.example.com wird auf example.com umgeleitet. Der Umleitungsblock
+	 * braucht den ACME-Pfad, sonst kann certbot den Namen nicht prüfen und das
+	 * Zertifikat deckt ihn nicht ab.
+	 */
+	public function testRedirectsWwwToBareDomain(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, false, 'bare');
+		$out = $this->renderer()->serverConfig($v);
+
+		self::assertSame(2, substr_count($out, 'server {'), 'ein Umleitungsblock kommt dazu');
+		self::assertStringContainsString("    server_name www.example.com;\n", $out);
+		self::assertStringContainsString('return 301 http://example.com$request_uri;', $out);
+		// Der ausliefernde Block hört weiterhin nur auf den kanonischen Namen.
+		self::assertStringContainsString("    server_name example.com;\n", $out);
+		self::assertSame(2, substr_count($out, 'acme-challenge'), 'beide Namen brauchen den ACME-Pfad');
+		// Auch der reine Umleitungsblock darf die nginx-Version nicht nennen.
+		self::assertSame(2, substr_count($out, 'server_tokens off;'), 'jeder server-Block verschweigt die Version');
+	}
+
+	public function testRedirectsBareDomainToWww(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, false, 'www');
+		$out = $this->renderer()->serverConfig($v);
+
+		self::assertStringContainsString("    server_name example.com;\n", $out);
+		self::assertStringContainsString('return 301 http://www.example.com$request_uri;', $out);
+		self::assertStringContainsString("    server_name www.example.com;\n", $out);
+		// Ausgeliefert wird unter www – der Docroot ist derselbe, es gibt kein
+		// Verzeichnis "www.example.com".
+		self::assertStringContainsString('root /var/www/example.com/web;', $out);
+		self::assertStringNotContainsString('/var/www/www.example.com', $out);
+	}
+
+	/**
+	 * Mit Zertifikat: Port 80 nimmt beide Namen und leitet unmittelbar auf den
+	 * kanonischen Namen über HTTPS um; auf 443 leitet der Nebenname weiter.
+	 */
+	public function testWwwRedirectWithSsl(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true, false, 'bare');
+		$out = $this->renderer()->serverConfig($v);
+
+		self::assertStringContainsString("    server_name example.com www.example.com;\n", $out);
+		self::assertStringContainsString('return 301 https://example.com$request_uri;', $out);
+		self::assertSame(3, substr_count($out, 'server {'), ':80 beide, :443 Nebenname, :443 kanonisch');
+		self::assertSame(3, substr_count($out, 'server_tokens off;'), 'jeder server-Block verschweigt die Version');
+		// Der 443-Umleitungsblock braucht dasselbe Zertifikat – es muss beide Namen abdecken.
+		self::assertSame(2, substr_count($out, 'ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;'), '');
+	}
+
+	/**
+	 * Ohne www-Umgang leitet der :80-Block wie bisher auf $host um – es gibt nur einen
+	 * Namen, und $host spart eine Fallunterscheidung.
+	 */
+	public function testSslWithoutWwwHandlingKeepsHostRedirect(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringContainsString('return 301 https://$host$request_uri;', $out);
+		self::assertSame(2, substr_count($out, 'server {'));
+	}
+
+	/**
+	 * localhost-Hosts haben keinen www-Namen; die Einstellung darf dort nichts bewirken.
+	 */
+	public function testWwwModeIsIgnoredForLocalhostHosts(): void
+	{
+		$v = new Vhost(2, 'localhost:3000', VhostKind::Localhost, 3000, null, false, false, false, 'bare');
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringNotContainsString('www.', $out);
+		self::assertSame(1, substr_count($out, 'server {'));
+	}
 }

@@ -102,6 +102,14 @@ final class VhostRepository
 	}
 
 	/**
+	 * www-Umgang setzen: "none", "www" oder "bare".
+	 */
+	public function setWwwMode(int $id, string $mode): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET www_mode = ? WHERE id = ?')->execute([$mode, $id]);
+	}
+
+	/**
 	 * Docroot-Unterordner setzen (null = Docroot ist web/ selbst).
 	 */
 	public function setSubdir(int $id, ?string $subdir): void

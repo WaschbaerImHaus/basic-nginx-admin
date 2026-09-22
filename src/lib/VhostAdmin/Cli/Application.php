@@ -49,6 +49,7 @@ vhost – nginx-vHosts verwalten
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
+  vhost www <name> none|www|bare        (wohin umgeleitet wird)
   vhost subdir <name> [unterordner]     (leer = Docroot ist web/; Inhalt zieht mit)
   vhost show <name>                     (fertige Konfiguration als ein Text)
   vhost conf-show <name>
@@ -330,12 +331,31 @@ TXT;
 				}
 				return $failed ? 1 : 0;
 
+			case 'www':
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$this->service->setWwwMode($vhost, $arg(1, 'none|www|bare'));
+				$updated = $this->service->load($vhost->name);
+				$alias = $updated->aliasName();
+				$this->out($alias === null
+					? "Kein www-Umgang: nur {$updated->name}.\n"
+					: "$alias wird auf {$updated->canonicalName()} umgeleitet.\n"
+						. ($updated->ssl && !$this->service->certificateCoversAlias($updated)
+							? "Achtung: Das Zertifikat deckt \"$alias\" noch nicht ab. "
+								. "Einmal \"vhost ssl {$updated->name} on\" holt eines für beide Namen.\n"
+							: ''));
+				return 0;
+
 			case 'subdir':
 				// Ohne zweites Argument wird der Unterordner geleert (Docroot = web/).
 				$vhost = $this->service->load($arg(0, 'Name'));
 				$target = SubDirectory::fromString($positional[1] ?? null);
 				$this->service->setSubdirectory($vhost, $target);
 				$this->out('Docroot: ' . $this->layout->docroot($this->service->load($vhost->name)) . "\n");
+				return 0;
+
+			case 'cert-covers':
+				// Für die Oberfläche: deckt das Zertifikat den Nebennamen ab? Rein lesend.
+				$this->out($this->service->certificateCoversAlias($this->service->load($arg(0, 'Name'))) ? "ja\n" : "nein\n");
 				return 0;
 
 			case 'show':

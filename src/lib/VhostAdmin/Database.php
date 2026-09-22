@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	ssl        INTEGER NOT NULL DEFAULT 0,
 	php        INTEGER NOT NULL DEFAULT 0,
 	health_token TEXT,
+	www_mode   TEXT NOT NULL DEFAULT 'none',
 	deleted_at TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -95,6 +96,10 @@ SQL);
 		$columns = array_column($this->pdo()->query('PRAGMA table_info(vhosts)')->fetchAll(), 'name');
 		if (!in_array('php', $columns, true)) {
 			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN php INTEGER NOT NULL DEFAULT 0');
+		}
+		if (!in_array('www_mode', $columns, true)) {
+			// none = kein www-Umgang; www = auf www.<domain> umleiten; bare = auf <domain>.
+			$this->pdo()->exec("ALTER TABLE vhosts ADD COLUMN www_mode TEXT NOT NULL DEFAULT 'none'");
 		}
 		if (!in_array('deleted_at', $columns, true)) {
 			// Zeitpunkt, zu dem das Entfernen angestossen wurde; bis zum Ablauf der

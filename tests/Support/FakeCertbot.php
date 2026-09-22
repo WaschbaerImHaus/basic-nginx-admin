@@ -17,6 +17,8 @@ final class FakeCertbot implements CertbotInterface
 	/** @var list<array{string, string, string}> */
 	public array $calls = [];
 	public bool $succeed = true;
+	/** @var list<list<string>> weitere Namen je Aufruf */
+	public array $alsoFor = [];
 
 	/**
 	 * @param string $liveDir Verzeichnis, unter dem die simulierten Zertifikate abgelegt werden
@@ -34,9 +36,10 @@ final class FakeCertbot implements CertbotInterface
 	 * @return string Ausgabe des simulierten Werkzeugs
 	 * @throws \RuntimeException wenn $succeed auf false gesetzt ist
 	 */
-	public function obtain(string $domain, string $webroot, string $email): string
+	public function obtain(string $domain, string $webroot, string $email, array $alsoFor = []): string
 	{
 		$this->calls[] = [$domain, $webroot, $email];
+		$this->alsoFor[] = $alsoFor;
 		if (!$this->succeed) {
 			throw new \RuntimeException('certbot fehlgeschlagen: Simulation');
 		}

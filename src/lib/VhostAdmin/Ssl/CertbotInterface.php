@@ -19,5 +19,9 @@ interface CertbotInterface
 	 * @return string Ausgabe des Werkzeugs (für die Anzeige in der Oberfläche)
 	 * @throws \RuntimeException wenn kein Zertifikat ausgestellt wurde
 	 */
-	public function obtain(string $domain, string $webroot, string $email): string;
+	/**
+	 * @param list<string> $alsoFor weitere Namen, die dasselbe Zertifikat abdecken soll
+	 *                              (z.B. www.<domain>, wenn darauf umgeleitet wird)
+	 */
+	public function obtain(string $domain, string $webroot, string $email, array $alsoFor = []): string;
 }

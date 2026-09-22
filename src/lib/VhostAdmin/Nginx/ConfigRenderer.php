@@ -23,6 +23,12 @@ final class ConfigRenderer
 	private const HEADER = "# generiert von vhost – nicht manuell bearbeiten\n";
 
 	/**
+	 * Gehört in jeden server-Block, auch in die reinen Umleitungsblöcke: sonst nennt
+	 * ausgerechnet die Umleitung die nginx-Version, die der ausliefernde Block verschweigt.
+	 */
+	private const HIDE_VERSION = "    server_tokens off;\n";
+
+	/**
 	 * @param Config      $config Pfade der Installation
 	 * @param VhostLayout $layout Quelle für Docroot, Logdateien und Snippet-Ordner
 	 */
@@ -111,19 +117,37 @@ final class ConfigRenderer
 			return self::HEADER . "server {\n" . $listen . "    server_name localhost;\n\n" . $this->body($v) . "}\n";
 		}
 
+		// Beide Namen zeigen auf denselben Docroot; ein Verzeichnis "www.<domain>" gibt
+		// es nie. Unterschieden wird nur, welcher Name ausliefert und welcher umleitet.
+		$canonical = $v->canonicalName();
+		$alias = $v->aliasName();
+
 		$listen80 = "    listen 80;\n" . ($this->config->ipv6 ? "    listen [::]:80;\n" : '');
 		if (!$v->ssl) {
-			return self::HEADER . "server {\n" . $listen80 . "    server_name {$v->name};\n\n"
+			$out = self::HEADER;
+			if ($alias !== null) {
+				// Eigener :80-Block für den Nebennamen – mit ACME-Pfad, sonst kann
+				// certbot ihn nicht prüfen und das Zertifikat deckt ihn nicht ab.
+				$out .= "server {\n" . $listen80 . "    server_name $alias;\n"
+					. self::HIDE_VERSION . "\n"
+					. $this->acme($v) . "\n"
+					. "    location / {\n        return 301 http://$canonical\$request_uri;\n    }\n}\n\n";
+			}
+			return $out . "server {\n" . $listen80 . "    server_name $canonical;\n\n"
 				. $this->acme($v) . "\n" . $this->body($v) . "}\n";
 		}
 
-		// Umleitung im eigenen :80-Block mit return 301. ISPConfig löst das mit
-		// "if ($scheme != https) { rewrite … }" im selben Block; return im eigenen Block
-		// ist billiger, weil nginx dann keine if-Auswertung pro Anfrage braucht.
+		// Mit Zertifikat nimmt der :80-Block beide Namen und leitet unmittelbar auf den
+		// kanonischen über HTTPS um – ein Umweg über den Nebennamen auf 443 wäre eine
+		// zweite Umleitung für nichts. Ohne www-Umgang bleibt $host stehen: es gibt nur
+		// einen Namen, und das spart eine Fallunterscheidung.
+		$names80 = $alias === null ? $canonical : "$canonical $alias";
+		$target80 = $alias === null ? '$host' : $canonical;
 		$redirect = self::HEADER
-			. "server {\n" . $listen80 . "    server_name {$v->name};\n\n"
+			. "server {\n" . $listen80 . "    server_name $names80;\n"
+			. self::HIDE_VERSION . "\n"
 			. $this->acme($v) . "\n"
-			. "    location / {\n        return 301 https://\$host\$request_uri;\n    }\n}\n\n";
+			. "    location / {\n        return 301 https://$target80\$request_uri;\n    }\n}\n\n";
 
 		$listen443 = "    listen 443 ssl;\n" . ($this->config->ipv6 ? "    listen [::]:443 ssl;\n" : '')
 			. "    http2 on;\n"
@@ -146,10 +170,20 @@ final class ConfigRenderer
 			. "    ssl_session_cache shared:SSL:10m;\n"
 			. "    ssl_session_timeout 1d;\n";
 
+		$aliasBlock = '';
+		if ($alias !== null) {
+			// Der Nebenname muss auch über HTTPS antworten: Wer https://<neben> aufruft,
+			// bekommt sonst einen Zertifikatsfehler, bevor irgendeine Umleitung greift.
+			// Deshalb muss das Zertifikat beide Namen abdecken.
+			$aliasBlock = "server {\n" . $listen443 . "\n    server_name $alias;\n"
+				. self::HIDE_VERSION . "\n" . $ssl . "\n"
+				. "    location / {\n        return 301 https://$canonical\$request_uri;\n    }\n}\n\n";
+		}
+
 		// Der ACME-Pfad gehört nur in den :80-Block: http-01 fragt immer über HTTP an, und
 		// dort hat "location ^~" Vorrang vor der Weiterleitung.
-		return $redirect
-			. "server {\n" . $listen443 . "\n    server_name {$v->name};\n\n" . $ssl . "\n"
+		return $redirect . $aliasBlock
+			. "server {\n" . $listen443 . "\n    server_name $canonical;\n\n" . $ssl . "\n"
 			. $this->body($v, $hsts) . "}\n";
 	}
 

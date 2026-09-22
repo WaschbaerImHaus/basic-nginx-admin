@@ -55,6 +55,20 @@ final class AdminPage
 	}
 
 	/**
+	 * Deckt das Zertifikat den Nebennamen der www-Umleitung ab?
+	 *
+	 * Über das CLI, weil /etc/letsencrypt für www-data nicht lesbar ist.
+	 */
+	public function certificateCoversAlias(Vhost $vhost): bool
+	{
+		if ($vhost->aliasName() === null || !$vhost->ssl) {
+			return true;
+		}
+		[$code, $output] = $this->runner->run(['cert-covers', $vhost->name]);
+		return $code === 0 && trim($output) === 'ja';
+	}
+
+	/**
 	 * Die fertige nginx-Konfiguration dieses vHosts als ein Text.
 	 *
 	 * Über das CLI, weil conf/ root gehört und die Oberfläche dort nicht hineinsieht.
@@ -158,6 +172,7 @@ final class AdminPage
 			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
 			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
+			'www' => ['args' => ['www', $name, $field('mode')], 'stdin' => null],
 			// Leeres Feld = Docroot ist web/ selbst; das CLI erwartet dann kein Argument.
 			'subdir' => [
 				'args' => array_merge(['subdir', $name], $field('subdir') !== '' ? [$field('subdir')] : []),

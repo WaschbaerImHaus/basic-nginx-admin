@@ -250,7 +250,14 @@ final class VhostService
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
 			// Webroot muss web/ sein, nicht der Basisordner: der Renderer bedient die
 			// ACME-Location mit "root <basis>/web" (C3, Abschlussreview 2026-09-20).
-			$output = $this->certbot->obtain($vhost->name, $this->layout->webDir($vhost), $email);
+			// Wird umgeleitet, muss der Nebenname im Zertifikat stehen.
+			$alias = $vhost->aliasName();
+			$output = $this->certbot->obtain(
+				$vhost->name,
+				$this->layout->webDir($vhost),
+				$email,
+				$alias === null ? [] : [$alias]
+			);
 		}
 		$this->repository->setSsl($vhost->id, true);
 		$this->linkCertificates($vhost);
@@ -541,6 +548,53 @@ final class VhostService
 	}
 
 	/**
+	 * www-Umgang setzen: "none", "www" (auf www.<domain> umleiten) oder "bare".
+	 *
+	 * Bei localhost-Hosts wirkungslos – dort gibt es keinen www-Namen.
+	 *
+	 * Wichtig bei eingeschaltetem HTTPS: Das vorhandene Zertifikat deckt den Nebennamen
+	 * noch nicht ab. Solange es fehlt, bekommt ein Aufruf von https://<nebenname> einen
+	 * Zertifikatsfehler, bevor die Umleitung greift. Der Aufrufer wird darauf
+	 * hingewiesen; ein erneutes "ssl on" holt ein Zertifikat für beide Namen.
+	 *
+	 * @throws \InvalidArgumentException bei unbekanntem Modus
+	 */
+	public function setWwwMode(Vhost $vhost, string $mode): void
+	{
+		if (!in_array($mode, ['none', 'www', 'bare'], true)) {
+			throw new \InvalidArgumentException("Unbekannter www-Umgang: \"$mode\" (erlaubt: none, www, bare)");
+		}
+		if ($vhost->isLocal() && $mode !== 'none') {
+			throw new \RuntimeException('Ein localhost-Host hat keinen www-Namen.');
+		}
+		if ($mode === $vhost->wwwMode) {
+			return;
+		}
+		$this->repository->setWwwMode((int)$vhost->id, $mode);
+		$this->render($this->repository->byId((int)$vhost->id));
+	}
+
+	/**
+	 * Deckt das vorhandene Zertifikat den Nebennamen ab?
+	 *
+	 * Prüft die Renewal-Konfiguration von certbot, nicht das Zertifikat selbst: dort
+	 * steht, für welche Namen es ausgestellt wurde.
+	 */
+	public function certificateCoversAlias(Vhost $vhost): bool
+	{
+		$alias = $vhost->aliasName();
+		if ($alias === null || !$vhost->ssl) {
+			return true;
+		}
+		$live = $this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem';
+		if (!is_file($live)) {
+			return false;
+		}
+		exec('openssl x509 -noout -text -in ' . escapeshellarg($live) . ' 2>&1', $output, $code);
+		return $code === 0 && str_contains(implode("\n", $output), 'DNS:' . $alias);
+	}
+
+	/**
 	 * Docroot-Unterordner ändern und den Inhalt mitnehmen.
 	 *
 	 * Der Inhalt zieht mit, weil sonst nichts auf einen Fehler hindeutet: nginx zeigte
@@ -562,7 +616,8 @@ final class VhostService
 
 		$candidate = new Vhost(
 			$vhost->id, $vhost->name, $vhost->kind, $vhost->port, $new,
-			$vhost->protect, $vhost->ssl, $vhost->php, $vhost->healthToken, $vhost->deletedAt, $vhost->createdAt
+			$vhost->protect, $vhost->ssl, $vhost->php, $vhost->wwwMode,
+			$vhost->healthToken, $vhost->deletedAt, $vhost->createdAt
 		);
 		$newDocroot = $this->layout->docroot($candidate);
 

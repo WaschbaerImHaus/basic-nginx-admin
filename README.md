@@ -213,6 +213,27 @@ einer gewöhnlichen `style.css` würde es Änderungen wochenlang verstecken.
 > bei denen gewinnt der erste Treffer, und die generierten stehen vorher. Wirksam sind ein
 > genauer Pfad (`location = /x.css`) oder ein Präfix mit Vorrang (`location ^~ /assets/`).
 
+## www-Umleitung
+
+Je Domain lässt sich einstellen, welcher Name ausliefert und welcher dorthin umleitet:
+`www.<domain>`, `<domain>` oder gar keine Umleitung. Beide Namen zeigen auf denselben
+Docroot – ein Verzeichnis `www.<domain>` wird nie angelegt.
+
+```
+sudo vhost www <name> none|www|bare
+```
+
+Ohne Zertifikat bekommt der Nebenname einen eigenen Port-80-Block, der mit 301 umleitet
+und den ACME-Pfad mitbringt. Mit Zertifikat nimmt der Port-80-Block beide Namen und
+leitet unmittelbar auf den kanonischen über HTTPS um; auf Port 443 leitet der Nebenname
+weiter.
+
+> **Wichtig bei eingeschaltetem HTTPS:** Das Zertifikat muss beide Namen abdecken. Wer
+> `https://www.<domain>` aufruft, bekommt sonst einen Zertifikatsfehler, *bevor* die
+> Umleitung greift. Nach dem Umschalten weist die Oberfläche darauf hin; ein erneutes
+> „Zertifikat holen" beantragt eines für beide Namen. Voraussetzung ist, dass auch der
+> Nebenname per DNS auf diesen Server zeigt.
+
 ## Erreichbarkeit
 
 Jeder vHost hat unter `web/.well-known/acme-challenge/vhost-admin-health` eine Datei mit

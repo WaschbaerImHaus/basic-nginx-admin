@@ -1104,4 +1104,62 @@ final class VhostServiceTest extends TestCase
 		self::assertFileDoesNotExist($this->layout->docroot($updated) . '/.well-known');
 		self::assertFileExists($this->layout->docroot($updated) . '/seite.html', 'Die Seite zieht mit');
 	}
+	// ------------------------------------------------------------------
+	// www-Umleitung
+	// ------------------------------------------------------------------
+
+	public function testSetWwwModeWritesTheRedirectAndIsIdempotent(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->service->setWwwMode($v, 'bare');
+
+		$updated = $this->repo->byName('um.example');
+		self::assertSame('bare', $updated->wwwMode);
+		self::assertSame('www.um.example', $updated->aliasName());
+		self::assertSame('um.example', $updated->canonicalName());
+		self::assertStringContainsString(
+			'return 301 http://um.example$request_uri;',
+			(string)file_get_contents($this->config->sitesAvailable . '/um.example.conf')
+		);
+
+		$before = $this->reloader->calls;
+		$this->service->setWwwMode($this->repo->byName('um.example'), 'bare');
+		self::assertSame($before, $this->reloader->calls, 'unveränderter Modus darf nichts tun');
+	}
+
+	public function testSetWwwModeRejectsUnknownValues(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->expectException(\InvalidArgumentException::class);
+		$this->service->setWwwMode($v, 'vielleicht');
+	}
+
+	public function testSetWwwModeRefusedForLocalhostHosts(): void
+	{
+		$v = $this->service->createLocal(Port::fromString('3011'), null);
+		$this->expectException(\RuntimeException::class);
+		$this->service->setWwwMode($v, 'bare');
+	}
+
+	/**
+	 * Wird umgeleitet, muss certbot den Nebennamen mitbeantragen – sonst gibt es einen
+	 * Zertifikatsfehler, bevor die Umleitung greift.
+	 */
+	public function testCertbotIsAskedForTheAliasToo(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->service->setWwwMode($v, 'bare');
+		$this->service->enableSsl($this->repo->byName('um.example'));
+
+		self::assertSame([['www.um.example']], $this->certbot->alsoFor);
+	}
+
+	public function testCertbotIsAskedForOneNameWithoutWwwHandling(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->service->enableSsl($this->repo->byName('um.example'));
+		self::assertSame([[]], $this->certbot->alsoFor);
+	}
 }

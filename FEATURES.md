@@ -2,6 +2,8 @@
 
 ## Implementiert
 
+- **www-Umleitung je Domain** (2026-09-22): Schalter „aus / auf <domain> / auf www.<domain>“ in der Oberfläche und `vhost www <name> none|www|bare`. Beide Namen zeigen auf denselben Docroot; ein Verzeichnis `www.<domain>` entsteht nie. certbot beantragt den Nebennamen mit, und die Oberfläche warnt, solange ein vorhandenes Zertifikat ihn noch nicht abdeckt.
+
 - **Fertige Konfiguration ansehen** (2026-09-22): `vhost show <name>` und ein Abschnitt in der Oberfläche zeigen den erzeugten `server`-Block mit eingesetztem Verzeichnisschutz und eigenen Direktiven als einen Text – mit Zeilennummern und hervorgehobenem eigenem Abschnitt. Systemdateien wie `fastcgi_params` bleiben als Verweis stehen.
 
 - **Erzeugte Passwörter für den Verzeichnisschutz** (2026-09-22): Das Eingabefeld ist durch ein nur lesbares Feld mit einem erzeugten Passwort ersetzt (20 Zeichen, Gross-/Kleinbuchstaben, Ziffern, `@=#+.,_-:;`, aus `random_int`). Nach dem Anlegen wird es einmal gross angezeigt und ist danach nicht mehr auslesbar. Je Benutzer gibt es „Passwort neu“. Über das CLI bleibt jedes beliebige Passwort möglich.
