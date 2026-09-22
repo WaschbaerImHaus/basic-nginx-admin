@@ -24,7 +24,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (383 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (394 Tests, Stand 2026-09-20 nach PHP/Wrapper); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -44,6 +44,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - **Entfernen läuft zweistufig**: `remove` ohne Option setzt `deleted_at`, nimmt den Host sofort aus `sites-enabled` (nginx antwortet nicht mehr) und lässt alles andere stehen; `purgeDue()` entfernt nach `Config::$removalGraceMinutes` (60) endgültig, angestossen vom Timer `vhost-admin-purge.timer`. `render()` hält einen vorgemerkten Host gesperrt – sonst würde `install.sh` ihn wiederbeleben. `--now`/`--purge` sind die ausdrücklichen Sofortwege.
 - Dateien unter `/var/www` löscht nur `--purge`. Auch nach Ablauf der Frist bleiben sie liegen; das ist Absicht und darf nicht „aufgeräumt" werden.
 - In einer Pipe kann der Leser jederzeit abbrechen (`| head`, `| grep -q`). `Cli\Application::out()` behandelt das als Normalfall, nicht als Fehler – siehe BUGS.md.
+- Passwörter für den Verzeichnisschutz erzeugt `Value\Password` (20 Zeichen, `random_int`, je eine Zeichenart garantiert, Fisher-Yates statt `shuffle()`). Die Oberfläche lässt keine eigenen mehr zu; das CLI schon. Ein gesetztes Passwort wird genau einmal angezeigt und ist danach nirgends mehr auslesbar.
 - Die Oberfläche lädt **nichts aus dem Netz** – keine Schriften, keine Skripte, keine Symbole. Sie läuft lokal; jede externe Anfrage wäre eine Nebenwirkung, die dort niemand erwartet.
 - Der Editor richtet Zeilennummern nur aus, solange das Textfeld `wrap="off"` hat. Mit Zeilenumbruch laufen Nummern und Zeilen auseinander.
 - `NginxSnippet` prüft gegen eine **Sperrliste** (seit 2026-09-20), nicht mehr gegen eine Positivliste. Erlaubt ist alles, was nicht aus dem vHost herausführt; Pfade werden gegen `VhostLayout::snippetScope()` geprüft. Neue Sperren immer dort ergänzen, nie im Renderer.

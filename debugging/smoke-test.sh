@@ -91,8 +91,24 @@ expect 302 "Domain anlegen" -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=create&dom
 grep -q 'flash ok' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-ui.example')" && echo "ok   Flash ok" || fail "Flash fehlt"
 curl -s -o /dev/null -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=create&domain=localhost:3998" http://127.0.0.1:8080/
 grep -q 'flash err' <<<"$(curl -s -c "$JAR" -b "$JAR" http://127.0.0.1:8080/)" && echo "ok   localhost über UI abgelehnt" || fail "localhost über UI nicht abgelehnt"
-curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF" -d 'action=user_add&name=smoke-ui.example&username=bob' --data-urlencode 'password=p@ss wörd!' http://127.0.0.1:8080/
-expect 200 "UI-Benutzer" -u 'bob:p@ss wörd!' -H 'Host: smoke-ui.example' http://127.0.0.1/
+# Das Passwortfeld ist nur noch lesbar und traegt ein erzeugtes Passwort; genau das
+# wird hinterlegt. Es aus der Seite ziehen und damit anmelden.
+UIPW=$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-ui.example' | grep -o 'name="password" class="mono pw" value="[^"]*"' | sed 's/.*value="//;s/"//')
+[ ${#UIPW} -eq 20 ] && echo "ok   erzeugtes Passwort (20 Zeichen)" || fail "kein erzeugtes Passwort im Formular: '$UIPW'"
+grep -qE '^[A-Za-z0-9@=#+.,_:;-]{20}$' <<<"$UIPW" && echo "ok   nur erlaubte Zeichen" || fail "unerlaubte Zeichen: $UIPW"
+curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF" -d 'action=user_add&name=smoke-ui.example&username=bob' --data-urlencode "password=$UIPW" http://127.0.0.1:8080/
+expect 200 "UI-Benutzer" -u "bob:$UIPW" -H 'Host: smoke-ui.example' http://127.0.0.1/
+# Das gesetzte Passwort wird genau einmal angezeigt.
+grep -q 'mono pw wide' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-ui.example')" \
+	&& echo "ok   Passwort einmal angezeigt" || fail "Passwort wurde nicht angezeigt"
+grep -q 'mono pw wide' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-ui.example')" \
+	&& fail "Passwort wird mehrfach angezeigt" || echo "ok   danach nicht mehr"
+# Zuruecksetzen: neues Passwort gilt, altes nicht mehr.
+curl -s -o /dev/null -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=user_reset&name=smoke-ui.example&username=bob" http://127.0.0.1:8080/
+NEWPW=$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-ui.example' | grep -o 'class="mono pw wide" value="[^"]*"' | sed 's/.*value="//;s/"//')
+[ -n "$NEWPW" ] && [ "$NEWPW" != "$UIPW" ] && echo "ok   neues Passwort erzeugt" || fail "Zuruecksetzen lieferte kein neues Passwort"
+expect 200 "neues Passwort gilt" -u "bob:$NEWPW" -H 'Host: smoke-ui.example' http://127.0.0.1/
+expect 401 "altes Passwort ungueltig" -u "bob:$UIPW" -H 'Host: smoke-ui.example' http://127.0.0.1/
 curl -s -o /dev/null -c "$JAR" -b "$JAR" -d "csrf=$CSRF&action=remove&name=smoke-ui.example" http://127.0.0.1:8080/
 
 echo "== Eigene Direktiven"

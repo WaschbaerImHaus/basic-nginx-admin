@@ -296,6 +296,13 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 	}
 	.editor-foot { display:flex; gap:.75rem; align-items:center; flex-wrap:wrap; margin-top:.6rem; }
 
+	/* Erzeugtes Passwort: als Text lesbar (es soll ja abgeschrieben werden), aber
+	   nicht überschreibbar. */
+	input.pw { letter-spacing:.02em; background:var(--sunken); cursor:pointer; }
+	input.pw.wide { width:100%; max-width:34rem; font-size:1.05rem; padding:.55rem .7rem; }
+	.panel.credential { border-color:color-mix(in srgb, var(--ok) 45%, transparent); }
+	.panel.credential > h2 { color:var(--ok); }
+
 	/* Detailansicht: Editor bekommt den grösseren Anteil der Breite, die Schalter
 	   stehen daneben statt darunter. */
 	.detail { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(24rem,1fr); gap:1rem; align-items:start; }
@@ -358,6 +365,15 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 		<div class="state"><?= railState($view, $reach) ?></div>
 		<a href="<?= h($url) ?>" target="_blank" rel="noopener">öffnen</a>
 	</div>
+
+	<?php if ($credential = $page->takeCredential($view)): ?>
+	<div class="panel credential">
+		<h2>Passwort für <span class="mono"><?= h($credential['user']) ?></span></h2>
+		<p class="hint">Wird nur jetzt angezeigt. Danach ist es nicht mehr auslesbar – in der htpasswd-Datei steht nur der Hash.</p>
+		<input type="text" class="mono pw wide" value="<?= h($credential['password']) ?>" readonly
+			aria-label="Passwort" onclick="this.select()" autofocus>
+	</div>
+	<?php endif ?>
 
 	<?php if ($view->isPendingDeletion()): $due = $view->deletionDueAt($config->removalGraceMinutes); ?>
 	<div class="panel">
@@ -431,14 +447,23 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 			<?php if ($users): ?>
 				<table><?php foreach ($users as $u): ?>
 					<tr><td class="mono"><?= h($u['username']) ?></td>
-						<td style="text-align:right"><?= form('user_del', ['name' => $view->name, 'username' => $u['username']], 'entfernen', 'small danger', 'Benutzer ' . $u['username'] . ' entfernen?') ?></td></tr>
+						<td style="text-align:right">
+							<?= form('user_reset', ['name' => $view->name, 'username' => $u['username']], 'Passwort neu', 'small', 'Neues Passwort für ' . $u['username'] . ' erzeugen?' . "\n\n" . 'Das bisherige gilt danach nicht mehr. Das neue wird einmal angezeigt.') ?>
+							<?= form('user_del', ['name' => $view->name, 'username' => $u['username']], 'entfernen', 'small danger', 'Benutzer ' . $u['username'] . ' entfernen?') ?>
+						</td></tr>
 				<?php endforeach ?></table>
 			<?php else: ?><p class="hint">Keine Benutzer.</p><?php endif ?>
-			<form method="post" class="row" style="margin-top:.6rem">
+			<form method="post" style="margin-top:.6rem">
 				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="user_add"><input type="hidden" name="name" value="<?= h($view->name) ?>">
-				<input type="text" name="username" placeholder="Benutzername" required autocomplete="off">
-				<input type="password" name="password" placeholder="Passwort" required autocomplete="new-password">
-				<button class="primary">Anlegen</button>
+				<div class="row">
+					<input type="text" name="username" placeholder="Benutzername" required autocomplete="off">
+					<input type="text" name="password" class="mono pw" value="<?= h($page->suggestedPassword()) ?>" readonly
+						aria-label="Erzeugtes Passwort" onclick="this.select()" title="Anklicken markiert das Passwort">
+					<button class="primary">Anlegen</button>
+				</div>
+				<p class="hint">Das Passwort wird erzeugt, nicht eingegeben: 20 Zeichen aus Gross- und Kleinbuchstaben,
+					Ziffern und <span class="mono">@=#+.,_-:;</span>. Es steht nirgends im Klartext – in der htpasswd-Datei
+					liegt nur der Hash. Notieren Sie es, solange es angezeigt wird; sonst hilft nur „Passwort neu“.</p>
 			</form>
 
 			<h2 style="margin-top:1.2rem">Freigegebene IPs</h2>

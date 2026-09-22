@@ -236,6 +236,24 @@ zurück, kann sie gelingen, obwohl ein fremdes Netz den Port nicht erreicht. „
 ist deshalb ein starkes Indiz, keine Garantie. „fremder Server" dagegen ist verlässlich:
 dann antwortet nachweislich nicht dieser Rechner.
 
+### Passwörter
+
+Passwörter werden erzeugt, nicht eingegeben. Das Formular zeigt ein fertiges an – 20
+Zeichen aus Gross- und Kleinbuchstaben, Ziffern und `@=#+.,_-:;`, gezogen aus dem
+Zufallsgenerator des Betriebssystems – und genau dieses wird hinterlegt. Damit fällt die
+häufigste Schwachstelle eines Verzeichnisschutzes weg, das zu einfache Passwort.
+
+Nach dem Anlegen erscheint das Passwort einmal gross und markierbar. Danach ist es nicht
+mehr auslesbar: in der htpasswd-Datei steht nur der Hash. Neben jedem Benutzer steht
+dafür **Passwort neu** – ein Klick erzeugt eines, hinterlegt es und zeigt es an; das
+bisherige gilt ab dann nicht mehr.
+
+Auf der Kommandozeile bleibt jedes beliebige Passwort möglich:
+
+```
+printf 'meins\n' | sudo vhost user-add <name> <benutzer>
+```
+
 ## Let's Encrypt
 
 1. E-Mail-Adresse in den Einstellungen hinterlegen.

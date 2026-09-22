@@ -16,6 +16,7 @@ namespace VhostAdmin\Web;
 use VhostAdmin\Config;
 use VhostAdmin\Vhost;
 use VhostAdmin\Ssl\ReachabilityChecker;
+use VhostAdmin\Value\Password;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 
@@ -51,6 +52,32 @@ final class AdminPage
 	public function reachability(array $vhosts): array
 	{
 		return $this->reachability->check($vhosts);
+	}
+
+	/**
+	 * Vorschlag für ein neues Passwort; wird im Formular angezeigt und genau so
+	 * hinterlegt.
+	 */
+	public function suggestedPassword(): string
+	{
+		return Password::generate()->value;
+	}
+
+	/**
+	 * Zuletzt gesetztes Passwort dieses vHosts, einmalig zum Anzeigen.
+	 *
+	 * Wird beim Lesen verbraucht: Ein Neuladen der Seite soll es nicht erneut zeigen.
+	 *
+	 * @return ?array{user: string, password: string}
+	 */
+	public function takeCredential(Vhost $vhost): ?array
+	{
+		$credential = $this->session['credential'] ?? null;
+		if (!is_array($credential) || ($credential['vhost'] ?? null) !== $vhost->name) {
+			return null;
+		}
+		unset($this->session['credential']);
+		return ['user' => (string)$credential['user'], 'password' => (string)$credential['password']];
 	}
 
 	/**
@@ -113,6 +140,8 @@ final class AdminPage
 			],
 			'protect' => ['args' => ['protect', $name, $field('state')], 'stdin' => null],
 			'user_add' => ['args' => ['user-add', $name, $field('username')], 'stdin' => (string)($post['password'] ?? '') . "\n"],
+			// Passwort neu setzen: derselbe Befehl, das Passwort erzeugt handlePost().
+			'user_reset' => ['args' => ['user-add', $name, $field('username')], 'stdin' => (string)($post['password'] ?? '') . "\n"],
 			'user_del' => ['args' => ['user-del', $name, $field('username')], 'stdin' => null],
 			'ip_add' => ['args' => ['ip-add', $name, $field('cidr')], 'stdin' => null],
 			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
@@ -150,6 +179,11 @@ final class AdminPage
 	public function handlePost(array $post): string
 	{
 		$action = (string)($post['action'] ?? '');
+		// Beim Zurücksetzen gibt es kein Eingabefeld, aus dem ein Passwort käme – es
+		// entsteht hier und wird danach einmal angezeigt.
+		if ($action === 'user_reset') {
+			$post['password'] = Password::generate()->value;
+		}
 		$command = self::commandFor($action, $post);
 		if ($command === null) {
 			return '/';
@@ -167,6 +201,15 @@ final class AdminPage
 					'text' => (string)($post['snippet'] ?? ''),
 				];
 			}
+		}
+		// Ein gesetztes Passwort einmal anzeigen: Es ist nirgends nachlesbar, in der
+		// htpasswd-Datei steht nur der Hash.
+		if (($action === 'user_add' || $action === 'user_reset') && $code === 0) {
+			$this->session['credential'] = [
+				'vhost' => (string)($post['name'] ?? ''),
+				'user' => trim((string)($post['username'] ?? '')),
+				'password' => (string)($post['password'] ?? ''),
+			];
 		}
 		$this->session['flash'] = [
 			$code === 0 ? 'ok' : 'err',

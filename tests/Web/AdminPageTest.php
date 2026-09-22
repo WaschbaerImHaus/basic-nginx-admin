@@ -248,4 +248,73 @@ final class AdminPageTest extends TestCase
 		$this->page->handlePost(['action' => 'conf', 'name' => 'a.de', 'snippet' => "expires 1d;\n"]);
 		self::assertNull($this->page->draft($v));
 	}
+	// ------------------------------------------------------------------
+	// Erzeugte Passwörter
+	// ------------------------------------------------------------------
+
+	/**
+	 * "Passwort neu" hat kein Eingabefeld – das Passwort muss beim Verarbeiten
+	 * entstehen und an das CLI gehen.
+	 */
+	public function testUserResetGeneratesAPasswordAndPassesItToTheCli(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->page->handlePost(['action' => 'user_reset', 'name' => 'a.de', 'username' => 'alice']);
+
+		$credential = $this->page->takeCredential($v);
+		self::assertNotNull($credential);
+		self::assertSame('alice', $credential['user']);
+		self::assertSame(20, strlen($credential['password']));
+		self::assertMatchesRegularExpression('/^[A-Za-z0-9@=#+.,_:;-]{20}$/', $credential['password']);
+	}
+
+	public function testResettingTwiceGivesDifferentPasswords(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->page->handlePost(['action' => 'user_reset', 'name' => 'a.de', 'username' => 'alice']);
+		$first = $this->page->takeCredential($v)['password'];
+		$this->page->handlePost(['action' => 'user_reset', 'name' => 'a.de', 'username' => 'alice']);
+		$second = $this->page->takeCredential($v)['password'];
+		self::assertNotSame($first, $second);
+	}
+
+	/**
+	 * Das Passwort darf nur einmal erscheinen: Ein Neuladen der Seite soll es nicht
+	 * noch einmal zeigen.
+	 */
+	public function testCredentialIsShownOnlyOnce(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->page->handlePost(['action' => 'user_add', 'name' => 'a.de', 'username' => 'bob', 'password' => 'Geheim123@abcdefghij']);
+
+		self::assertSame('Geheim123@abcdefghij', $this->page->takeCredential($v)['password']);
+		self::assertNull($this->page->takeCredential($v));
+	}
+
+	public function testCredentialBelongsToItsVhost(): void
+	{
+		$a = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$b = $this->repo->insert('b.de', VhostKind::Domain, null, null, true);
+		$this->page->handlePost(['action' => 'user_add', 'name' => 'a.de', 'username' => 'bob', 'password' => 'x']);
+		self::assertNull($this->page->takeCredential($b));
+		self::assertNotNull($this->page->takeCredential($a));
+	}
+
+	/**
+	 * Scheitert das Anlegen, darf kein Passwort angezeigt werden – es wurde ja keines
+	 * hinterlegt.
+	 */
+	public function testNoCredentialWhenTheCommandFails(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$page = $this->pageWithFailingCli();
+		$page->handlePost(['action' => 'user_add', 'name' => 'a.de', 'username' => 'bob', 'password' => 'x']);
+		self::assertNull($page->takeCredential($v));
+	}
+
+	public function testSuggestedPasswordIsFreshEveryTime(): void
+	{
+		self::assertNotSame($this->page->suggestedPassword(), $this->page->suggestedPassword());
+		self::assertSame(20, strlen($this->page->suggestedPassword()));
+	}
 }
