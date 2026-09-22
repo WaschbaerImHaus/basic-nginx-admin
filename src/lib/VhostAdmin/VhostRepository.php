@@ -64,8 +64,11 @@ final class VhostRepository
 		if ($this->byName($name) !== null) {
 			throw new \RuntimeException("Existiert bereits: $name");
 		}
-		$this->db->pdo()->prepare('INSERT INTO vhosts (name, kind, port, subdir, protect) VALUES (?, ?, ?, ?, ?)')
-			->execute([$name, $kind->value, $port, $subdir, (int)$protect]);
+		// www_mode ausdrücklich mitgeben: Eine Datenbank aus einer früheren Fassung hat
+		// als Spaltenstandard noch "none", das es nicht mehr gibt.
+		$this->db->pdo()
+			->prepare('INSERT INTO vhosts (name, kind, port, subdir, protect, www_mode) VALUES (?, ?, ?, ?, ?, ?)')
+			->execute([$name, $kind->value, $port, $subdir, (int)$protect, Vhost::WWW_DEFAULT]);
 		return $this->byId((int)$this->db->pdo()->lastInsertId());
 	}
 

@@ -35,6 +35,9 @@ final class VhostService
 	private const SETTING_EMAIL = 'le_email';
 	private const SETTING_HSTS = 'hsts';
 
+	/** Hinweis aus dem letzten enableSsl(), wenn der Nebenname nicht mitbeantragt wurde. */
+	private string $lastAliasNote = '';
+
 	/**
 	 * Übernimmt Konfiguration, Repository, Renderer, Reloader, certbot-Client und Layout.
 	 */
@@ -250,14 +253,27 @@ final class VhostService
 		if (!file_exists($this->config->letsEncryptLive . '/' . $vhost->name . '/fullchain.pem')) {
 			// Webroot muss web/ sein, nicht der Basisordner: der Renderer bedient die
 			// ACME-Location mit "root <basis>/web" (C3, Abschlussreview 2026-09-20).
-			// Wird umgeleitet, muss der Nebenname im Zertifikat stehen.
+			// Der Nebenname gehört ins Zertifikat – aber nur, wenn er auch erreichbar
+			// ist. certbot prüft jeden angegebenen Namen einzeln; ein Name ohne
+			// DNS-Eintrag lässt den GESAMTEN Antrag scheitern, auch für den Hauptnamen.
+			// Da die Umleitung voreingestellt ist, beträfe das sonst jede Domain, für
+			// die es kein www gibt.
 			$alias = $vhost->aliasName();
-			$output = $this->certbot->obtain(
-				$vhost->name,
-				$this->layout->webDir($vhost),
-				$email,
-				$alias === null ? [] : [$alias]
-			);
+			$alsoFor = [];
+			if ($alias !== null) {
+				$aliasResult = $this->reachabilityChecker->checkName($alias, $vhost->healthToken);
+				if ($aliasResult->isOk()) {
+					$alsoFor[] = $alias;
+				} else {
+					$this->lastAliasNote = "Hinweis: \"$alias\" ist nicht erreichbar ("
+						. $aliasResult->status->label() . '), das Zertifikat gilt deshalb nur für '
+						. $vhost->name . '.';
+				}
+			}
+			$output = $this->certbot->obtain($vhost->name, $this->layout->webDir($vhost), $email, $alsoFor);
+			if ($this->lastAliasNote !== '') {
+				$output = trim($output . "\n" . $this->lastAliasNote);
+			}
 		}
 		$this->repository->setSsl($vhost->id, true);
 		$this->linkCertificates($vhost);
@@ -548,9 +564,11 @@ final class VhostService
 	}
 
 	/**
-	 * www-Umgang setzen: "none", "www" (auf www.<domain> umleiten) oder "bare".
+	 * www-Umgang setzen: "bare" (auf <domain>, Voreinstellung) oder "www".
 	 *
-	 * Bei localhost-Hosts wirkungslos – dort gibt es keinen www-Namen.
+	 * "aus" gibt es nicht: Einer der beiden Namen liefert aus, der andere leitet
+	 * dorthin um. Nur für Hauptdomains – bei einer Unterdomain ist "www.shop.example.com"
+	 * nicht üblich und existiert in aller Regel gar nicht.
 	 *
 	 * Wichtig bei eingeschaltetem HTTPS: Das vorhandene Zertifikat deckt den Nebennamen
 	 * noch nicht ab. Solange es fehlt, bekommt ein Aufruf von https://<nebenname> einen
@@ -561,11 +579,15 @@ final class VhostService
 	 */
 	public function setWwwMode(Vhost $vhost, string $mode): void
 	{
-		if (!in_array($mode, ['none', 'www', 'bare'], true)) {
-			throw new \InvalidArgumentException("Unbekannter www-Umgang: \"$mode\" (erlaubt: none, www, bare)");
+		if (!in_array($mode, Vhost::WWW_MODES, true)) {
+			throw new \InvalidArgumentException(
+				"Unbekannter www-Umgang: \"$mode\" (erlaubt: " . implode(', ', Vhost::WWW_MODES) . ')'
+			);
 		}
-		if ($vhost->isLocal() && $mode !== 'none') {
-			throw new \RuntimeException('Ein localhost-Host hat keinen www-Namen.');
+		if (!$vhost->supportsWwwRedirect()) {
+			throw new \RuntimeException(
+				"Für \"{$vhost->name}\" gibt es keine www-Entsprechung – das gilt nur für Hauptdomains."
+			);
 		}
 		if ($mode === $vhost->wwwMode) {
 			return;

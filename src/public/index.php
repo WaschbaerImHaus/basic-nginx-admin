@@ -553,20 +553,18 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 			</form>
 		</div>
 
-		<?php if ($isDomain): $alias = $view->aliasName(); ?>
+		<?php if ($view->supportsWwwRedirect()): $alias = (string)$view->aliasName(); ?>
 		<div class="panel">
-			<h2>www-Umleitung <?= $alias === null ? mark('off', 'aus') : mark('ok', $view->canonicalName()) ?></h2>
-			<p class="hint">Beide Namen zeigen auf denselben Docroot – ein Verzeichnis
-				<span class="mono">www.<?= h($view->name) ?></span> gibt es nie. Der eine Name liefert aus, der andere
-				leitet mit 301 dorthin um.</p>
+			<h2>Ausgeliefert unter <?= mark('ok', $view->canonicalName()) ?></h2>
+			<p class="hint"><span class="mono"><?= h($alias) ?></span> wird mit 301 dorthin umgeleitet. Beide Namen zeigen
+				auf denselben Docroot – ein Verzeichnis <span class="mono">www.<?= h($view->name) ?></span> gibt es nie.</p>
 			<form method="post" class="row">
 				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="www"><input type="hidden" name="name" value="<?= h($view->name) ?>">
-				<label><input type="radio" name="mode" value="none" <?= $view->wwwMode === 'none' ? 'checked' : '' ?>> aus</label>
-				<label><input type="radio" name="mode" value="bare" <?= $view->wwwMode === 'bare' ? 'checked' : '' ?>> auf <span class="mono"><?= h($view->name) ?></span></label>
-				<label><input type="radio" name="mode" value="www" <?= $view->wwwMode === 'www' ? 'checked' : '' ?>> auf <span class="mono">www.<?= h($view->name) ?></span></label>
+				<label><input type="radio" name="mode" value="bare" <?= $view->wwwMode !== 'www' ? 'checked' : '' ?>> <span class="mono"><?= h($view->name) ?></span></label>
+				<label><input type="radio" name="mode" value="www" <?= $view->wwwMode === 'www' ? 'checked' : '' ?>> <span class="mono">www.<?= h($view->name) ?></span></label>
 				<button class="primary">Übernehmen</button>
 			</form>
-			<?php if ($alias !== null && $view->ssl && !$page->certificateCoversAlias($view)): ?>
+			<?php if ($view->ssl && !$page->certificateCoversAlias($view)): ?>
 				<p class="hint"><?= mark('bad', 'Zertifikat unvollständig') ?> Das Zertifikat deckt
 					<span class="mono"><?= h($alias) ?></span> noch nicht ab. Wer diesen Namen über HTTPS aufruft, bekommt
 					einen Zertifikatsfehler, bevor die Umleitung greift. Einmal „Zertifikat holen“ unten holt eines für

@@ -19,6 +19,8 @@ final class FakeReachability implements AcmeReachabilityInterface
 	/** @var list<array<string, string>> Aufrufe, zur Kontrolle im Test */
 	public array $calls = [];
 	public ReachabilityStatus $status = ReachabilityStatus::Ok;
+	/** @var array<string, ReachabilityStatus> Ergebnis je Name, überschreibt $status */
+	public array $statusByName = [];
 
 	/**
 	 * @param array<string, string> $targets
@@ -29,7 +31,8 @@ final class FakeReachability implements AcmeReachabilityInterface
 		$this->calls[] = $targets;
 		$results = [];
 		foreach (array_keys($targets) as $domain) {
-			$results[$domain] = new ReachabilityResult($this->status, 'Testergebnis für ' . $domain, 200);
+			$status = $this->statusByName[$domain] ?? $this->status;
+			$results[$domain] = new ReachabilityResult($status, 'Testergebnis für ' . $domain, 200);
 		}
 		return $results;
 	}

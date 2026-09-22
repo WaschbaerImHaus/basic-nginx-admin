@@ -24,6 +24,24 @@ final class ReachabilityChecker
 	}
 
 	/**
+	 * Prüft einen einzelnen Namen gegen die Kennung eines vHosts.
+	 *
+	 * Für den Nebennamen der www-Umleitung: Der liefert denselben Marker aus wie der
+	 * Hauptname, weil beide auf denselben Docroot zeigen.
+	 */
+	public function checkName(string $name, ?string $token): ReachabilityResult
+	{
+		if ($token === null) {
+			return new ReachabilityResult(
+				ReachabilityStatus::Unreachable,
+				'Noch nicht geprüft: die Kennung für den ACME-Pfad fehlt.'
+			);
+		}
+		return $this->reachability->checkMany([$name => $token])[$name]
+			?? new ReachabilityResult(ReachabilityStatus::Unreachable, "Keine Antwort für \"$name\".");
+	}
+
+	/**
 	 * Prüft die übergebenen vHosts und liefert je Name ein Ergebnis.
 	 *
 	 * localhost-Hosts werden nicht angefragt: sie sind absichtlich nie von aussen

@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Buchstaben. localhost-Varianten sind ausgeschlossen, dafür gibt es Port.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-17 10:39
+ * @version Letzte Änderung: 2026-09-22 14:10
  */
 
 namespace VhostAdmin\Value;
@@ -37,6 +37,37 @@ final class DomainName
 		}
 		return new self($name);
 	}
+
+	/**
+	 * Ist das eine Hauptdomain (z. B. example.com) und keine Unterdomain
+	 * (z. B. shop.example.com)?
+	 *
+	 * Nur eine Hauptdomain hat sinnvollerweise eine www-Entsprechung: "www.example.com"
+	 * ist üblich, "www.shop.example.com" nicht.
+	 *
+	 * Die Unterscheidung braucht eigentlich die Public Suffix List – ohne sie wäre
+	 * "example.co.uk" fälschlich eine Unterdomain. Statt diese Liste (über 9000
+	 * Einträge, wöchentlich gepflegt) mitzuschleppen, deckt SECOND_LEVEL die geläufigen
+	 * zweiteiligen Endungen ab. Ein Irrtum kostet hier nichts Ernstes: Der Schalter
+	 * wird dann nicht angeboten, die Domain funktioniert unverändert.
+	 */
+	public static function isMainDomain(string $name): bool
+	{
+		$labels = explode('.', strtolower(trim($name)));
+		$count = count($labels);
+		if ($count < 2) {
+			return false;
+		}
+		$secondLevel = $count >= 3 ? $labels[$count - 2] : '';
+		$suffixLabels = in_array($secondLevel, self::SECOND_LEVEL, true) ? 3 : 2;
+		return $count === $suffixLabels;
+	}
+
+	/**
+	 * Zweite Ebene geläufiger zweiteiliger Endungen: example.co.uk, example.com.br,
+	 * example.ac.at. Keine vollständige Liste, siehe isMainDomain().
+	 */
+	private const SECOND_LEVEL = ['co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'mil', 'sch', 'or', 'ne', 'go'];
 
 	/**
 	 * Der validierte Wert als Zeichenkette (z. B. für Konfigurationstexte).

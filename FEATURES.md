@@ -4,7 +4,7 @@
 
 - **Honigtopf und tägliche Log-Auswertung** (2026-09-22): statische Honigtopf-Seite mit `robots.txt` und eigenem Favicon (`honeypot/`), tägliche Auswertung von `access.log` und `error.log` samt Vortagsvergleich (`honeypot/analyse.php`, systemd-Timer 07:20), Bericht nach `research/honeypot/<datum>.md` mit abgeleiteten Werkzeugvorschlägen. Entwurf der Ansicht: `docs/specs/2026-09-22-honeypot-dashboard.md`.
 
-- **www-Umleitung je Domain** (2026-09-22): Schalter „aus / auf <domain> / auf www.<domain>“ in der Oberfläche und `vhost www <name> none|www|bare`. Beide Namen zeigen auf denselben Docroot; ein Verzeichnis `www.<domain>` entsteht nie. certbot beantragt den Nebennamen mit, und die Oberfläche warnt, solange ein vorhandenes Zertifikat ihn noch nicht abdeckt.
+- **www-Umleitung je Hauptdomain** (2026-09-22): Voreingestellt wird ohne `www` ausgeliefert, `www.<domain>` leitet mit 301 dorthin um; umschaltbar mit `vhost www <name> bare|www`. Kein „aus“ – einer der beiden Namen liefert aus. Nur für Hauptdomains, nicht für Unterdomains. Beide Namen zeigen auf denselben Docroot; ein Verzeichnis `www.<domain>` entsteht nie. certbot beantragt den Nebennamen mit, **sofern er erreichbar ist** – sonst liesse ein Name ohne DNS-Eintrag den ganzen Antrag scheitern.
 
 - **Fertige Konfiguration ansehen** (2026-09-22): `vhost show <name>` und ein Abschnitt in der Oberfläche zeigen den erzeugten `server`-Block mit eingesetztem Verzeichnisschutz und eigenen Direktiven als einen Text – mit Zeilennummern und hervorgehobenem eigenem Abschnitt. Systemdateien wie `fastcgi_params` bleiben als Verweis stehen.
 

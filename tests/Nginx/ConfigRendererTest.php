@@ -79,25 +79,27 @@ final class ConfigRendererTest extends TestCase
 	 */
 	public function testDomainWithoutSslHasTheExpectedStructureInOrder(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, 'public', true, false);
+		// Unterdomain: Für sie gibt es keine www-Entsprechung, also genau ein
+		// server-Block – hier geht es um dessen Aufbau, nicht um die Umleitung.
+		$v = new Vhost(1, 'test.example.com', VhostKind::Domain, null, 'public', true, false);
 		$out = $this->renderer()->serverConfig($v);
 
 		self::assertStringStartsWith("# generiert von vhost – nicht manuell bearbeiten\nserver {\n", $out);
 		self::assertStringEndsWith("    # <<<<\n}\n", $out);
-		self::assertSame(1, substr_count($out, 'server {'), 'ohne SSL nur ein server-Block');
+		self::assertSame(1, substr_count($out, 'server {'), 'eine Unterdomain braucht nur einen Block');
 
 		$expectedOrder = [
 			'listen 80;',
-			'server_name example.com;',
+			'server_name test.example.com;',
 			'location ^~ /.well-known/acme-challenge/',
-			'root /var/www/example.com/web/public;',
+			'root /var/www/test.example.com/web/public;',
 			'index index.html index.htm;',
 			'try_files $uri $uri/ =404;',
-			'access_log /var/www/example.com/logs/access.log;',
+			'access_log /var/www/test.example.com/logs/access.log;',
 			'server_tokens off;',
 			'add_header X-Content-Type-Options',
 			'gzip_types',
-			'include /etc/nginx/auth/example.com.conf;',
+			'include /etc/nginx/auth/test.example.com.conf;',
 			'location ~ /\.(?!well-known/)',
 			'location = /favicon.ico',
 			'location = /robots.txt',
@@ -106,7 +108,7 @@ final class ConfigRendererTest extends TestCase
 			'expires -1;',
 			'location ~ \.php$',
 			'# >>>>',
-			'include /var/www/example.com/conf/*.conf;',
+			'include /var/www/test.example.com/conf/*.conf;',
 		];
 		$previous = -1;
 		foreach ($expectedOrder as $needle) {
@@ -119,20 +121,22 @@ final class ConfigRendererTest extends TestCase
 
 	public function testDomainWithSslRedirectsAndServes443(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		// Unterdomain, damit genau zwei Blöcke entstehen; die www-Umleitung mit SSL hat
+		// ihren eigenen Test.
+		$v = new Vhost(1, 'shop.example.com', VhostKind::Domain, null, null, true, true);
 		$out = $this->renderer()->serverConfig($v);
 		self::assertStringContainsString("    location / {\n        return 301 https://\$host\$request_uri;\n    }\n}\n", $out);
 		self::assertStringContainsString("    listen 443 ssl;\n    listen [::]:443 ssl;\n    http2 on;\n", $out);
-		self::assertStringContainsString('ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;', $out);
-		self::assertStringContainsString('ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;', $out);
+		self::assertStringContainsString('ssl_certificate     /etc/letsencrypt/live/shop.example.com/fullchain.pem;', $out);
+		self::assertStringContainsString('ssl_certificate_key /etc/letsencrypt/live/shop.example.com/privkey.pem;', $out);
 		self::assertStringContainsString("ssl_protocols TLSv1.2 TLSv1.3;", $out);
 		self::assertSame(2, substr_count($out, 'server {'));
 		// Der ACME-Pfad gehört nur in den Port-80-Block: http-01 fragt immer über HTTP an, und "location ^~" hat dort Vorrang vor der Weiterleitung.
 		self::assertSame(1, substr_count($out, 'acme-challenge'));
-		self::assertSame(1, substr_count($out, 'include /etc/nginx/auth/example.com.conf;'));
-		self::assertStringContainsString('root /var/www/example.com/web;', $out);
-		self::assertSame(1, substr_count($out, 'include /var/www/example.com/conf/*.conf;'));
-		self::assertStringContainsString('access_log /var/www/example.com/logs/access.log;', $out);
+		self::assertSame(1, substr_count($out, 'include /etc/nginx/auth/shop.example.com.conf;'));
+		self::assertStringContainsString('root /var/www/shop.example.com/web;', $out);
+		self::assertSame(1, substr_count($out, 'include /var/www/shop.example.com/conf/*.conf;'));
+		self::assertStringContainsString('access_log /var/www/shop.example.com/logs/access.log;', $out);
 	}
 
 	/**
@@ -198,7 +202,9 @@ final class ConfigRendererTest extends TestCase
 	 */
 	public function testNoGeneratedRootLocationSoUsersCanDefineTheirOwn(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		// Unterdomain: Der Umleitungsblock einer Hauptdomain enthält selbst ein
+		// "location /", das hier nichts zur Sache tut.
+		$v = new Vhost(1, 'test.example.com', VhostKind::Domain, null, null, true, false);
 		$out = $this->renderer()->serverConfig($v);
 		self::assertStringContainsString("    try_files \$uri \$uri/ =404;\n", $out);
 		self::assertStringNotContainsString('location / {', $out);
@@ -386,15 +392,32 @@ final class ConfigRendererTest extends TestCase
 	// ------------------------------------------------------------------
 
 	/**
-	 * Ohne eingestellten www-Umgang bleibt alles wie bisher: ein Name, kein
-	 * zusätzlicher Block.
+	 * Voreingestellt wird ohne www ausgeliefert und www dorthin umgeleitet – ohne dass
+	 * jemand etwas einstellen muss.
 	 */
-	public function testNoWwwHandlingByDefault(): void
+	public function testDefaultRedirectsWwwToBareDomain(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
 		$out = $this->renderer()->serverConfig($v);
-		self::assertStringNotContainsString('www.example.com', $out);
+		self::assertStringContainsString("    server_name www.example.com;\n", $out);
+		self::assertStringContainsString('return 301 http://example.com$request_uri;', $out);
+		self::assertSame(2, substr_count($out, 'server {'));
+	}
+
+	/**
+	 * Unterdomains bekommen keine www-Umleitung: "www.shop.example.com" ist nicht
+	 * üblich, und ein solcher Name existiert in aller Regel gar nicht.
+	 */
+	public function testSubdomainsGetNoWwwRedirect(): void
+	{
+		$v = new Vhost(1, 'shop.example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringNotContainsString('www.shop.example.com', $out);
 		self::assertSame(1, substr_count($out, 'server {'));
+
+		// Auch eine anderslautende Einstellung darf daran nichts ändern.
+		$forced = new Vhost(1, 'shop.example.com', VhostKind::Domain, null, null, true, false, false, 'www');
+		self::assertStringNotContainsString('www.', $this->renderer()->serverConfig($forced));
 	}
 
 	/**
@@ -449,15 +472,15 @@ final class ConfigRendererTest extends TestCase
 	}
 
 	/**
-	 * Ohne www-Umgang leitet der :80-Block wie bisher auf $host um – es gibt nur einen
-	 * Namen, und $host spart eine Fallunterscheidung.
+	 * Wo es keine www-Entsprechung gibt (Unterdomain), leitet der :80-Block auf $host
+	 * um – es gibt nur einen Namen, und das spart eine Fallunterscheidung.
 	 */
-	public function testSslWithoutWwwHandlingKeepsHostRedirect(): void
+	public function testSslOnASubdomainKeepsTheHostRedirect(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		$v = new Vhost(1, 'shop.example.com', VhostKind::Domain, null, null, true, true);
 		$out = $this->renderer()->serverConfig($v);
 		self::assertStringContainsString('return 301 https://$host$request_uri;', $out);
-		self::assertSame(2, substr_count($out, 'server {'));
+		self::assertSame(2, substr_count($out, 'server {'), ':80 Umleitung und :443');
 	}
 
 	/**

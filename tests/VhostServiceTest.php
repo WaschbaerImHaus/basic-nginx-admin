@@ -840,9 +840,13 @@ final class VhostServiceTest extends TestCase
 		$this->reachability->status = ReachabilityStatus::Ok;
 		$this->service->enableSsl($this->repo->byName('reach.example'));
 		self::assertTrue($this->repo->byName('reach.example')->ssl);
-		// Geprüft wurde mit der gespeicherten Kennung dieser Domain.
+		// Geprüft wurde mit der gespeicherten Kennung dieser Domain – erst der Hauptname,
+		// danach der Nebenname der voreingestellten www-Umleitung.
 		$token = $this->repo->byName('reach.example')->healthToken;
-		self::assertSame([['reach.example' => $token]], $this->reachability->calls);
+		self::assertSame(
+			[['reach.example' => $token], ['www.reach.example' => $token]],
+			$this->reachability->calls
+		);
 	}
 
 	public function testReachabilitySkipsLocalhostHosts(): void
@@ -1149,17 +1153,41 @@ final class VhostServiceTest extends TestCase
 	{
 		$this->service->setLetsEncryptEmail('admin@example.com');
 		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
-		$this->service->setWwwMode($v, 'bare');
+		// "bare" ist die Voreinstellung – es muss nichts eingestellt werden.
+		self::assertSame('bare', $this->repo->byName('um.example')->wwwMode);
 		$this->service->enableSsl($this->repo->byName('um.example'));
 
 		self::assertSame([['www.um.example']], $this->certbot->alsoFor);
 	}
 
-	public function testCertbotIsAskedForOneNameWithoutWwwHandling(): void
+	/**
+	 * Der Nebenname gehört nur ins Zertifikat, wenn er erreichbar ist. certbot prüft
+	 * jeden angegebenen Namen; einer ohne DNS-Eintrag lässt den ganzen Antrag
+	 * scheitern – auch für den Hauptnamen. Da die Umleitung voreingestellt ist, beträfe
+	 * das sonst jede Domain, für die es kein www gibt.
+	 */
+	public function testAliasIsLeftOutOfTheCertificateWhenItIsNotReachable(): void
 	{
 		$this->service->setLetsEncryptEmail('admin@example.com');
 		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
-		$this->service->enableSsl($this->repo->byName('um.example'));
+		$this->reachability->statusByName['www.um.example'] = ReachabilityStatus::DnsFailed;
+
+		$output = $this->service->enableSsl($this->repo->byName('um.example'));
+
+		self::assertSame([[]], $this->certbot->alsoFor, 'ohne erreichbaren Nebennamen nur ein Name');
+		self::assertTrue($this->repo->byName('um.example')->ssl, 'das Zertifikat kommt trotzdem');
+		self::assertStringContainsString('www.um.example', $output, 'der Hinweis muss erscheinen');
+	}
+
+	/**
+	 * Eine Unterdomain hat keine www-Entsprechung; es darf kein zweiter Name beantragt
+	 * werden.
+	 */
+	public function testSubdomainGetsACertificateForOneNameOnly(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('shop.um.example'), null);
+		$this->service->enableSsl($this->repo->byName('shop.um.example'));
 		self::assertSame([[]], $this->certbot->alsoFor);
 	}
 }

@@ -215,24 +215,36 @@ einer gewöhnlichen `style.css` würde es Änderungen wochenlang verstecken.
 
 ## www-Umleitung
 
-Je Domain lässt sich einstellen, welcher Name ausliefert und welcher dorthin umleitet:
-`www.<domain>`, `<domain>` oder gar keine Umleitung. Beide Namen zeigen auf denselben
-Docroot – ein Verzeichnis `www.<domain>` wird nie angelegt.
+Eine Hauptdomain wird immer unter einem der beiden Namen ausgeliefert, der andere leitet
+mit 301 dorthin um. **Voreingestellt ist die Auslieferung ohne `www`.** Es gibt keine
+Einstellung „keine Umleitung": Einer der beiden Namen liefert aus, der andere zeigt
+dorthin.
 
 ```
-sudo vhost www <name> none|www|bare
+sudo vhost www <name> bare|www
 ```
+
+Das gilt nur für **Hauptdomains**. Für eine Unterdomain wie `shop.example.com` gibt es
+keinen Schalter – `www.shop.example.com` ist nicht üblich und existiert in aller Regel
+gar nicht. Die Unterscheidung trifft `DomainName::isMainDomain()`; sie kennt die
+geläufigen zweiteiligen Endungen (`example.co.uk` ist eine Hauptdomain), aber nicht die
+vollständige Public Suffix List.
+
+Beide Namen zeigen auf denselben Docroot – ein Verzeichnis `www.<domain>` wird nie
+angelegt.
 
 Ohne Zertifikat bekommt der Nebenname einen eigenen Port-80-Block, der mit 301 umleitet
 und den ACME-Pfad mitbringt. Mit Zertifikat nimmt der Port-80-Block beide Namen und
 leitet unmittelbar auf den kanonischen über HTTPS um; auf Port 443 leitet der Nebenname
 weiter.
 
-> **Wichtig bei eingeschaltetem HTTPS:** Das Zertifikat muss beide Namen abdecken. Wer
-> `https://www.<domain>` aufruft, bekommt sonst einen Zertifikatsfehler, *bevor* die
-> Umleitung greift. Nach dem Umschalten weist die Oberfläche darauf hin; ein erneutes
-> „Zertifikat holen" beantragt eines für beide Namen. Voraussetzung ist, dass auch der
-> Nebenname per DNS auf diesen Server zeigt.
+> **Zum Zertifikat:** Es muss beide Namen abdecken, sonst bekommt ein Aufruf von
+> `https://www.<domain>` einen Zertifikatsfehler, *bevor* die Umleitung greift. Deshalb
+> beantragt `vhost ssl <name> on` den Nebennamen mit – **aber nur, wenn er erreichbar
+> ist.** certbot prüft jeden angegebenen Namen einzeln; einer ohne DNS-Eintrag lässt den
+> gesamten Antrag scheitern, auch für den Hauptnamen. Da die Umleitung voreingestellt
+> ist, beträfe das sonst jede Domain, für die es kein `www` gibt. Ist der Nebenname nicht
+> erreichbar, gilt das Zertifikat nur für den Hauptnamen und der Aufruf sagt das.
 
 ## Erreichbarkeit
 

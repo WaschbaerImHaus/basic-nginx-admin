@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	ssl        INTEGER NOT NULL DEFAULT 0,
 	php        INTEGER NOT NULL DEFAULT 0,
 	health_token TEXT,
-	www_mode   TEXT NOT NULL DEFAULT 'none',
+	www_mode   TEXT NOT NULL DEFAULT 'bare',
 	deleted_at TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -98,8 +98,12 @@ SQL);
 			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN php INTEGER NOT NULL DEFAULT 0');
 		}
 		if (!in_array('www_mode', $columns, true)) {
-			// none = kein www-Umgang; www = auf www.<domain> umleiten; bare = auf <domain>.
-			$this->pdo()->exec("ALTER TABLE vhosts ADD COLUMN www_mode TEXT NOT NULL DEFAULT 'none'");
+			// bare = auf <domain> umleiten (Standard), www = auf www.<domain>.
+			$this->pdo()->exec("ALTER TABLE vhosts ADD COLUMN www_mode TEXT NOT NULL DEFAULT 'bare'");
+		} else {
+			// Eine frühere Fassung kannte "none" (keine Umleitung). Das ist keine
+			// Einstellung mehr: Einer der beiden Namen liefert aus, der andere leitet dorthin.
+			$this->pdo()->exec("UPDATE vhosts SET www_mode = 'bare' WHERE www_mode NOT IN ('bare', 'www')");
 		}
 		if (!in_array('deleted_at', $columns, true)) {
 			// Zeitpunkt, zu dem das Entfernen angestossen wurde; bis zum Ablauf der

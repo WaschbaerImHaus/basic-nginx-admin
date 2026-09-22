@@ -49,7 +49,7 @@ vhost – nginx-vHosts verwalten
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
-  vhost www <name> none|www|bare        (wohin umgeleitet wird)
+  vhost www <name> bare|www             (wohin umgeleitet wird; nur Hauptdomains)
   vhost subdir <name> [unterordner]     (leer = Docroot ist web/; Inhalt zieht mit)
   vhost show <name>                     (fertige Konfiguration als ein Text)
   vhost conf-show <name>
@@ -333,12 +333,10 @@ TXT;
 
 			case 'www':
 				$vhost = $this->service->load($arg(0, 'Name'));
-				$this->service->setWwwMode($vhost, $arg(1, 'none|www|bare'));
+				$this->service->setWwwMode($vhost, $arg(1, 'bare|www'));
 				$updated = $this->service->load($vhost->name);
-				$alias = $updated->aliasName();
-				$this->out($alias === null
-					? "Kein www-Umgang: nur {$updated->name}.\n"
-					: "$alias wird auf {$updated->canonicalName()} umgeleitet.\n"
+				$alias = (string)$updated->aliasName();
+				$this->out("$alias wird auf {$updated->canonicalName()} umgeleitet.\n"
 						. ($updated->ssl && !$this->service->certificateCoversAlias($updated)
 							? "Achtung: Das Zertifikat deckt \"$alias\" noch nicht ab. "
 								. "Einmal \"vhost ssl {$updated->name} on\" holt eines für beide Namen.\n"

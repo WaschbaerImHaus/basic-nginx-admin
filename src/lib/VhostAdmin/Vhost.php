@@ -26,6 +26,12 @@ use VhostAdmin\Value\SubDirectory;
 
 final class Vhost
 {
+	/** Mögliche Werte für den www-Umgang. "aus" gibt es nicht: Einer der beiden Namen liefert aus. */
+	public const WWW_MODES = ['bare', 'www'];
+
+	/** Voreinstellung: ausgeliefert wird ohne www, www leitet dorthin um. */
+	public const WWW_DEFAULT = 'bare';
+
 	/**
 	 * @param ?int      $id        Datenbank-ID (null vor dem Speichern)
 	 * @param string    $name      "example.com" oder "localhost:3000"
@@ -35,8 +41,8 @@ final class Vhost
 	 * @param bool      $protect   Verzeichnisschutz aktiv
 	 * @param bool      $ssl       Let's-Encrypt-Zertifikat aktiv (nur Domain)
 	 * @param bool      $php       PHP über einen eigenen FPM-Pool ausliefern
-	 * @param string    $wwwMode   "none", "www" (auf www.<domain> umleiten) oder "bare"
-	 *                             (auf <domain> umleiten)
+	 * @param string    $wwwMode   "bare" (auf <domain> umleiten, Standard) oder "www"
+	 *                             (auf www.<domain> umleiten). Wirkt nur bei Hauptdomains.
 	 * @param ?string   $healthToken Kennung im ACME-Marker, mit der der Erreichbarkeitstest
 	 *                               belegt, dass die Domain auf diesen Server zeigt
 	 * @param ?string   $deletedAt Zeitpunkt (UTC), zu dem das Entfernen angestossen wurde;
@@ -52,7 +58,7 @@ final class Vhost
 		public readonly bool $protect,
 		public readonly bool $ssl,
 		public readonly bool $php = false,
-		public readonly string $wwwMode = 'none',
+		public readonly string $wwwMode = self::WWW_DEFAULT,
 		public readonly ?string $healthToken = null,
 		public readonly ?string $deletedAt = null,
 		public readonly ?string $createdAt = null,
@@ -137,7 +143,8 @@ final class Vhost
 			// Ältere Datenbanken kennen die Spalte nicht; Database::migrateSchema() zieht
 			// sie nach, der Standardwert hier hält den Fall bis dahin aus.
 			(bool)($row['php'] ?? false),
-			in_array($row['www_mode'] ?? 'none', ['none', 'www', 'bare'], true) ? (string)($row['www_mode'] ?? 'none') : 'none',
+			// "none" gab es in einer früheren Fassung; es ist keine Einstellung mehr.
+			in_array($row['www_mode'] ?? '', self::WWW_MODES, true) ? (string)$row['www_mode'] : self::WWW_DEFAULT,
 			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
 			($row['deleted_at'] ?? null) === null || $row['deleted_at'] === '' ? null : (string)$row['deleted_at'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
@@ -152,19 +159,29 @@ final class Vhost
 	 */
 	public function canonicalName(): string
 	{
-		return $this->wwwMode === 'www' ? 'www.' . $this->name : $this->name;
+		return $this->supportsWwwRedirect() && $this->wwwMode === 'www' ? 'www.' . $this->name : $this->name;
 	}
 
 	/**
-	 * Der Name, der umgeleitet wird; null, wenn kein www-Umgang eingestellt ist.
+	 * Der Name, der umgeleitet wird; null, wenn es für diesen Host keinen gibt.
 	 */
 	public function aliasName(): ?string
 	{
-		return match ($this->wwwMode) {
-			'www' => $this->name,
-			'bare' => 'www.' . $this->name,
-			default => null,
-		};
+		if (!$this->supportsWwwRedirect()) {
+			return null;
+		}
+		return $this->wwwMode === 'www' ? $this->name : 'www.' . $this->name;
+	}
+
+	/**
+	 * Kommt für diesen Host eine www-Umleitung überhaupt in Frage?
+	 *
+	 * Nur für Hauptdomains: "www.example.com" ist üblich, "www.shop.example.com" nicht.
+	 * localhost-Hosts haben ohnehin keinen www-Namen.
+	 */
+	public function supportsWwwRedirect(): bool
+	{
+		return !$this->isLocal() && DomainName::isMainDomain($this->name);
 	}
 
 	/**
