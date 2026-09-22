@@ -49,6 +49,7 @@ vhost – nginx-vHosts verwalten
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
+  vhost show <name>                     (fertige Konfiguration als ein Text)
   vhost conf-show <name>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
   vhost fix-permissions [name]
@@ -327,6 +328,12 @@ TXT;
 						|| $result->status === \VhostAdmin\Ssl\ReachabilityStatus::WrongServer;
 				}
 				return $failed ? 1 : 0;
+
+			case 'show':
+				// Die fertige Konfiguration als ein Text – für die Oberfläche und zum
+				// Nachsehen auf der Kommandozeile. Rein lesend.
+				$this->out($this->service->effectiveConfig($this->service->load($arg(0, 'Name'))) . "\n");
+				return 0;
 
 			case 'conf-show':
 				// Die Oberfläche kommt an conf/ nicht mehr heran (root:<besitzer> 0750) und

@@ -541,6 +541,70 @@ final class VhostService
 	}
 
 	/**
+	 * Die fertige Konfiguration dieses vHosts als ein zusammenhängender Text.
+	 *
+	 * nginx setzt den Block aus mehreren Dateien zusammen: dem erzeugten server-Block,
+	 * dem Auth-Snippet und den eigenen Direktiven aus conf/. Wer wissen will, was am
+	 * Ende gilt, müsste sie auf dem Server einzeln nachschlagen. Diese Methode setzt
+	 * die Einbindungen, die zu diesem vHost gehören, an Ort und Stelle ein und nennt
+	 * dabei die Herkunft.
+	 *
+	 * Fremde Einbindungen – etwa fastcgi_params – bleiben als Verweis stehen: Das sind
+	 * unveränderliche Systemdateien, deren Inhalt hier nur Rauschen wäre.
+	 *
+	 * @throws \RuntimeException wenn für den vHost keine Konfiguration geschrieben wurde
+	 */
+	public function effectiveConfig(Vhost $vhost): string
+	{
+		$file = $this->renderer->serverConfigPath($vhost);
+		if (!is_file($file)) {
+			throw new \RuntimeException("Für {$vhost->name} wurde noch keine nginx-Konfiguration geschrieben ($file).");
+		}
+		$own = [
+			$this->renderer->authSnippetPath($vhost) => 'Verzeichnisschutz',
+			$this->layout->confDir($vhost) . '/*.conf' => 'eigene Direktiven',
+		];
+		$out = [];
+		foreach (explode("\n", (string)file_get_contents($file)) as $line) {
+			if (preg_match('/^(\s*)include\s+(\S+);\s*$/', $line, $match) && isset($own[$match[2]])) {
+				foreach ($this->inlineInclude($match[1], $match[2], $own[$match[2]]) as $inlined) {
+					$out[] = $inlined;
+				}
+				continue;
+			}
+			$out[] = $line;
+		}
+		return implode("\n", $out);
+	}
+
+	/**
+	 * Inhalt einer eingebundenen Datei, eingerückt und mit Herkunftsangabe.
+	 *
+	 * @param string $indent  Einrückung der ersetzten include-Zeile
+	 * @param string $pattern Pfad oder Glob-Muster aus der include-Direktive
+	 * @param string $label   Was dort steht, für die Herkunftszeile
+	 * @return list<string>
+	 */
+	private function inlineInclude(string $indent, string $pattern, string $label): array
+	{
+		$files = str_contains($pattern, '*') ? (glob($pattern) ?: []) : (is_file($pattern) ? [$pattern] : []);
+		if ($files === []) {
+			return [$indent . "# $label: keine Datei vorhanden"
+				. ($label === 'eigene Direktiven' ? ' – keine eigenen Direktiven gesetzt' : '')];
+		}
+		$out = [];
+		foreach ($files as $path) {
+			$out[] = $indent . "# ── $label aus $path";
+			foreach (explode("\n", rtrim((string)file_get_contents($path), "\n")) as $line) {
+				// Leerzeilen nicht künstlich einrücken – sonst stehen dort Leerzeichen.
+				$out[] = $line === '' ? '' : $indent . $line;
+			}
+			$out[] = $indent . "# ── Ende $label";
+		}
+		return $out;
+	}
+
+	/**
 	 * Erreichbarkeit einer oder mehrerer vHosts über den ACME-Pfad prüfen.
 	 *
 	 * Die Entscheidung, was geprüft wird, steckt in Ssl\ReachabilityChecker – die

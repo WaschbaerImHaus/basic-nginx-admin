@@ -106,6 +106,12 @@ Eine unbekannte Direktive ist erlaubt und wird an nginx weitergegeben. Schlägt 
 fehl, bleibt die bisherige Fassung aktiv und die Meldung erscheint im roten Kasten.
 Gespeichert wird das Snippet in `[domain]/conf/custom.conf`.
 
+Unter dem Editor steht die **fertige Konfiguration**: der erzeugte `server`-Block, der
+Verzeichnisschutz und die eigenen Direktiven zu einem Text zusammengesetzt, mit
+Zeilennummern und hervorgehobenem eigenem Abschnitt. nginx liest diese Teile aus
+mehreren Dateien; um zu sehen, was am Ende gilt, musste man sie bisher auf dem Server
+einzeln nachschlagen. Auf der Kommandozeile: `sudo vhost show <name>`.
+
 **Bearbeitet wird ausschliesslich über die Oberfläche bzw. `vhost conf`.** `[domain]/conf/`
 gehört root (`root:<besitzer> 0750`, die Datei `0640`): der Besitzer der Website darf den
 Text lesen, aber nicht ändern, und keine eigenen Dateien dort anlegen. Auch `www-data` hat
@@ -286,6 +292,7 @@ sudo vhost set hsts on|off                                   # HSTS wirkt im Bro
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
 sudo vhost conf <name>                                        # nginx-Snippet per stdin (leer = entfernen)
 sudo vhost conf-show <name>                                   # aktuelles Snippet ausgeben
+sudo vhost show <name>                                        # fertige Konfiguration als ein Text
 sudo vhost fix-permissions [name]                             # Rechte laut VhostLayout wiederherstellen
 sudo vhost migrate-layout                                     # alte vHosts (ohne web/conf/cert/private/logs) nachziehen
 ```

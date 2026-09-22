@@ -146,6 +146,38 @@ function railState(Vhost $v, ?ReachabilityResult $r): string
 	return $out;
 }
 
+/**
+ * Konfigurationstext mit Zeilennummern ausgeben.
+ *
+ * Hervorgehoben wird nur, was beim Lesen hilft: Kommentare treten zurück, der eigene
+ * Abschnitt zwischen den Markern wird hinterlegt – daran sieht man auf einen Blick,
+ * wo die eigenen Direktiven landen.
+ */
+function confListing(string $text): string
+{
+	$out = '';
+	$inOwn = false;
+	foreach (explode("\n", rtrim($text, "\n")) as $number => $line) {
+		$trimmed = ltrim($line);
+		if (str_starts_with($trimmed, '# >>>>')) {
+			$inOwn = true;
+		}
+		$classes = [];
+		if ($inOwn) {
+			$classes[] = 'own';
+		}
+		if (str_starts_with($trimmed, '#')) {
+			$classes[] = 'comment';
+		}
+		if (str_starts_with($trimmed, '# <<<<')) {
+			$inOwn = false;
+		}
+		$out .= '<span class="ln">' . ($number + 1) . '</span>'
+			. '<span class="' . implode(' ', $classes) . '">' . h($line) . "</span>\n";
+	}
+	return $out;
+}
+
 // Fehlermeldungen der Direktivenprüfung nennen die Zeile ("Zeile 3: ..."). Die
 // markieren wir im Editor, statt sie den Nutzer selbst suchen zu lassen.
 $errorLine = 0;
@@ -298,6 +330,21 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 
 	/* Erzeugtes Passwort: als Text lesbar (es soll ja abgeschrieben werden), aber
 	   nicht überschreibbar. */
+	/* Fertige Konfiguration: Zeilennummern links, Text rechts, alles scrollbar. */
+	.listing {
+		margin:0; border:1px solid var(--line); border-radius:4px; background:var(--surface);
+		font:13px/1.6 var(--mono); overflow:auto; max-height:34rem;
+		display:grid; grid-template-columns:auto minmax(0,1fr); align-content:start;
+	}
+	.listing .ln {
+		position:sticky; left:0; padding:0 .55rem 0 .7rem; text-align:right;
+		color:var(--muted); background:var(--sunken); border-right:1px solid var(--line);
+		user-select:none;
+	}
+	.listing > span:not(.ln) { padding:0 .7rem; white-space:pre; }
+	.listing .comment { color:var(--muted); }
+	.listing .own { background:color-mix(in srgb, var(--act) 9%, transparent); }
+
 	input.pw { letter-spacing:.02em; background:var(--sunken); cursor:pointer; }
 	input.pw.wide { width:100%; max-width:34rem; font-size:1.05rem; padding:.55rem .7rem; }
 	.panel.credential { border-color:color-mix(in srgb, var(--ok) 45%, transparent); }
@@ -407,6 +454,19 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 						bleibt die bisherige Fassung aktiv und die Meldung erscheint oben.</span>
 				</div>
 			</form>
+		</div>
+
+		<div class="panel">
+			<h2>Fertige Konfiguration</h2>
+			<p class="hint">Was nginx für diesen Host tatsächlich liest – der erzeugte Block, der Verzeichnisschutz und
+				Ihre eigenen Direktiven zusammengesetzt zu einem Text. Der hinterlegte Bereich ist Ihrer. Auf der
+				Kommandozeile: <span class="mono">sudo vhost show <?= h($view->name) ?></span></p>
+			<?php $effective = $page->effectiveConfig($view); ?>
+			<?php if ($effective === ''): ?>
+				<p class="hint">Noch keine Konfiguration geschrieben.</p>
+			<?php else: ?>
+				<pre class="listing"><?= confListing($effective) ?></pre>
+			<?php endif ?>
 		</div>
 
 		<div class="panel">

@@ -949,4 +949,66 @@ final class VhostServiceTest extends TestCase
 		$expected = new \DateTimeImmutable($pending->deletedAt . ' UTC');
 		self::assertSame(3600, $due->getTimestamp() - $expected->getTimestamp());
 	}
+	// ------------------------------------------------------------------
+	// Fertige Konfiguration ansehen
+	// ------------------------------------------------------------------
+
+	/**
+	 * Die Ansicht soll ein zusammenhängender Text sein: Die Einbindungen, die zu
+	 * diesem vHost gehören, werden an Ort und Stelle eingesetzt – sonst müsste man die
+	 * Dateien auf dem Server nachschlagen, und genau das soll entfallen.
+	 */
+	public function testEffectiveConfigInlinesTheVhostsOwnIncludes(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('zeig.example'), null);
+		$this->service->addUser($v, Username::fromString('alice'), 'geheim');
+		$this->service->setSnippet(
+			$this->repo->byName('zeig.example'),
+			NginxSnippet::fromString("location = /health {\n    return 200 \"ok\";\n}\n", $this->layout->snippetScope($v))
+		);
+
+		$out = $this->service->effectiveConfig($this->repo->byName('zeig.example'));
+
+		// Der Verzeichnisschutz steht jetzt im Text statt als Verweis.
+		self::assertStringContainsString('auth_basic', $out);
+		self::assertStringContainsString('satisfy any;', $out);
+		// Die eigenen Direktiven ebenso.
+		self::assertStringContainsString('location = /health {', $out);
+		// Und es bleibt kein Verweis auf eine Datei dieses vHosts übrig.
+		self::assertStringNotContainsString('include /etc/nginx/auth/', $out);
+		self::assertStringNotContainsString('/conf/*.conf;', $out);
+		// Die Herkunft wird genannt, damit klar ist, woher ein Abschnitt stammt.
+		self::assertStringContainsString('conf/custom.conf', $out);
+	}
+
+	/**
+	 * fastcgi_params ist eine unveränderliche Systemdatei mit zwanzig Zeilen – die
+	 * gehört nicht in die Ansicht, sie wäre nur Rauschen.
+	 */
+	public function testEffectiveConfigLeavesSystemIncludesAlone(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('zeig.example'), null);
+		$this->service->enablePhp($v);
+		$out = $this->service->effectiveConfig($this->repo->byName('zeig.example'));
+		self::assertStringContainsString('include ' . $this->config->fastcgiParams . ';', $out);
+	}
+
+	/**
+	 * Ohne eigene Direktiven soll dastehen, dass dort nichts ist – nicht einfach eine
+	 * Lücke, bei der man rätselt, ob die Ansicht etwas verschluckt hat.
+	 */
+	public function testEffectiveConfigSaysWhenThereAreNoOwnDirectives(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('zeig.example'), null);
+		$out = $this->service->effectiveConfig($this->repo->byName('zeig.example'));
+		self::assertStringContainsString('keine eigenen Direktiven', $out);
+	}
+
+	public function testEffectiveConfigFailsLoudlyWithoutAConfiguration(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('zeig.example'), null);
+		unlink($this->config->sitesAvailable . '/zeig.example.conf');
+		$this->expectException(\RuntimeException::class);
+		$this->service->effectiveConfig($this->repo->byName('zeig.example'));
+	}
 }

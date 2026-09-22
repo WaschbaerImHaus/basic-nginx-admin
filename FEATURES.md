@@ -2,6 +2,8 @@
 
 ## Implementiert
 
+- **Fertige Konfiguration ansehen** (2026-09-22): `vhost show <name>` und ein Abschnitt in der Oberfläche zeigen den erzeugten `server`-Block mit eingesetztem Verzeichnisschutz und eigenen Direktiven als einen Text – mit Zeilennummern und hervorgehobenem eigenem Abschnitt. Systemdateien wie `fastcgi_params` bleiben als Verweis stehen.
+
 - **Erzeugte Passwörter für den Verzeichnisschutz** (2026-09-22): Das Eingabefeld ist durch ein nur lesbares Feld mit einem erzeugten Passwort ersetzt (20 Zeichen, Gross-/Kleinbuchstaben, Ziffern, `@=#+.,_-:;`, aus `random_int`). Nach dem Anlegen wird es einmal gross angezeigt und ist danach nicht mehr auslesbar. Je Benutzer gibt es „Passwort neu“. Über das CLI bleibt jedes beliebige Passwort möglich.
 
 - **Oberfläche neu gestaltet** (2026-09-21): volle Fensterbreite, dauerhafte vHost-Liste links mit Zustandsanzeige, Arbeitsbereich rechts. Der Direktiven-Editor hat Zeilennummern, füllt gut die halbe Fensterhöhe, ist grösser ziehbar, der Tabulator rückt ein. Abgelehnte Eingaben bleiben erhalten, die beanstandete Zeile wird markiert und angesprungen. Dunkles Farbschema nach Systemeinstellung, keine Schriften oder Skripte aus dem Netz.

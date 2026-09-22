@@ -132,6 +132,13 @@ grep -q 'flash ok' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=s
 curl -s -o /dev/null -c "$JAR" -b "$JAR" --data-urlencode "csrf=$CSRF2" -d 'action=conf&name=smoke-conf.example' --data-urlencode 'snippet=root /etc;' http://127.0.0.1:8080/
 grep -q 'X-Smoke-Test' /var/www/smoke-conf.example/conf/custom.conf && echo "ok   verbotene Direktive abgelehnt, alte Fassung aktiv" || fail "verbotene Direktive hat das Snippet überschrieben"
 grep -q 'flash err' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-conf.example')" && echo "ok   Fehlermeldung angezeigt" || fail "keine Fehlermeldung in der Oberfläche"
+# Fertige Konfiguration: die eingebundenen Teile muessen im Text stehen, nicht als Verweis.
+SHOW=$(vhost show smoke-conf.example)
+grep -q 'X-Smoke-Test' <<<"$SHOW" && echo "ok   eigene Direktiven im Gesamttext" || fail "eigene Direktiven fehlen in 'vhost show'"
+grep -q 'satisfy any\|Verzeichnisschutz deaktiviert' <<<"$SHOW" && echo "ok   Verzeichnisschutz im Gesamttext" || fail "Verzeichnisschutz fehlt in 'vhost show'"
+grep -q 'include /etc/nginx/auth/' <<<"$SHOW" && fail "Verweis auf das Auth-Snippet blieb stehen" || echo "ok   kein Verweis mehr auf eigene Dateien"
+grep -q 'class="listing"' <<<"$(curl -s -c "$JAR" -b "$JAR" 'http://127.0.0.1:8080/?v=smoke-conf.example')" \
+	&& echo "ok   Konfiguration in der Oberflaeche sichtbar" || fail "Konfigurationsansicht fehlt in der Oberflaeche"
 # conf/ darf vom Besitzer der Website nur gelesen werden; bearbeitet wird
 # ausschliesslich über die Oberfläche bzw. das CLI (Nutzervorgabe 2026-09-20).
 OWNER=$(stat -c '%U' /var/www/smoke-conf.example)

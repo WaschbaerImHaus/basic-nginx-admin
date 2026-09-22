@@ -55,6 +55,17 @@ final class AdminPage
 	}
 
 	/**
+	 * Die fertige nginx-Konfiguration dieses vHosts als ein Text.
+	 *
+	 * Über das CLI, weil conf/ root gehört und die Oberfläche dort nicht hineinsieht.
+	 */
+	public function effectiveConfig(Vhost $vhost): string
+	{
+		[$code, $output] = $this->runner->run(['show', $vhost->name], null, false);
+		return $code === 0 ? $output : '';
+	}
+
+	/**
 	 * Vorschlag für ein neues Passwort; wird im Formular angezeigt und genau so
 	 * hinterlegt.
 	 */
