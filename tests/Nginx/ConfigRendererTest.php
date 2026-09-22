@@ -211,6 +211,9 @@ final class ConfigRendererTest extends TestCase
 		self::assertStringContainsString("location ~ /\\.(?!well-known/) {\n        deny all;", $out);
 		self::assertStringContainsString('location = /favicon.ico {', $out);
 		self::assertStringContainsString('location = /robots.txt {', $out);
+		// robots.txt wird protokolliert (Honigtopf-Signal), favicon.ico nicht (Rauschen).
+		self::assertStringContainsString("    location = /robots.txt {\n        allow all;\n        log_not_found off;\n    }", $out);
+		self::assertStringContainsString("    location = /favicon.ico {\n        log_not_found off;\n        access_log off;\n    }", $out);
 		self::assertStringContainsString("    access_log /var/www/example.com/logs/access.log;\n", $out);
 	}
 

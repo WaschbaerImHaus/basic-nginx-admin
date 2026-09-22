@@ -102,6 +102,14 @@ final class VhostRepository
 	}
 
 	/**
+	 * Docroot-Unterordner setzen (null = Docroot ist web/ selbst).
+	 */
+	public function setSubdir(int $id, ?string $subdir): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET subdir = ? WHERE id = ?')->execute([$subdir, $id]);
+	}
+
+	/**
 	 * Zeitpunkt des angestossenen Entfernens setzen (null = zurückholen).
 	 */
 	public function setDeletedAt(int $id, ?string $when): void

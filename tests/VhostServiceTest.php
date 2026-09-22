@@ -68,6 +68,7 @@ final class VhostServiceTest extends TestCase
 			// /etc/php schreiben und ohne root laufen.
 			'fpmPoolDir' => $this->dir . '/pool.d',
 			'fpmSocketDir' => $this->dir . '/run',
+			'backupDir' => $this->dir . '/backups',
 		]);
 		$db = new Database($this->config);
 		$db->initSchema();
@@ -1010,5 +1011,97 @@ final class VhostServiceTest extends TestCase
 		unlink($this->config->sitesAvailable . '/zeig.example.conf');
 		$this->expectException(\RuntimeException::class);
 		$this->service->effectiveConfig($this->repo->byName('zeig.example'));
+	}
+	// ------------------------------------------------------------------
+	// Docroot-Unterordner ändern
+	// ------------------------------------------------------------------
+
+	/**
+	 * Der Inhalt zieht mit: Bliebe er liegen, zeigte nginx nach der Umstellung auf ein
+	 * leeres Verzeichnis und die Seite wäre weg, ohne dass ein Fehler erscheint.
+	 */
+	public function testChangingTheSubdirectoryMovesTheContent(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), SubDirectory::fromString('www/src'));
+		$old = $this->layout->docroot($this->repo->byName('um.example'));
+		file_put_contents($old . '/seite.html', 'inhalt');
+
+		$this->service->setSubdirectory($this->repo->byName('um.example'), SubDirectory::fromString('src/www'));
+
+		$updated = $this->repo->byName('um.example');
+		self::assertSame('src/www', $updated->subdir);
+		self::assertSame($this->layout->webDir($updated) . '/src/www', $this->layout->docroot($updated));
+		self::assertFileExists($this->layout->docroot($updated) . '/seite.html');
+		self::assertSame('inhalt', file_get_contents($this->layout->docroot($updated) . '/seite.html'));
+		self::assertFileDoesNotExist($old . '/seite.html');
+		// Die nginx-Konfiguration muss den neuen Pfad nennen.
+		self::assertStringContainsString(
+			'root ' . $this->layout->docroot($updated) . ';',
+			(string)file_get_contents($this->config->sitesAvailable . '/um.example.conf')
+		);
+	}
+
+	public function testChangingTheSubdirectoryWritesABackupFirst(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), SubDirectory::fromString('www/src'));
+		$this->service->setSubdirectory($this->repo->byName('um.example'), SubDirectory::fromString('src/www'));
+		self::assertNotEmpty(glob($this->config->backupDir . '/*.tar.gz'), 'Vor dem Verschieben muss gesichert werden');
+	}
+
+	public function testSubdirectoryCanBeCleared(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), SubDirectory::fromString('www/src'));
+		file_put_contents($this->layout->docroot($this->repo->byName('um.example')) . '/seite.html', 'inhalt');
+
+		$this->service->setSubdirectory($this->repo->byName('um.example'), null);
+
+		$updated = $this->repo->byName('um.example');
+		self::assertNull($updated->subdir);
+		self::assertSame($this->layout->webDir($updated), $this->layout->docroot($updated));
+		self::assertFileExists($this->layout->webDir($updated) . '/seite.html');
+	}
+
+	public function testUnchangedSubdirectoryDoesNothing(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), SubDirectory::fromString('www/src'));
+		$before = $this->reloader->calls;
+		$this->service->setSubdirectory($this->repo->byName('um.example'), SubDirectory::fromString('www/src'));
+		self::assertSame($before, $this->reloader->calls, 'Ohne Änderung darf nichts passieren');
+		self::assertEmpty(glob($this->config->backupDir . '/*.tar.gz'), 'und auch nicht gesichert werden');
+	}
+
+	/**
+	 * Liegt im Ziel schon etwas, wird nicht darüber geschrieben – lieber abbrechen und
+	 * den Fall dem Menschen überlassen.
+	 */
+	public function testChangingTheSubdirectoryRefusesToOverwriteExistingContent(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), SubDirectory::fromString('www/src'));
+		$reloaded = $this->repo->byName('um.example');
+		file_put_contents($this->layout->docroot($reloaded) . '/seite.html', 'alt');
+		mkdir($this->layout->webDir($reloaded) . '/src/www', 0775, true);
+		file_put_contents($this->layout->webDir($reloaded) . '/src/www/seite.html', 'neu');
+
+		$this->expectException(\RuntimeException::class);
+		$this->service->setSubdirectory($reloaded, SubDirectory::fromString('src/www'));
+	}
+	/**
+	 * Der ACME-Pfad hängt an web/, nicht am Docroot. Wanderte er beim Umstellen mit,
+	 * käme Let's Encrypt nicht mehr durch und jede Zertifikatserneuerung scheiterte.
+	 */
+	public function testChangingTheSubdirectoryLeavesTheAcmePathAlone(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$reloaded = $this->repo->byName('um.example');
+		$marker = $this->layout->healthFile($reloaded);
+		self::assertFileExists($marker);
+		file_put_contents($this->layout->docroot($reloaded) . '/seite.html', 'inhalt');
+
+		$this->service->setSubdirectory($reloaded, SubDirectory::fromString('src/www'));
+
+		$updated = $this->repo->byName('um.example');
+		self::assertFileExists($marker, 'Der ACME-Marker muss unter web/ bleiben');
+		self::assertFileDoesNotExist($this->layout->docroot($updated) . '/.well-known');
+		self::assertFileExists($this->layout->docroot($updated) . '/seite.html', 'Die Seite zieht mit');
 	}
 }

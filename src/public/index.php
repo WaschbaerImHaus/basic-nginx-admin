@@ -470,6 +470,19 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 		</div>
 
 		<div class="panel">
+			<h2>Docroot</h2>
+			<p class="hint">Unterordner unterhalb von <span class="mono"><?= h($layout->webDir($view)) ?></span>, aus dem
+				ausgeliefert wird. Leer bedeutet: <span class="mono">web/</span> selbst. Beim Ändern zieht der Inhalt mit,
+				vorher wird der Basisordner gesichert. Der ACME-Pfad bleibt, wo er ist.</p>
+			<form method="post" class="row" onsubmit="return confirm('Docroot-Unterordner ändern?\n\nDer Inhalt des bisherigen Docroots wird in den neuen verschoben. Vorher wird eine Sicherung angelegt.')">
+				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="subdir"><input type="hidden" name="name" value="<?= h($view->name) ?>">
+				<input type="text" name="subdir" class="mono" value="<?= h($view->subdir ?? '') ?>" placeholder="z. B. src/www" autocomplete="off">
+				<button class="primary">Übernehmen</button>
+			</form>
+			<p class="hint">Aktuell: <span class="mono"><?= h($layout->docroot($view)) ?></span></p>
+		</div>
+
+		<div class="panel">
 			<h2>Pfade</h2>
 			<dl class="facts">
 				<dt>Basisordner</dt><dd><?= h($layout->baseDir($view)) ?></dd>

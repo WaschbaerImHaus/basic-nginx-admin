@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /$
+Allow: /favicon.svg
+Allow: /favicon.ico
+Disallow: /admin/
+Disallow: /

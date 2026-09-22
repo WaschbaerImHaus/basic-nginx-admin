@@ -158,6 +158,11 @@ final class AdminPage
 			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
 			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
 			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
+			// Leeres Feld = Docroot ist web/ selbst; das CLI erwartet dann kein Argument.
+			'subdir' => [
+				'args' => array_merge(['subdir', $name], $field('subdir') !== '' ? [$field('subdir')] : []),
+				'stdin' => null,
+			],
 			'remove' => ['args' => ['remove', $name], 'stdin' => null],
 			'restore' => ['args' => ['restore', $name], 'stdin' => null],
 			'email' => ['args' => ['set', 'le_email', $field('le_email')], 'stdin' => null],

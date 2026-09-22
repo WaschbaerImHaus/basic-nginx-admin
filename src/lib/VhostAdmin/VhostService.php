@@ -541,6 +541,141 @@ final class VhostService
 	}
 
 	/**
+	 * Docroot-Unterordner ändern und den Inhalt mitnehmen.
+	 *
+	 * Der Inhalt zieht mit, weil sonst nichts auf einen Fehler hindeutet: nginx zeigte
+	 * ab dem Umschalten auf ein leeres Verzeichnis, die Seite wäre verschwunden, und in
+	 * keinem Log stünde warum.
+	 *
+	 * Vorher wird der Basisordner gesichert – hier werden echte Inhalte verschoben, und
+	 * ein Fehlgriff beim Unterordner soll wiederherstellbar bleiben.
+	 *
+	 * @throws \RuntimeException wenn im Ziel schon Dateien liegen oder das Verschieben scheitert
+	 */
+	public function setSubdirectory(Vhost $vhost, ?SubDirectory $subdir): void
+	{
+		$new = $subdir?->value;
+		if ($new === $vhost->subdir) {
+			return;
+		}
+		$oldDocroot = $this->layout->docroot($vhost);
+
+		$candidate = new Vhost(
+			$vhost->id, $vhost->name, $vhost->kind, $vhost->port, $new,
+			$vhost->protect, $vhost->ssl, $vhost->php, $vhost->healthToken, $vhost->deletedAt, $vhost->createdAt
+		);
+		$newDocroot = $this->layout->docroot($candidate);
+
+		if (is_link($oldDocroot) || is_link($newDocroot)) {
+			throw new \RuntimeException('Symlink gehört hier nicht hin, wird nicht angefasst.');
+		}
+		$movable = $this->movableEntries($oldDocroot, $newDocroot);
+		$conflicts = [];
+		foreach ($movable as $entry) {
+			if (file_exists($newDocroot . '/' . $entry) || is_link($newDocroot . '/' . $entry)) {
+				$conflicts[] = $entry;
+			}
+		}
+		if ($conflicts !== []) {
+			throw new \RuntimeException(
+				"In $newDocroot liegen bereits: " . implode(', ', $conflicts)
+				. '. Es wird nichts überschrieben – bitte von Hand entscheiden, was gelten soll.'
+			);
+		}
+
+		$this->backupBaseDir($vhost);
+		$this->repository->setSubdir((int)$vhost->id, $new);
+		$updated = $this->repository->byId((int)$vhost->id);
+		$this->makeDirectories($updated);
+		$this->moveDirectoryContents($oldDocroot, $this->layout->docroot($updated), $movable);
+		$this->applyPermissions($updated);
+		$this->render($updated);
+	}
+
+	/**
+	 * Was aus dem alten Docroot mitwandern darf.
+	 *
+	 * Zwei Dinge bleiben immer liegen:
+	 *  - ".well-known": Der ACME-Pfad hängt an web/, nicht am Docroot (der ACME-Block
+	 *    setzt "root web/"). Würde er mitwandern, käme Let's Encrypt nicht mehr durch
+	 *    und die Zertifikatserneuerung scheiterte.
+	 *  - die erste Wegmarke zum neuen Docroot, falls der im alten liegt – sonst würde
+	 *    ein Ordner in sich selbst verschoben.
+	 *
+	 * @return list<string>
+	 */
+	private function movableEntries(string $oldDocroot, string $newDocroot): array
+	{
+		if (!is_dir($oldDocroot)) {
+			return [];
+		}
+		$skip = ['.', '..', '.well-known'];
+		if (str_starts_with($newDocroot . '/', $oldDocroot . '/')) {
+			$rest = trim(substr($newDocroot, strlen($oldDocroot)), '/');
+			if ($rest !== '') {
+				$skip[] = explode('/', $rest)[0];
+			}
+		}
+		return array_values(array_diff(scandir($oldDocroot) ?: [], $skip));
+	}
+
+	/**
+	 * Verschiebt alle Einträge aus $from nach $to; $from bleibt danach leer zurück.
+	 *
+	 * Bewusst Eintrag für Eintrag statt "mv $from $to": Das Ziel existiert bereits (es
+	 * wurde gerade mit den richtigen Rechten angelegt), und ein Verschieben des ganzen
+	 * Ordners würde daraus einen Unterordner im Ziel machen.
+	 *
+	 * @param list<string> $entries Einträge, die mitwandern (siehe movableEntries())
+	 * @throws \RuntimeException wenn ein Eintrag nicht verschoben werden kann
+	 */
+	private function moveDirectoryContents(string $from, string $to, array $entries): void
+	{
+		if ($from === $to || !is_dir($from)) {
+			return;
+		}
+		foreach ($entries as $entry) {
+			$target = $to . '/' . $entry;
+			if (file_exists($target) || is_link($target)) {
+				throw new \RuntimeException("Im Ziel existiert bereits: $target");
+			}
+			if (!@rename($from . '/' . $entry, $target)) {
+				throw new \RuntimeException("Kann $from/$entry nicht nach $target verschieben.");
+			}
+		}
+	}
+
+	/**
+	 * Sichert den Basisordner eines vHosts vor einem Eingriff, der Dateien bewegt.
+	 */
+	private function backupBaseDir(Vhost $vhost): string
+	{
+		$base = $this->layout->baseDir($vhost);
+		if (!is_dir($base)) {
+			return '';
+		}
+		$dir = $this->config->backupDir;
+		if (!is_dir($dir) && !mkdir($dir, 0750, true) && !is_dir($dir)) {
+			throw new \RuntimeException("Kann Sicherungsverzeichnis nicht anlegen: $dir");
+		}
+		$archive = $dir . '/vhost-admin-' . $vhost->slug() . '-' . date('Ymd-His') . '.tar.gz';
+		exec(sprintf(
+			'tar czf %s -C %s %s 2>&1',
+			escapeshellarg($archive),
+			escapeshellarg($this->config->wwwRoot),
+			escapeshellarg($vhost->slug())
+		), $output, $code);
+		if ($code !== 0) {
+			throw new \RuntimeException("Sicherung fehlgeschlagen:\n" . implode("\n", $output));
+		}
+		// Enthält auch private/; nur root darf lesen (wie bei der Layout-Migration).
+		if (!chmod($archive, 0600)) {
+			throw new \RuntimeException("Kann Rechte der Sicherung nicht auf 0600 setzen: $archive");
+		}
+		return $archive;
+	}
+
+	/**
 	 * Die fertige Konfiguration dieses vHosts als ein zusammenhängender Text.
 	 *
 	 * nginx setzt den Block aus mehreren Dateien zusammen: dem erzeugten server-Block,

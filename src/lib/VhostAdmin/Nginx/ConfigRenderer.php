@@ -310,10 +310,12 @@ final class ConfigRenderer
 			. "        log_not_found off;\n"
 			. "        access_log off;\n"
 			. "    }\n\n"
+			// robots.txt wird bewusst protokolliert: Wer sie abruft und danach einen dort
+			// ausgeschlossenen Pfad besucht, verrät sich damit – für einen Honigtopf das
+			// eigentliche Signal. Es ist eine Zeile je Besucher, kein Rauschen.
 			. "    location = /robots.txt {\n"
 			. "        allow all;\n"
 			. "        log_not_found off;\n"
-			. "        access_log off;\n"
 			. "    }\n";
 	}
 

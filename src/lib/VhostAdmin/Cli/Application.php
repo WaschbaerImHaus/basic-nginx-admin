@@ -49,6 +49,7 @@ vhost – nginx-vHosts verwalten
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
   vhost check-acme [name]
+  vhost subdir <name> [unterordner]     (leer = Docroot ist web/; Inhalt zieht mit)
   vhost show <name>                     (fertige Konfiguration als ein Text)
   vhost conf-show <name>
   vhost conf <name>                   (nginx-Snippet per stdin; leer = entfernen)
@@ -328,6 +329,14 @@ TXT;
 						|| $result->status === \VhostAdmin\Ssl\ReachabilityStatus::WrongServer;
 				}
 				return $failed ? 1 : 0;
+
+			case 'subdir':
+				// Ohne zweites Argument wird der Unterordner geleert (Docroot = web/).
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$target = SubDirectory::fromString($positional[1] ?? null);
+				$this->service->setSubdirectory($vhost, $target);
+				$this->out('Docroot: ' . $this->layout->docroot($this->service->load($vhost->name)) . "\n");
+				return 0;
 
 			case 'show':
 				// Die fertige Konfiguration als ein Text – für die Oberfläche und zum

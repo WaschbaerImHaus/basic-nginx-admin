@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Honigwabe">
+	<title>Honigwabe</title>
+	<!-- Wabenzelle: flache Oberkante, damit die Silhouette auch bei 16 Pixeln ruhig bleibt. -->
+	<polygon points="9.5,3 22.5,3 29,16 22.5,29 9.5,29 3,16"
+		fill="#e9a21c" stroke="#6f4403" stroke-width="2.5" stroke-linejoin="round"/>
+	<!-- Honigtropfen: Spitze oben, runder Bauch unten. -->
+	<path d="M16 8.5c3.4 4.6 5.2 7.4 5.2 9.6a5.2 5.2 0 0 1-10.4 0c0-2.2 1.8-5 5.2-9.6z"
+		fill="#fdeec2"/>
+	<!-- Ein Lichtpunkt, sonst wirkt der Tropfen flach. -->
+	<ellipse cx="14" cy="16.5" rx="1.1" ry="1.7" fill="#fffdf6"/>
+</svg>
