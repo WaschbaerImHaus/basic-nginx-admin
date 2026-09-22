@@ -201,7 +201,7 @@ schreibt (`honeypot/analyse.php`, siehe unten). Grund: Die Logs gehören root un
 
 ---
 
-## Umgesetzt am 2026-09-22 (Build 10)
+## Umgesetzt am 2026-09-22 (Build 11)
 
 Die Ansicht liegt unter `src/public/honeypot/` (`index.php`, `detail.php`, `bootstrap.php`,
 `style.css`), die Auswertung unter `src/lib/Honeypot/`. Eingerichtet wird sie mit

@@ -18,7 +18,7 @@
 2026-09-22 16:17  Die Nebenwirkung der Voreinstellung war der eigentliche Aufwand: Mit "bare" als Standard haette enableSsl() fuer JEDE Hauptdomain zusaetzlich www.<domain> beantragt. certbot prueft jeden angegebenen Namen einzeln - einer ohne DNS-Eintrag laesst den gesamten Antrag scheitern, auch fuer den Hauptnamen. Aus einer Voreinstellung waere damit ein Fehlschlag fuer jede Domain ohne www geworden. Jetzt prueft enableSsl() den Nebennamen vorher ueber den ACME-Marker (ReachabilityChecker::checkName()) und nimmt ihn nur bei Erfolg mit; andernfalls gilt das Zertifikat nur fuer den Hauptnamen und die Ausgabe sagt das.
 2026-09-22 16:17  Am System: nginx -t gruen; "vhost www bienchen.mfsvr.de www" wird mit Begruendung abgelehnt (Unterdomain), mfsvr.de laesst sich weiter umstellen; mfsvr.de hat drei server-Bloecke (:80 beide Namen, :443 Nebenname, :443 kanonisch), bienchen zwei (:80 Umleitung, :443). http://www.mfsvr.de/ leitet weiterhin auf https://mfsvr.de/. Nebenbei zwei eigene frueheren Aussagen korrigiert: bienchen.mfsvr.de loest inzwischen auf (gleiche Adresse wie mfsvr.de) und hat ein eigenes Zertifikat - beide Hosts liefern HTTPS aus (mfsvr.de 200, bienchen 401 wegen Verzeichnisschutz).
 
-2026-09-22 17:35 - Build 10: Zertifikat nachtragen + Honigtopf-Ansicht
+2026-09-22 17:35 - Build 11: Zertifikat nachtragen + Honigtopf-Ansicht
 Gemeldeter Fehler: Der Hinweis "Zertifikat unvollstaendig" verwies auf einen Knopf
 "Zertifikat holen", den es bei aktivem HTTPS nicht gibt. Der Knopf allein haette aber
 auch nichts geholfen: enableSsl() ueberspringt certbot, sobald fullchain.pem existiert.
