@@ -60,9 +60,12 @@ LIVE="$(mktemp -d)"
 python3 - "$SITE/index.html" "$LIVE/index.html" <<'PY2'
 import sys
 s = open(sys.argv[1], encoding='utf-8').read()
-shim = ("<script>window.requestAnimationFrame = function (cb) {"
-        " return setTimeout(function () { cb(performance.now()); }, 16); };</script>\n")
-open(sys.argv[2], 'w', encoding='utf-8').write(s.replace('<script>', shim + '<script>', 1))
+def shim(ms):
+    return ("<script>window.requestAnimationFrame = function (cb) {"
+            " return setTimeout(function () { cb(performance.now()); }, %d); };</script>\n" % ms)
+open(sys.argv[2], 'w', encoding='utf-8').write(s.replace('<script>', shim(16) + '<script>', 1))
+# Zweite Kopie mit 60 ms je Bild (rund 16 Bilder/s): ein zu langsamer Rechner.
+open(sys.argv[2].replace('index.html', 'slow.html'), 'w', encoding='utf-8').write(s.replace('<script>', shim(60) + '<script>', 1))
 PY2
 python3 -m http.server $((PORT + 1)) --bind 127.0.0.1 --directory "$LIVE" >/dev/null 2>&1 &
 LIVESERVER=$!
@@ -76,9 +79,23 @@ python3 -c "import sys; z1,z3=float('$Z1'),float('$Z3'); sys.exit(0 if z3 < z1 -
 	&& echo "ok   die Wiese zieht vorbei (z: $Z1 -> $Z3)" || { echo "FEHLER: Kamera steht (z: $Z1 -> $Z3)" >&2; exit 1; }
 [ "$X1" != "$X3" ] && echo "ok   die Biene schwirrt (x: $X1 -> $X3)" || { echo "FEHLER: Biene steht (x: $X1)" >&2; exit 1; }
 
+echo "== Qualität nach Bildrate"
+# Die Seite zählt intern ihre Bilder je Sekunde (data-fps) und senkt bei Ruckeln die
+# Qualität (data-quality, Klasse lite). Flüssig muss alles bleiben, wie es ist.
+attrs() { timeout 90 "$CHROME" --no-sandbox --window-size=1280,800 --virtual-time-budget=12000 --dump-dom \
+	"http://127.0.0.1:$((PORT + 1))/$1" 2>/dev/null | grep -oE '<div class="meadow[^>]*>' | head -1; }
+FAST=$(attrs index.html); SLOW=$(attrs slow.html)
+grep -q 'data-fps="6[0-9]"\|data-fps="5[6-9]"' <<<"$FAST" && ! grep -q 'data-quality' <<<"$FAST" \
+	&& echo "ok   flüssig: volle Qualität ($FAST)" || { echo "FEHLER: flüssig, aber $FAST" >&2; exit 1; }
+grep -q 'lite' <<<"$SLOW" && grep -q 'data-quality="[^v]' <<<"$SLOW" \
+	&& echo "ok   ruckelnd: gesenkt ($SLOW)" || { echo "FEHLER: ruckelnd, aber $SLOW" >&2; exit 1; }
+
 echo "== Bildschirmfotos"
 shot geradeaus 1280x800 2
 shot linkskurve 1280x800 7
 shot rechtskurve 1280x800 22
 shot handy 390x844 22
+# Sparsamste Stufe: ohne Unschärfe, gut ein Drittel der Blumen.
+timeout 90 "$CHROME" --no-sandbox --hide-scrollbars --window-size=1280,800 --virtual-time-budget=1500 \
+	--screenshot="$OUT/sparsam.png" "http://127.0.0.1:$PORT/?t=7&quality=4" 2>/dev/null
 echo "ok   $OUT"

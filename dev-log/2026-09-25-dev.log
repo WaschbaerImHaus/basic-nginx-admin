@@ -79,3 +79,11 @@ Ereignisse per SQL gefiltert. Nebenbei: Stundenbalken hatten keine Hoehe (.hours
 height -> 2px), behoben. Teilvorlagen antworten direkt aufgerufen mit 404.
 Geprueft als web3 mit open_basedir des Pools (16 Varianten ohne Warnung), Screenshots,
 Smoke-Test gruen. 630 Tests gruen.
+
+2026-09-25 23:10 Bienenflug: interner FPS-Zaehler mit Qualitaetsstufen (Nutzerwunsch)
+FrameRate (1-s-Fenster, Pausen >250 ms ignoriert), QualityGovernor (unter 42 B/s zwei
+Fenster -> Stufe runter, ab 56 B/s acht Fenster -> hoch; Einbruch <=4 s nach Anheben
+sperrt die Stufe), Stufen: voll / ohne Randunschaerfe / ohne Gauss / 60 % / 35 % Blumen.
+Tests: SiteQualityTest fuehrt den markierten JS-Abschnitt in chrome-headless-shell aus
+(11 Tests). meadow-check.sh: rAF-Shim 16 ms -> data-fps 63, volle Qualitaet; 60 ms ->
+data-fps 17, Stufe "sparsam". Ausgeliefert mit install-site.sh. 641 Tests gruen.

@@ -173,6 +173,8 @@
 		-webkit-mask-image:linear-gradient(to top, #000 35%, transparent);
 		mask-image:linear-gradient(to top, #000 35%, transparent);
 	}
+	/* Sparstufe (siehe QUALITY_LEVELS): ohne den grossen Weichzeichner am Rand. */
+	.meadow.lite .near { -webkit-backdrop-filter:none; backdrop-filter:none; }
 
 	/* ---------- Biene ---------- */
 	/* Sie fliegt vor der Kamera her, wir folgen ihr. --bank: Schräglage in der Kurve. */
@@ -486,16 +488,122 @@
 		recenter: 20000    // ab diesem Abstand vom Ursprung wird die Welt zurückgeschoben
 	};
 
+	// <adaptive-quality>
+	/**
+	 * Interner Bildratenzähler: zählt Bilder über ein Zeitfenster und liefert an dessen
+	 * Ende die mittlere Bildrate. Einzelne Ausreisser mitteln sich weg.
+	 *
+	 * Pausen zählen nicht mit: Nach einem Tabwechsel oder wenn der Rechner schläft,
+	 * kommt ein Bild mit Sekunden Abstand – das ist keine schlechte Bildrate, sondern
+	 * gar keine, und darf die Qualität nicht senken.
+	 */
+	class FrameRate {
+		constructor(window) {
+			this.window = window;   // Fensterlänge in Sekunden
+			this.frames = 0;
+			this.elapsed = 0;
+		}
+
+		/** Ein Bild, dt Sekunden nach dem vorigen. Liefert Bilder/s am Fensterende, sonst null. */
+		tick(dt) {
+			if (!(dt > 0) || dt > 0.25) { return null; }
+			this.frames++;
+			this.elapsed += dt;
+			// Kleine Toleranz: 60 × 1/60 ergibt in Gleitkomma knapp unter 1.
+			if (this.elapsed < this.window - 1e-9) { return null; }
+			const fps = this.frames / this.elapsed;
+			this.frames = 0;
+			this.elapsed = 0;
+			return fps;
+		}
+	}
+
+	/**
+	 * Qualitätsstufen, von voll bis sparsam. Jede Stufe spart gegenüber der vorigen:
+	 * zuerst die Randunschärfe (ein Weichzeichner über ein Viertel des Bildschirms, der
+	 * teuerste Einzeleffekt), dann der Gauß je Blume (Tiefenunschärfe), dann Blumen.
+	 */
+	const QUALITY_LEVELS = [
+		{ name: 'voll', nearBlur: true, blur: true, density: 1 },
+		{ name: 'ohne Randunschärfe', nearBlur: false, blur: true, density: 1 },
+		{ name: 'ohne Gauß', nearBlur: false, blur: false, density: 1 },
+		{ name: 'weniger Blumen', nearBlur: false, blur: false, density: 0.6 },
+		{ name: 'sparsam', nearBlur: false, blur: false, density: 0.35 }
+	];
+
+	/**
+	 * Rang einer Pflanze für das Ausdünnen, gleichmässig zwischen 0 und 1: Vielfache des
+	 * goldenen Schnitts streuen maximal gleichmässig. Bei Dichte 0,6 bleiben die
+	 * Pflanzen mit Rang unter 0,6 – ohne Lücken oder Häufungen auf der Wiese.
+	 */
+	function plantRank(index) {
+		return (index * 0.6180339887498949) % 1;
+	}
+
+	/**
+	 * Wählt die Qualitätsstufe nach der gemessenen Bildrate.
+	 *
+	 * Mit Abstand zwischen den Schwellen und Geduld: Gesenkt wird nach zwei schwachen
+	 * Sekunden, angehoben erst nach acht guten. Bricht die Bildrate gleich nach einem
+	 * Anheben wieder ein, war die höhere Stufe zu teuer – sie wird dann nicht noch
+	 * einmal versucht. Sonst pendelte die Wiese sichtbar zwischen zwei Stufen.
+	 */
+	class QualityGovernor {
+		constructor(levels) {
+			this.levels = levels;
+			this.level = 0;          // Index in levels; 0 = volle Qualität
+			this.best = 0;           // höchste Stufe, die noch versucht werden darf
+			this.low = 42;           // darunter ruckelt es sichtbar
+			this.high = 56;          // darüber läuft es flüssig (60-Hz-Bildschirm)
+			this.warmup = 2;         // Messungen nach dem Start, die nicht zählen
+			this.bad = 0;            // schwache Messungen in Folge
+			this.good = 0;           // gute Messungen in Folge
+			this.sinceUpgrade = Infinity;
+		}
+
+		current() { return this.levels[this.level]; }
+
+		/** Eine Messung in Bildern/s. Liefert true, wenn die Stufe gewechselt hat. */
+		measure(fps) {
+			if (this.warmup > 0) {
+				this.warmup--;
+				return false;
+			}
+			this.sinceUpgrade++;
+			if (fps < this.low) {
+				this.good = 0;
+				this.bad++;
+				if (this.bad < 2 || this.level === this.levels.length - 1) { return false; }
+				if (this.sinceUpgrade <= 4) {
+					// Das letzte Anheben hat es nicht getragen.
+					this.best = this.level + 1;
+				}
+				this.level++;
+				this.bad = 0;
+				return true;
+			}
+			this.bad = 0;
+			this.good = fps >= this.high ? this.good + 1 : 0;
+			if (this.good < 8 || this.level <= this.best) { return false; }
+			this.level--;
+			this.good = 0;
+			this.sinceUpgrade = 0;
+			return true;
+		}
+	}
+	// </adaptive-quality>
+
 	/**
 	 * Eine Pflanze: ihr Element und was zuletzt an ihm eingestellt wurde. Geschrieben
 	 * wird nur bei einer Änderung – die meisten Pflanzen bleiben in den meisten Bildern
 	 * unberührt.
 	 */
 	class Plant {
-		constructor(element, x, z) {
+		constructor(element, x, z, rank) {
 			this.element = element;
 			this.x = x;
 			this.z = z;
+			this.rank = rank;        // für das Ausdünnen, siehe plantRank()
 			this.moved = true;
 			this.shown = true;
 			this.blur = -1;
@@ -550,6 +658,10 @@
 			this.last = null;
 			this.running = false;
 			this.button = null;
+			this.rate = new FrameRate(1);
+			this.governor = new QualityGovernor(QUALITY_LEVELS);
+			this.quality = QUALITY_LEVELS[0];
+			this.adaptive = true;    // false, wenn die Stufe fest vorgegeben ist (?quality=)
 			this.frame = this.frame.bind(this);
 		}
 
@@ -585,7 +697,8 @@
 				this.plants.push(new Plant(
 					element,
 					this.random.between(-half, half),
-					this.random.between(-half, half)
+					this.random.between(-half, half),
+					plantRank(i)
 				));
 				fragment.appendChild(element);
 			}
@@ -652,7 +765,9 @@
 				const dist = Math.hypot(rx, rz);
 				// Hinter der Kamera, im Dunst oder weit ausserhalb des Blickfelds: gar
 				// nicht zeichnen. Das spart dem Browser die meiste Arbeit.
-				const visible = ahead > 18 && dist < WORLD.fogEnd && Math.abs(side) < ahead * 1.4 + 160;
+				// Auf den Sparstufen fallen zusätzlich Pflanzen nach ihrem Rang weg.
+				const visible = ahead > 18 && dist < WORLD.fogEnd && Math.abs(side) < ahead * 1.4 + 160
+					&& plant.rank < this.quality.density;
 				plant.show(visible);
 				if (!visible) { continue; }
 				plant.place();
@@ -660,7 +775,7 @@
 				// Tiefenunschärfe: vor der Schärfeebene deutlich schneller als dahinter,
 				// wie bei einem Makro-Objektiv; in halben Pixeln gestuft.
 				const soft = Math.max((dist - WORLD.focus) / 170, (WORLD.focus - dist) / 55) - 0.3;
-				const blur = Math.round(Math.min(7, Math.max(0, soft)) * 2) / 2;
+				const blur = this.quality.blur ? Math.round(Math.min(7, Math.max(0, soft)) * 2) / 2 : 0;
 				// Dunst in der Ferne, sanftes Auftauchen ganz vorn; in 5-%-Stufen.
 				const fog = Math.min(1, Math.max(0, (WORLD.fogEnd - dist) / (WORLD.fogEnd - WORLD.fogStart)));
 				const fade = Math.min(1, Math.max(0, (ahead - 18) / 60));
@@ -684,12 +799,43 @@
 
 		frame(time) {
 			if (!this.running) { return; }
-			// Nach einem Tabwechsel nicht mit einem Riesenschritt weiterfliegen.
-			const dt = this.last === null ? 0 : Math.min(0.05, (time - this.last) / 1000);
+			const elapsed = this.last === null ? 0 : (time - this.last) / 1000;
 			this.last = time;
-			this.flight.advance(dt);
+			// Bildrate messen und die Qualität nachführen – mit der echten Bildzeit,
+			// nicht der begrenzten, sonst sähe ein Ruckeln flüssiger aus, als es ist.
+			const fps = this.rate.tick(elapsed);
+			if (fps !== null) {
+				this.root.dataset.fps = String(Math.round(fps));
+				if (this.adaptive && this.governor.measure(fps)) {
+					this.setQuality(this.governor.level);
+				}
+			}
+			// Nach einem Tabwechsel nicht mit einem Riesenschritt weiterfliegen.
+			this.flight.advance(Math.min(0.05, elapsed));
 			this.show();
 			requestAnimationFrame(this.frame);
+		}
+
+		/**
+		 * Stellt eine Qualitätsstufe ein. Die Pflanzen vergessen ihre letzte Unschärfe,
+		 * damit das nächste Bild sie neu setzt (oder entfernt).
+		 */
+		setQuality(level) {
+			this.quality = QUALITY_LEVELS[level];
+			this.root.classList.toggle('lite', !this.quality.nearBlur);
+			this.root.dataset.quality = this.quality.name;
+			for (const plant of this.plants) {
+				plant.blur = -1;
+			}
+			if (!this.running) {
+				this.show();
+			}
+		}
+
+		/** Feste Stufe statt Anpassung – für Prüfbilder (?quality=0 … 4). */
+		fixQuality(level) {
+			this.adaptive = false;
+			this.setQuality(Math.min(QUALITY_LEVELS.length - 1, Math.max(0, level)));
 		}
 
 		/** Flug starten oder anhalten; der Schalter zeigt den Zustand. */
@@ -749,6 +895,11 @@
 		document.querySelector('.meadow')
 	);
 	meadow.attach(document.getElementById('flight'));
+	// ?quality=2 hält eine feste Qualitätsstufe (0 = voll) – für Prüfbilder.
+	const fixed = parseInt(new URLSearchParams(location.search).get('quality'), 10);
+	if (fixed >= 0) {
+		meadow.fixQuality(fixed);
+	}
 	meadow.start(!still && skip === 0, skip);
 })();
 </script>
