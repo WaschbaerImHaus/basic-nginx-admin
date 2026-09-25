@@ -81,7 +81,7 @@ final class LogEntry
 	 */
 	public function isProbe(): bool
 	{
-		return $this->method === 'CONNECT' || !in_array($this->method, self::HTTP_METHODS, true);
+		return self::probeKindOf($this->request) !== null;
 	}
 
 	/**
@@ -89,15 +89,25 @@ final class LogEntry
 	 */
 	public function probeKind(): ?string
 	{
-		if (!$this->isProbe()) {
+		return self::probeKindOf($this->request);
+	}
+
+	/**
+	 * Dasselbe allein aus der Anfragezeile – die Detailansicht eines Zeitraums kennt
+	 * nur noch sie, nicht mehr jedes Ereignis. null bei gewöhnlichem HTTP.
+	 */
+	public static function probeKindOf(string $request): ?string
+	{
+		$method = explode(' ', $request)[0];
+		if ($method !== 'CONNECT' && in_array($method, self::HTTP_METHODS, true)) {
 			return null;
 		}
 		return match (true) {
-			str_starts_with($this->request, 'SSH-') => 'SSH-Banner',
-			str_starts_with($this->request, 'MGLNDD_') => 'Portscanner-Kennung',
-			$this->method === 'CONNECT' => 'Proxy gesucht',
-			str_starts_with($this->request, '\\x') => 'Binärprotokoll',
-			$this->request === '-' || trim($this->request) === '' => 'leere Anfrage',
+			str_starts_with($request, 'SSH-') => 'SSH-Banner',
+			str_starts_with($request, 'MGLNDD_') => 'Portscanner-Kennung',
+			$method === 'CONNECT' => 'Proxy gesucht',
+			str_starts_with($request, '\\x') => 'Binärprotokoll',
+			$request === '-' || trim($request) === '' => 'leere Anfrage',
 			default => 'unbekanntes Protokoll',
 		};
 	}

@@ -4,23 +4,33 @@ declare(strict_types=1);
 /**
  * Detailansichten der Honigtopf-Ansicht: die vollständigen Listen hinter den Kacheln.
  *
- * Wird ausschliesslich von index.php eingebunden; dort sind $report, $host, $day und
- * $view bereits geprüft. Eigene Datei, damit die Übersicht lesbar bleibt.
+ * Wird ausschliesslich von index.php eingebunden; dort sind $report, $host, $period
+ * und $view bereits geprüft. Eigene Datei, damit die Übersicht lesbar bleibt. Alles
+ * bezieht sich auf den gewählten Zeitraum – einen Tag oder einen Bereich.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 12:00
+ * @version Letzte Änderung: 2026-09-25 23:05
  */
 
+if (!function_exists('period_link')) {
+	// Direkt aufgerufen statt eingebunden: nichts ausgeben.
+	http_response_code(404);
+	exit;
+}
+
 /** @var \Honeypot\DayReport $report */
+/** @var \Honeypot\ReportDatabase $db */
+/** @var \Honeypot\Period $period */
+/** @var \Honeypot\PeriodSelection $selection */
 /** @var string $view */
 /** @var string $host */
-/** @var string $day */
+/** @var string $span */
 /** @var ?\Honeypot\PathTrend $trend */
 
 $classifier = new \Honeypot\LootClassifier();
 ?>
 <p class="crumb"><a href="<?= h(link_to(['ansicht' => ''])) ?>">&larr; Übersicht</a>
-	· <?= h($host) ?> · <?= h($day) ?></p>
+	· <?= h($host) ?> · <?= h($period->label()) ?></p>
 
 <div class="tile">
 <?php if ($view === 'pfade'): $group = param('gruppe'); ?>
@@ -83,22 +93,15 @@ $classifier = new \Honeypot\LootClassifier();
 	<h2>Anfragen, die gar kein Webzugriff waren</h2>
 	<table>
 		<tr><th class="num">Anzahl</th><th>Art</th><th>Rohdaten der Anfragezeile</th></tr>
-		<?php foreach ($report->probes as $raw => $count):
-			$sample = null;
-			foreach ($report->events as $event) {
-				if (($event['probe'] ?? '') !== '' && str_starts_with((string)($event['request'] ?? ''), (string)$raw)) {
-					$sample = (string)$event['probe'];
-					break;
-				}
-			} ?>
+		<?php foreach ($report->probes as $raw => $count): $kind = \Honeypot\LogEntry::probeKindOf((string)$raw); ?>
 			<tr class="probe">
 				<td class="num"><?= (int)$count ?></td>
-				<td><span class="tag warn"><?= h($sample ?? 'unbekannt') ?></span></td>
+				<td><span class="tag warn"><?= h($kind ?? 'unbekannt') ?></span></td>
 				<td class="mono"><?= h((string)$raw) ?></td>
 			</tr>
 		<?php endforeach ?>
 	</table>
-	<?php if ($report->probes === []): ?><p class="empty">An diesem Tag keine.</p><?php endif ?>
+	<?php if ($report->probes === []): ?><p class="empty"><?= ucfirst(h($span)) ?> keine.</p><?php endif ?>
 	<p class="hint">Diese Zeilen stehen mit Status 400 im Log. Sie suchen keinen Webinhalt, sondern einen
 		Dienst: ein SSH-Banner auf Port 443, einen offenen Proxy, ein Binärprotokoll. Eine
 		Portscanner-Kennung wie <span class="mono">MGLNDD_…</span> trägt sogar die Adresse des Scanners
@@ -114,19 +117,37 @@ $classifier = new \Honeypot\LootClassifier();
 			<td class="mono"><?= (string)$user === '' ? '<em>(leer)</em>' : h((string)$user) ?></td></tr>
 		<?php endforeach ?>
 	</table>
-	<?php if ($report->logins === []): ?><p class="empty">An diesem Tag keine.</p><?php endif ?>
+	<?php if ($report->logins === []): ?><p class="empty"><?= ucfirst(h($span)) ?> keine.</p><?php endif ?>
 	<p class="hint">Aus dem <span class="mono">error.log</span>, solange der Host einen Verzeichnisschutz
 		trägt. Passwörter stehen dort nicht und werden hier auch nicht gesammelt – wer Zugangsdaten
 		einsammelt, betreibt keinen Honigtopf mehr.</p>
 
-<?php elseif ($view === 'verlauf'): ?>
+<?php elseif ($view === 'verlauf'):
+	// Spalten: bei einem Tag er selbst und die 14 davor, bei einem Bereich dessen Tage
+	// (höchstens die letzten 31 – breiter wird die Tabelle unlesbar). Tage ohne einen
+	// einzigen 404 bekommen trotzdem ihre Spalte.
+	$first = $period->isSingleDay() ? $period->before(14)->from : $period->from;
+	$columns = \Honeypot\Period::between(array_slice(\Honeypot\Period::between($first, $period->to)->days(), -31)[0], $period->to);
+	$daily = array_map(static fn(): array => [], $db->dailyTotals($host, $columns));
+	foreach ($db->dailyPaths($host, $columns) as $date => $paths) {
+		$daily[$date] = $paths;
+	}
+	$grid = \Honeypot\PathTrend::fromDailyPaths($daily);
+?>
 
 	<h2>Sondierungspfade über Tage</h2>
-	<?php if ($trend === null || !$trend->hasHistory()): ?>
-		<p class="empty">Noch kein Vortag zum Vergleichen – die Matrix entsteht ab dem zweiten Berichtstag.</p>
-	<?php else: $fresh = $trend->newToday(); $dates = $trend->dates(); ?>
-		<p class="hint" style="margin-top:0"><?= count($fresh) ?> Pfade wurden am <?= h($day) ?> zum ersten Mal
-			seit <?= count($dates) - 1 ?> Tagen gesucht – sie stehen rot. Leere Felder heissen: an dem Tag nicht gesucht.</p>
+	<?php if ($trend === null || count($grid->dates()) < 2): ?>
+		<p class="empty">Noch zu wenige Tage zum Vergleichen – die Matrix entsteht ab dem zweiten Berichtstag.</p>
+	<?php else: $fresh = $trend !== null && $trend->hasHistory() ? $trend->newToday() : []; $dates = $grid->dates(); ?>
+		<p class="hint" style="margin-top:0">
+			<?php if ($trend->hasHistory()): ?>
+				<?= count($fresh) ?> Pfade wurden <?= $period->isSingleDay() ? 'am' : 'im Zeitraum' ?>
+				<?= h($period->label()) ?> zum ersten Mal seit <?= count($trend->dates()) - 1 ?> Tagen gesucht – sie stehen rot.
+			<?php else: ?>
+				Vor <?= h($period->label()) ?> liegen keine ausgewerteten Tage; was neu ist, lässt sich erst mit
+				Tagen davor sagen.
+			<?php endif ?>
+			Leere Felder heissen: an dem Tag nicht gesucht.</p>
 		<div class="scroll">
 		<table class="matrix">
 			<tr>
@@ -136,13 +157,13 @@ $classifier = new \Honeypot\LootClassifier();
 				<?php endforeach ?>
 				<th>zuerst</th>
 			</tr>
-			<?php foreach ($trend->matrix() as $path => $row): $isNew = isset($fresh[$path]); ?>
+			<?php foreach ($grid->matrix() as $path => $row): $isNew = isset($fresh[$path]); ?>
 				<tr class="<?= $isNew ? 'violation' : '' ?>">
 					<td class="mono"><?= h((string)$path) ?></td>
 					<?php foreach ($row as $count): ?>
 						<td class="num cell<?= $count > 0 ? ' hit' : '' ?>"><?= $count > 0 ? (int)$count : '' ?></td>
 					<?php endforeach ?>
-					<td class="mono"><?= h((string)$trend->firstSeen((string)$path)) ?></td>
+					<td class="mono"><?= h((string)$grid->firstSeen((string)$path)) ?></td>
 				</tr>
 			<?php endforeach ?>
 		</table>
@@ -155,7 +176,7 @@ $classifier = new \Honeypot\LootClassifier();
 
 	<h2>Gegenstellen</h2>
 	<?php if ($report->peers === []): ?>
-		<p class="empty">An diesem Tag hat sich keine Gegenstelle zu erkennen gegeben.</p>
+		<p class="empty"><?= ucfirst(h($span)) ?> hat sich keine Gegenstelle zu erkennen gegeben.</p>
 	<?php else: ?>
 	<table>
 		<tr><th class="num">Anfragen</th><th>Quelle</th><th>Name</th><th>Adresse</th><th>Netz</th><th>Land</th><th>Rückwärtsname</th></tr>
@@ -193,22 +214,11 @@ $classifier = new \Honeypot\LootClassifier();
 	if (!array_key_exists($what, $filters)) {
 		$what = '';
 	}
-	$matches = static function (array $event) use ($what, $needle): bool {
-		$path = (string)($event['path'] ?? '');
-		$hit = match ($what) {
-			'sondierung' => ($event['status'] ?? '') === '404',
-			'dienst' => ($event['probe'] ?? '') !== '',
-			'falle' => $path === '/robots.txt' || str_starts_with($path, '/admin'),
-			default => true,
-		};
-		if (!$hit || $needle === '') {
-			return $hit;
-		}
-		$haystack = $path . ' ' . ($event['agent'] ?? '') . ' ' . ($event['request'] ?? '');
-		return stripos($haystack, $needle) !== false;
-	};
-	$rows = array_values(array_filter($report->events, $matches));
+	// Gefiltert wird in der Datenbank: Über einen längeren Zeitraum sind es schnell
+	// Zehntausende Zeilen, gezeigt werden die neuesten 500.
 	$limit = 500;
+	$found = $db->events($host, $period, $what, $needle, $limit);
+	$rows = $found['rows'];
 ?>
 
 	<h2>Ereignisse</h2>
@@ -218,23 +228,26 @@ $classifier = new \Honeypot\LootClassifier();
 		<?php endforeach ?>
 		<form method="get" style="display:flex;gap:.4rem">
 			<input type="hidden" name="host" value="<?= h($host) ?>">
-			<input type="hidden" name="tag" value="<?= h($day) ?>">
+			<?php foreach ($selection->query() as $name => $value): ?>
+				<input type="hidden" name="<?= h($name) ?>" value="<?= h($value) ?>">
+			<?php endforeach ?>
 			<input type="hidden" name="ansicht" value="ereignisse">
 			<input type="hidden" name="was" value="<?= h($what) ?>">
 			<input type="search" name="q" value="<?= h($needle) ?>" placeholder="Pfad oder Kennung">
 			<button>Suchen</button>
 		</form>
 	</div>
-	<p class="hint" style="margin-top:0"><?= count($rows) ?> von <?= count($report->events) ?> auffälligen
-		Anfragen<?= count($rows) > $limit ? ', gezeigt werden die ersten ' . $limit : '' ?>. Gewöhnliche
-		Treffer stehen bewusst nicht in der Liste.</p>
+	<p class="hint" style="margin-top:0"><?= $found['total'] ?> passende auffällige
+		Anfragen<?= $found['total'] > $limit ? ', gezeigt werden die neuesten ' . $limit : '' ?>, neueste zuerst.
+		Gewöhnliche Treffer stehen bewusst nicht in der Liste.</p>
 	<table>
-		<tr><th>Zeit</th><th>Verb</th><th>Pfad bzw. Anfragezeile</th><th class="num">Status</th><th>Kennung</th></tr>
-		<?php foreach (array_slice($rows, 0, $limit) as $event):
+		<tr><?php if (!$period->isSingleDay()): ?><th>Tag</th><?php endif ?><th>Zeit</th><th>Verb</th><th>Pfad bzw. Anfragezeile</th><th class="num">Status</th><th>Kennung</th></tr>
+		<?php foreach ($rows as $event):
 			$isProbe = ($event['probe'] ?? '') !== '';
 			$path = (string)($event['path'] ?? '');
 			$violation = str_starts_with($path, '/admin'); ?>
 			<tr class="<?= $isProbe ? 'probe' : ($violation ? 'violation' : '') ?>">
+				<?php if (!$period->isSingleDay()): ?><td class="mono"><?= h(\Honeypot\Period::day((string)$event['date'])->label()) ?></td><?php endif ?>
 				<td class="mono"><?= h((string)($event['time'] ?? '')) ?></td>
 				<td class="mono"><?= h((string)($event['method'] ?? '')) ?></td>
 				<td class="mono"><?= h($isProbe ? (string)($event['request'] ?? '') : $path) ?>

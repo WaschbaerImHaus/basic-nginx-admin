@@ -96,4 +96,17 @@ final class LogEntryTest extends TestCase
 		$entry = LogEntry::fromLine('10.200.0.1 - - [21/Sep/2026:16:34:24 +0200] "GET / HTTP/1.1" 400 248 "-" "Mozilla/5.0 zgrab/0.x"');
 		self::assertFalse($entry?->isProbe());
 	}
+
+	/**
+	 * Die Detailansicht kennt bei Zeiträumen nur die Rohzeile, nicht mehr jedes
+	 * Ereignis. Die Art muss sich daraus allein bestimmen lassen.
+	 */
+	public function testNamesTheKindOfProbeFromTheRawRequestAlone(): void
+	{
+		self::assertSame('SSH-Banner', LogEntry::probeKindOf('SSH-2.0-Go'));
+		self::assertSame('Proxy gesucht', LogEntry::probeKindOf('CONNECT x.example:443 HTTP/1.1'));
+		self::assertSame('Binärprotokoll', LogEntry::probeKindOf('\\x16\\x03\\x01'));
+		self::assertSame('leere Anfrage', LogEntry::probeKindOf('-'));
+		self::assertNull(LogEntry::probeKindOf('GET / HTTP/1.1'), 'gewöhnliches HTTP');
+	}
 }

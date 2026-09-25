@@ -65,3 +65,17 @@ ungeschuetzt - Testfehler: "return" wirkt in der Rewrite-Phase vor der Zugriffsp
 mit einem Content-Phasen-Block 401 wie erwartet.
 Der Mechanismus ersetzt satisfy/allow/deny auch fuer die ganze Seite (ein Mechanismus
 statt zwei). Smoke-Test prueft alle Umwege und PHP im Pfad. 575 Tests gruen.
+
+2026-09-25 23:06 Honigtopf: Auswertungen in SQLite, Kalender und Zeitraeume (Nutzerwunsch)
+Korrektur zur Aufgabenstellung: logrotate haelt die Logs 14 Tage (rotate 14), nicht 30.
+Neu: Period, PeriodSelection, MonthCalendar, ReportDatabase, Analyzer (VERSION 2),
+PathTrend::against/fromDailyPaths, LogEntry::probeKindOf. analyse.php schreibt nach
+private/honeypot/honeypot.sqlite; abgeschlossene Tage werden uebersprungen (Live-Lauf:
+ausgewertet 1, uebersprungen 6), ein gespeicherter Tag mit mehr Anfragen als die Logs
+bleibt stehen. JSON-Berichte einmalig importiert (7 Tage).
+Ansicht: Kalender-Kachel (Faerbung nach 404 relativ zum staerksten Tag, KW waehlt Woche),
+von/bis + Schnellwahl, "Tage im Ueberblick", Vergleich mit gleich langem Zeitraum davor,
+Ereignisse per SQL gefiltert. Nebenbei: Stundenbalken hatten keine Hoehe (.hours .h ohne
+height -> 2px), behoben. Teilvorlagen antworten direkt aufgerufen mit 404.
+Geprueft als web3 mit open_basedir des Pools (16 Varianten ohne Warnung), Screenshots,
+Smoke-Test gruen. 630 Tests gruen.

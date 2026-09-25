@@ -240,8 +240,16 @@ printf '{"date":"2026-01-01","complete":true,"requests":7,"status":{"404":5},"ho
 	> "$HP/private/honeypot/smoke.example/2026-01-01.json"
 chown "$PUSER:$PGROUP" "$HP/private/honeypot/smoke.example/2026-01-01.json"
 chmod 640 "$HP/private/honeypot/smoke.example/2026-01-01.json"
+# Die Ansicht liest seit 2026-09-25 die SQLite-Datenbank; der Bericht kommt über den
+# JSON-Import hinein – derselbe Weg, den eine bestehende Installation beim Update nimmt.
+php -r 'spl_autoload_register(static function (string $c): void { $f = $GLOBALS["argv"][1] . "/" . substr(strrchr($c, "\\"), 1) . ".php"; if (is_file($f)) { require $f; } });
+	$db = Honeypot\ReportDatabase::open($argv[2] . "/honeypot.sqlite");
+	exit($db->importJson(new Honeypot\ReportStore($argv[2])) === 1 ? 0 : 1);' "$LIBSRC" "$HP/private/honeypot" \
+	|| fail "Honigtopf-Datenbank liess sich nicht aus JSON befüllen"
+chown "$PUSER:$PGROUP" "$HP/private/honeypot/honeypot.sqlite"
+chmod 640 "$HP/private/honeypot/honeypot.sqlite"
 install -d -m 2775 -o "$WUSER" -g "$WGROUP" "$HP/web/hp"
-for f in index.php detail.php bootstrap.php style.css; do
+for f in index.php detail.php calendar.php days.php bootstrap.php style.css; do
 	install -m 644 -o "$WUSER" -g "$WGROUP" "$PAGESRC/$f" "$HP/web/hp/$f"
 done
 OUT=$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/hp/)
@@ -250,6 +258,13 @@ grep -q 'Sondierungen' <<<"$OUT" || fail "Honigtopf-Ansicht ohne Kennzahlen"
 echo "ok   Honigtopf-Ansicht liefert aus"
 grep -q '\.env' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/?ansicht=pfade')" \
 	&& echo "ok   Detailansicht liefert aus" || fail "Detailansicht ohne Inhalt"
+grep -q 'Kalender' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/?von=2025-12-25&bis=2026-01-07')" \
+	&& echo "ok   Zeitraum und Kalender" || fail "Zeitraumansicht ohne Kalender"
+for f in calendar.php days.php detail.php; do
+	code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: smoke-php.example' "http://127.0.0.1/hp/$f")
+	[ "$code" = 404 ] || fail "Teilvorlage $f direkt abrufbar (HTTP $code)"
+done
+echo "ok   Teilvorlagen nicht direkt abrufbar"
 
 # PHP unter einem geschützten Pfad muss mitgeschützt sein. Genau hier versagt ein
 # location-Block: Als Präfix gewönne der PHP-Regex-Block, mit ^~ käme der Quelltext.

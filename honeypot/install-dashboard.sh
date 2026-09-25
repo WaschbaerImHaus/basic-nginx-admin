@@ -45,7 +45,7 @@ GROUP="$(stat -c '%G' "$DOCROOT")"
 POWNER="$(stat -c '%U' "$BASE/private")"
 
 # 1. Ansicht in den Docroot
-for file in index.php detail.php bootstrap.php style.css; do
+for file in index.php detail.php calendar.php days.php bootstrap.php style.css; do
 	install -m 644 -o "$OWNER" -g "$GROUP" "$PAGE/$file" "$DOCROOT/$file"
 done
 

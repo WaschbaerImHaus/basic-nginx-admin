@@ -33,6 +33,35 @@ final class PathTrend
 	}
 
 	/**
+	 * Aus den Pfaden je Tag, wie die Datenbank sie liefert – ohne ganze Tagesberichte.
+	 *
+	 * @param array<string, array<string, int>> $daily Datum => Pfad => Anfragen
+	 */
+	public static function fromDailyPaths(array $daily): self
+	{
+		$days = [];
+		foreach ($daily as $date => $paths) {
+			$days[] = DayReport::fromArray(['date' => (string)$date, 'complete' => true, 'notFound' => $paths]);
+		}
+		return new self($days);
+	}
+
+	/**
+	 * Ein Bericht (Tag oder ganzer Zeitraum) gegen die Tage davor. Der Zeitraum zählt
+	 * als ein Block – sonst wäre jeder Pfad vom ersten Tag des Zeitraums „bekannt".
+	 *
+	 * @param array<string, array<string, int>> $earlierDaily Datum => Pfad => Anfragen
+	 */
+	public static function against(DayReport $current, array $earlierDaily): self
+	{
+		$days = [$current];
+		foreach ($earlierDaily as $date => $paths) {
+			$days[] = DayReport::fromArray(['date' => (string)$date, 'complete' => true, 'notFound' => $paths]);
+		}
+		return new self($days);
+	}
+
+	/**
 	 * Gibt es überhaupt Vortage? Ohne sie wäre jeder Pfad „neu".
 	 */
 	public function hasHistory(): bool

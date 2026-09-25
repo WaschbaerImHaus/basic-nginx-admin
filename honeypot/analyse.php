@@ -6,11 +6,11 @@ declare(strict_types=1);
  *
  * Liest access.log und error.log samt der rotierten Fassungen, gruppiert alles nach
  * Kalendertag (logrotate schneidet morgens um 06:20, eine Datei enthält also zwei Tage)
- * und legt je Tag einen Bericht ab:
- *
- *   - als Markdown unter research/honeypot/<datum>.md – zum Lesen
- *   - als JSON unter <ansichtshost>/private/honeypot/<host>/<datum>.json – für die
- *     Ansicht unter dem Ansichtshost
+ * und legt je Tag die fertige Auswertung in einer SQLite-Datenbank ab
+ * (<ansichtshost>/private/honeypot/honeypot.sqlite, ohne Ansicht unter research/).
+ * Fertige Tage werden nicht erneut ausgewertet (Nutzerwunsch vom 2026-09-25); die
+ * Regeln stehen in Honeypot\Analyzer. Dazu ein Markdown-Bericht zum Lesen unter
+ * research/honeypot/<datum>.md.
  *
  * Die Trennung ist keine Bequemlichkeit: Die Logs gehören root und sollen für den
  * Webserver unlesbar bleiben. Also rechnet dieser Dienst als root und legt nur das
@@ -19,7 +19,7 @@ declare(strict_types=1);
  * Aufruf: php honeypot/analyse.php [--dashboard=<host>] <vhost-name> [weitere ...]
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:45
+ * @version Letzte Änderung: 2026-09-25 23:05
  */
 
 // Im Projektverzeichnis liegt der Autoloader unter src/, in der Installation
@@ -27,12 +27,13 @@ declare(strict_types=1);
 $bootstrap = dirname(__DIR__) . '/src/bootstrap.php';
 require is_file($bootstrap) ? $bootstrap : dirname(__DIR__) . '/bootstrap.php';
 
+use Honeypot\Analyzer;
 use Honeypot\DayReport;
-use Honeypot\LoginAttempts;
 use Honeypot\LogParser;
 use Honeypot\NetworkRegistry;
-use Honeypot\PeerFinder;
 use Honeypot\PeerResolver;
+use Honeypot\Period;
+use Honeypot\ReportDatabase;
 use Honeypot\ReportStore;
 use Honeypot\Suggestions;
 use Honeypot\SystemDns;
@@ -40,6 +41,10 @@ use Honeypot\SystemDns;
 const WWW_ROOT = '/var/www';
 /** Netz- und Ländertabelle; gebaut von honeypot/update-networks.php. */
 const NETWORK_TABLE = '/var/lib/vhost-admin/networks.txt';
+/** Name der Datenbank mit den fertigen Auswertungen. */
+const DATABASE_FILE = 'honeypot.sqlite';
+/** Aufbewahrte Fassungen je Log – muss zu "rotate" in src/etc/logrotate-vhost-admin passen. */
+const LOG_GENERATIONS = 14;
 const REPORT_DIR = __DIR__ . '/../research/honeypot';
 
 /** Balken für die Stundenverteilung im Markdown-Bericht. */
@@ -140,32 +145,38 @@ if (!is_dir(REPORT_DIR) && !mkdir(REPORT_DIR, 0755, true) && !is_dir(REPORT_DIR)
 	exit(1);
 }
 
-$store = null;
+// Die Datenbank liegt bei der Ansicht (dort liest sie sie), sonst bei den Berichten.
+$dataDir = REPORT_DIR;
 if ($dashboard !== null) {
 	$dataDir = WWW_ROOT . '/' . $dashboard . '/private/honeypot';
 	if (!is_dir($dataDir) && !mkdir($dataDir, 0755, true) && !is_dir($dataDir)) {
 		fwrite(STDERR, "Kann Datenverzeichnis der Ansicht nicht anlegen: $dataDir\n");
 		exit(1);
 	}
-	$store = new ReportStore($dataDir);
+}
+$database = ReportDatabase::open($dataDir . '/' . DATABASE_FILE);
+// Einmalige Übernahme der früheren JSON-Tagesberichte; idempotent, danach ohne Wirkung.
+$imported = $database->importJson(new ReportStore($dataDir));
+if ($imported > 0) {
+	echo "$imported frühere Tagesberichte (JSON) übernommen.\n";
 }
 
 $parser = new LogParser();
 $dns = new SystemDns();
 $networks = new NetworkRegistry(NETWORK_TABLE);
-// Ein Resolver für den ganzen Lauf: Er merkt sich Antworten über alle Tage und Hosts.
-$resolver = new PeerResolver($dns, $networks);
 if (!$networks->isAvailable()) {
 	fwrite(STDERR, 'Hinweis: keine Netztabelle unter ' . NETWORK_TABLE
 		. " - Gegenstellen erscheinen ohne Netz und Land (sudo php honeypot/update-networks.php).\n");
 }
-$attempts = new LoginAttempts();
+// Ein Resolver für den ganzen Lauf: Er merkt sich Antworten über alle Tage und Hosts.
+$analyzer = new Analyzer($database, new PeerResolver($dns, $networks), $parser);
 $suggester = new Suggestions();
 $today = date('Y-m-d');
 
 $markdown = "# Honigtopf-Auswertung $today\n\n"
 	. "Erzeugt von `honeypot/analyse.php`. Grundlage sind access.log und error.log samt\n"
-	. "der rotierten Fassungen, gruppiert nach Kalendertag.\n";
+	. "der rotierten Fassungen; fertige Tage stehen in der Datenbank und werden nicht\n"
+	. "erneut ausgewertet.\n";
 
 foreach ($names as $name) {
 	$logs = WWW_ROOT . '/' . $name . '/logs';
@@ -173,19 +184,19 @@ foreach ($names as $name) {
 		$markdown .= "\n## $name\n\nKein Logverzeichnis: `$logs`\n";
 		continue;
 	}
-	// Alle noch vorhandenen Fassungen lesen, nicht nur die letzten zwei: Gruppiert wird
-	// ohnehin nach dem Datum in der Zeile, und ältere Tage bekommen so bei jedem Lauf
-	// ihren vollständigen Bericht (readFile() nimmt auch die .gz-Fassung).
+	// Alle vorhandenen Fassungen lesen (readFile() nimmt auch .gz). Das Lesen kostet
+	// Millisekunden; teuer ist das Auswerten samt Nachschlagen, und das übernimmt der
+	// Analyzer nur für Tage, die es brauchen.
 	$lines = $parser->readFile($logs . '/access.log');
-	for ($generation = 1; $generation <= 14; $generation++) {
-		$lines = array_merge($lines, $parser->readFile($logs . '/access.log.' . $generation));
-	}
-	$parsed = $parser->parse($lines);
 	$errorLines = $parser->readFile($logs . '/error.log');
-	for ($generation = 1; $generation <= 14; $generation++) {
+	for ($generation = 1; $generation <= LOG_GENERATIONS; $generation++) {
+		$lines = array_merge($lines, $parser->readFile($logs . '/access.log.' . $generation));
 		$errorLines = array_merge($errorLines, $parser->readFile($logs . '/error.log.' . $generation));
 	}
-	$logins = $attempts->byDate($errorLines);
+	// Existiert die letzte Fassung, die logrotate aufbewahrt, ist die davor schon
+	// gelöscht – und mit ihr vermutlich der Anfang des ältesten Tages.
+	$oldestMayBeCut = is_file($logs . '/access.log.' . LOG_GENERATIONS)
+		|| is_file($logs . '/access.log.' . LOG_GENERATIONS . '.gz');
 
 	// Eigene Namen und Adressen sind keine Gegenstelle. Der Portscanner MGLNDD etwa
 	// schreibt die Adresse des ZIELS in seine Anfrage – das wären wir selbst.
@@ -196,28 +207,16 @@ foreach ($names as $name) {
 			$ownNames[] = $ownAddress;
 		}
 	}
-	$finder = new PeerFinder($ownNames);
+
+	$result = $analyzer->run($name, $lines, $errorLines, $ownNames, $today, $oldestMayBeCut);
+	echo "$name: ausgewertet " . count($result['analysed']) . ', übersprungen ' . count($result['skipped'])
+		. ', behalten ' . count($result['kept']) . "\n";
 
 	$markdown .= "\n## $name\n";
-	if ($parsed->days === []) {
-		$markdown .= "\nKeine lesbaren Zeilen.\n";
-		continue;
-	}
-	// Neueste Tage zuerst im Bericht; abgelegt werden alle.
-	$dates = array_reverse(array_keys($parsed->days));
-	foreach ($dates as $date) {
-		// Unlesbare Zeilen tragen kein Datum und lassen sich keinem Tag zuordnen.
-		// Sie stehen deshalb beim laufenden Tag – dort fällt eine Formatänderung im
-		// Log am schnellsten auf, und genau dafür ist die Zahl da.
-		$report = DayReport::fromEntries(
-			$date,
-			$parsed->days[$date],
-			$date === $today ? $parsed->unreadable : 0,
-			$logins[$date] ?? [],
-			$date !== $today
-		)->withPeers($resolver->resolve($finder->find($parsed->days[$date])));
-		$store?->save($name, $report);
-		if (in_array($date, array_slice($dates, 0, 2), true)) {
+	$yesterday = date('Y-m-d', strtotime('-1 day'));
+	foreach ([$today, $yesterday] as $date) {
+		$report = $database->load($name, Period::day($date));
+		if ($report !== null) {
 			$markdown .= section($report, $suggester->forReport($report));
 		}
 	}
@@ -226,6 +225,4 @@ foreach ($names as $name) {
 $target = REPORT_DIR . '/' . $today . '.md';
 file_put_contents($target, $markdown);
 echo "Bericht geschrieben: $target\n";
-if ($store !== null) {
-	echo 'Daten für die Ansicht: ' . WWW_ROOT . '/' . $dashboard . "/private/honeypot\n";
-}
+echo 'Datenbank: ' . $dataDir . '/' . DATABASE_FILE . "\n";

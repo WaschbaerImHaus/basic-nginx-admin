@@ -390,7 +390,8 @@ Der Entwurf der Ansicht selbst liegt in
 ## Honigtopf-Ansicht
 
 Ein vHost kann eine Ansicht bekommen, die zeigt, was an Angriffen und Scans auf einem
-anderen (dem „Honigtopf") ankommt – je Kalendertag, mit Detailansichten.
+anderen (dem „Honigtopf") ankommt – für einen Tag oder einen beliebigen Zeitraum, mit
+Detailansichten.
 
 ```bash
 sudo vhost php <ansichtshost> on                              # die Ansicht ist PHP
@@ -410,6 +411,24 @@ sudo php /opt/vhost-admin/honeypot/analyse.php --dashboard=<ansichtshost> <honig
 **Warum zwei Schritte statt einer Live-Ansicht:** Die Logs gehören root und sollen für
 den Webserver unlesbar bleiben. Die Auswertung rechnet deshalb als root und legt nur das
 Ergebnis dort ab, wo die Ansicht es lesen darf (`private/honeypot/`).
+
+**Gespeicherte Auswertungen:** Die Ergebnisse liegen je Tag in einer SQLite-Datenbank
+(`private/honeypot/honeypot.sqlite`, nur root schreibt, die Ansicht öffnet sie nur
+lesend). Die Logs selbst hält logrotate 14 Tage vor; ausgewertete Tage bleiben in der
+Datenbank, auch wenn ihr Log längst gelöscht ist. Ein abgeschlossener Tag wird nicht
+erneut gerechnet – nur der laufende Tag und Tage, deren Auswertung aus einer älteren
+Fassung stammt. Hat ein Tag in der Datenbank mehr Anfragen als die noch vorhandenen
+Logs hergeben (etwa weil ein Teil schon rotiert ist), bleibt der gespeicherte Stand
+stehen. Frühere JSON-Tagesberichte übernimmt der erste Lauf automatisch.
+
+**Tag und Zeitraum wählen:** Die Kachel „Kalender" zeigt einen Monat, eingefärbt nach
+Sondierungen; ein Klick auf einen Tag zeigt diesen Tag, ein Klick auf die Kalenderwoche
+die ganze Woche, „ganzer Monat" den Monat. Oben stehen „von"/„bis" für einen freien
+Bereich und eine Schnellwahl (heute, gestern, 7 Tage, 30 Tage, dieser Monat – die
+Schnellwahl bleibt relativ, ein Lesezeichen darauf zeigt morgen die Tage bis morgen).
+Bei einem Zeitraum sind alle Kacheln die Summe seiner Tage; verglichen wird mit dem
+gleich langen Zeitraum davor, „Neu gesucht" misst gegen die 14 Tage davor. Die Kachel
+„Tage im Überblick" zeigt Anfragen und Sondierungen je Tag.
 
 **Was die Ansicht zeigt:** Tagesbilanz mit Vortagsvergleich, Tagesverlauf, wonach gesucht
 wurde (Beutegruppen statt einzelner Pfade), womit gesucht wurde (nennt sich / tarnt sich /

@@ -118,4 +118,29 @@ final class PathTrendTest extends TestCase
 		self::assertSame(['/neu' => 2], $trend->newToday());
 		self::assertSame('2026-09-25', $trend->dates()[0]);
 	}
+
+	/**
+	 * Die Ansicht holt die Pfade je Tag direkt aus der Datenbank, ohne ganze
+	 * Tagesberichte zu laden.
+	 */
+	public function testWorksFromThePathsPerDay(): void
+	{
+		$trend = PathTrend::fromDailyPaths([
+			'2026-09-24' => ['/.env' => 2],
+			'2026-09-25' => ['/.env' => 1, '/neu' => 3],
+		]);
+		self::assertSame(['/neu' => 3], $trend->newToday());
+		self::assertSame(['2026-09-25', '2026-09-24'], $trend->dates());
+	}
+
+	/**
+	 * Für einen Zeitraum: Was darin gesucht wurde und in den Tagen davor nicht. Der
+	 * Zeitraum zählt als ein Block, sonst wäre jeder Pfad vom ersten Tag „bekannt".
+	 */
+	public function testComparesAPeriodAgainstTheDaysBefore(): void
+	{
+		$period = DayReport::fromArray(['date' => '2026-09-20', 'notFound' => ['/.env' => 5, '/neu' => 2, '/auch-neu' => 1]]);
+		$trend = PathTrend::against($period, ['2026-09-18' => ['/.env' => 1], '2026-09-19' => ['/alt' => 1]]);
+		self::assertSame(['/neu' => 2, '/auch-neu' => 1], $trend->newToday());
+	}
 }

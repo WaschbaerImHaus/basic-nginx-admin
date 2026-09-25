@@ -152,7 +152,7 @@ final class DayReport implements \JsonSerializable
 
 		return new self(
 			$date, $complete, count($entries), $status, $hours, $agents,
-			self::rotatingAgents($agents), $notFound, $loot, $methods,
+			self::detectRotation($agents), $notFound, $loot, $methods,
 			$probeCount, $probeKinds, $probes,
 			$robots, $admin, $robotsThenAdmin, $gaps, $logins, $unreadable, $events
 		);
@@ -168,7 +168,7 @@ final class DayReport implements \JsonSerializable
 	 * @param array<string, int> $agents
 	 * @return array<int, list<string>>
 	 */
-	private static function rotatingAgents(array $agents): array
+	public static function detectRotation(array $agents): array
 	{
 		$byCount = [];
 		foreach ($agents as $agent => $count) {

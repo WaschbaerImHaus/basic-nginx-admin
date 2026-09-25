@@ -6,7 +6,7 @@
  * beobachtet, darf nicht selbst bei Dritten anklopfen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 18:00
+ * @version Letzte Änderung: 2026-09-25 23:05
  */
 
 :root {
@@ -42,8 +42,10 @@ code, .mono { font-family:var(--mono); font-size:.92em; }
 .top .name .hive { color:var(--hive); }
 .top .where { color:var(--muted); font-size:.85rem; font-family:var(--mono); }
 .top .spacer { flex:1; }
-.top form { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color:var(--muted); }
-select, input[type=search] {
+.top form { display:flex; align-items:center; gap:.4rem; font-size:.85rem; color:var(--muted); flex-wrap:wrap; }
+.top .presets { display:flex; gap:.35rem; flex-wrap:wrap; }
+.top .presets .tag { text-decoration:none; }
+select, input[type=search], input[type=date] {
 	font:inherit; font-size:.85rem; padding:.25rem .4rem;
 	background:var(--surface); color:var(--ink);
 	border:1px solid var(--line); border-radius:4px;
@@ -92,7 +94,7 @@ button.primary { background:var(--act); border-color:var(--act); color:#fff; }
 
 /* ---------- Tagesverlauf ---------- */
 .hours { display:flex; align-items:flex-end; gap:2px; height:5.5rem; }
-.hours .h { flex:1; background:var(--sunken); border-radius:2px 2px 0 0; position:relative; min-height:2px; }
+.hours .h { flex:1; height:100%; background:var(--sunken); border-radius:2px 2px 0 0; position:relative; }
 .hours .h .f { position:absolute; bottom:0; left:0; right:0; background:var(--act); border-radius:2px 2px 0 0; }
 .scale { display:flex; justify-content:space-between; font-size:.72rem; color:var(--muted); font-family:var(--mono); margin-top:.25rem; }
 
@@ -130,3 +132,31 @@ table.matrix td.cell { width:2.6rem; color:var(--muted); }
 table.matrix td.cell.hit { background:color-mix(in srgb, var(--act) 14%, transparent); color:var(--ink); }
 table.matrix tr.violation td.cell.hit { background:color-mix(in srgb, var(--bad) 18%, transparent); }
 table.matrix th.num { white-space:nowrap; }
+
+/* ---------- Kalender ---------- */
+.month { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
+.month a { text-decoration:none; font-size:1.2rem; padding:0 .5rem; }
+table.calendar { table-layout:fixed; font-size:.82rem; }
+table.calendar th, table.calendar td { text-align:center; padding:.12rem; border-bottom:0; vertical-align:middle; }
+table.calendar td.week a { color:var(--muted); font-family:var(--mono); font-size:.72rem; text-decoration:none; }
+table.calendar td.day a, table.calendar td.day span {
+	display:block; padding:.28rem 0; border-radius:4px; text-decoration:none;
+	font-variant-numeric:tabular-nums; border:2px solid transparent;
+}
+table.calendar td.day span { color:var(--line); }
+table.calendar td.l1 a { background:var(--sunken); color:var(--ink); }
+table.calendar td.l2 a { background:color-mix(in srgb, var(--bad) 18%, var(--surface)); color:var(--ink); }
+table.calendar td.l3 a { background:color-mix(in srgb, var(--bad) 42%, var(--surface)); color:var(--ink); }
+table.calendar td.l4 a { background:color-mix(in srgb, var(--bad) 72%, var(--surface)); color:#fff; }
+table.calendar td.selected a, table.calendar td.selected span { border-color:var(--act); }
+table.calendar td.day a:hover { border-color:var(--muted); }
+
+/* ---------- Tage im Überblick ---------- */
+.days { display:flex; align-items:flex-end; gap:2px; height:5.5rem; }
+.days .d { flex:1; position:relative; height:100%; border-radius:2px 2px 0 0; }
+.days .d.none { background:repeating-linear-gradient(135deg, transparent 0 3px, var(--line-soft) 3px 5px); height:.4rem; align-self:flex-end; }
+.days .d span { position:absolute; bottom:0; left:0; right:0; border-radius:2px 2px 0 0; min-height:1px; }
+.days .d .all { background:var(--act); opacity:.45; }
+.days .d .bad { background:var(--bad); }
+.days .d:hover .all, .days .d.selected .all { opacity:.9; }
+.days .d.selected { outline:2px solid var(--act); outline-offset:1px; }
