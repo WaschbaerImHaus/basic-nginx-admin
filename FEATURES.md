@@ -44,18 +44,16 @@
 
 ## Offen
 
-- Honigtopf-Ansicht unter `bienchen.mfsvr.de` nach der Spec bauen (die Spec liegt vor, die Datenquelle auch). Voraussetzung: `bienchen.mfsvr.de` muss per DNS auf diesen Server zeigen – tut es derzeit nicht.
-
 - Mehrere PHP-Versionen pro Host wählbar machen (aktuell immer die höchste installierte).
 - Pool-Kennwerte (`pm.max_children` u.a.) pro Host einstellbar; derzeit für alle gleich (`ondemand`, 10).
 - `rewrites.conf` als eigenes Textfeld in der Oberfläche (die Datei wird schon eingebunden, gepflegt wird sie per Hand).
 - gzip-Vorgaben zentral in `nginx.conf` setzen.
 - Systembenutzer eines gelöschten vHosts aufräumen (bleibt derzeit absichtlich bestehen, siehe SECURITY_RISKS.md).
 
-- `www.`-Alias für Domains (heute nur als separate Domain mit eigenem Docroot möglich)
-- PHP-FPM für normale vHosts (heute nur statische Dateien)
 - Backup/Export der Datenbank und Docroots
 - Basic-Auth für die Oberfläche selbst, falls sie einmal im LAN erreichbar sein soll
+- PROXY-Protokoll für öffentliche Hosts (echte Client-Adressen durch den WireGuard-Tunnel, siehe README) – braucht zuerst die Einrichtung auf dem Tunnelserver durch den Nutzer
+- `default_server` auf Port 443 mit `ssl_reject_handshake` – Entscheidung des Nutzers, weil IP-Scanner dann aus dem Honigtopf verschwinden (SECURITY_RISKS.md)
 - IPv6-Änderungen zur Laufzeit (die IPv6-Erkennung läuft nur beim Rendern)
 - Log-Anzeige in der Oberfläche (heute nur per SSH/CLI einsehbar) – bewusst zurückgestellt
 - Eigene, selbst hochgeladene Zertifikate in `cert/` statt ausschließlich Let's-Encrypt-Symlinks – bewusst zurückgestellt

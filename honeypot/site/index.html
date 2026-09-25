@@ -180,9 +180,14 @@
 		--bank:0;
 		position:absolute; left:50%; top:62%; width:110px; height:110px;
 		margin:-55px 0 0 -55px;
+		/* Die Biene schwirrt umher (--bee-x/--bee-y), kommt näher und entfernt sich
+		   (--bee-s) und legt sich in die Kurve (--bank). Ohne diese Eigenbewegung stand
+		   sie auf dem Bildschirm still, und nur die Wiese zog unter ihr durch – das las
+		   sich nicht als Flug (gemeldet am 2026-09-25). */
 		transform:
-			translateX(calc(var(--bank) * 2.2px))
-			rotate(calc(var(--bank) * 1deg));
+			translate(calc(var(--bee-x, 0) * 1px), calc(var(--bee-y, 0) * 1px))
+			rotate(calc(var(--bank) * 1deg))
+			scale(var(--bee-s, 1));
 		filter:drop-shadow(0 14px 6px rgba(20, 40, 10, .28));
 	}
 	/* Auf breiten Schirmen fliegt sie links neben dem Text, sonst verschwände sie
@@ -195,10 +200,25 @@
 	@keyframes flap { from { transform:scaleY(1) rotate(0); } to { transform:scaleY(.45) rotate(-8deg); } }
 	@keyframes bob { 0%, 100% { translate:0 -4px; } 50% { translate:0 5px; } }
 
-	/* Wer „Bewegung reduzieren" eingestellt hat, bekommt ein stehendes Bild. */
+	/* Wer „Bewegung reduzieren" eingestellt hat, bekommt ein stehendes Bild – bis er
+	   den Flug über den Schalter ausdrücklich startet (.flying). */
 	@media (prefers-reduced-motion: reduce) {
-		.bee svg, .bee .wing { animation:none; }
+		.meadow:not(.flying) .bee svg, .meadow:not(.flying) .bee .wing { animation:none; }
 	}
+	.meadow.paused .bee svg, .meadow.paused .bee .wing { animation-play-state:paused; }
+
+	/* Schalter zum Anhalten und Starten (WCAG 2.2.2). Liegt ausserhalb der Wiese, die
+	   für Screenreader ausgeblendet ist. */
+	.flight {
+		position:fixed; right:1rem; bottom:1rem; z-index:2;
+		font:600 .85rem/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+		color:#fff; background:rgba(0, 0, 0, .55);
+		border:1px solid rgba(255, 255, 255, .35); border-radius:999px;
+		padding:.55rem .95rem; cursor:pointer;
+	}
+	.flight:hover { background:rgba(0, 0, 0, .7); }
+	.flight:focus-visible { outline:3px solid var(--honey); outline-offset:2px; }
+	.flight .icon { display:inline-block; width:1em; text-align:center; margin-right:.35rem; }
 </style>
 </head>
 <body>
@@ -236,6 +256,10 @@
 		</svg>
 	</div>
 </div>
+
+<button id="flight" class="flight" type="button" aria-pressed="true" hidden>
+	<span class="icon" aria-hidden="true">❚❚</span>Bienenflug
+</button>
 
 <div class="wrap">
 	<header>
@@ -399,10 +423,12 @@
 			this.targetRate = 0;     // angestrebte Drehgeschwindigkeit
 			this.nextDecision = 3;   // Sekunden bis zur nächsten Entscheidung
 			this.speed = 150;        // Pixel je Sekunde
+			this.time = 0;           // Flugzeit, für das Schwirren
 		}
 
 		/** Rückt den Flug um dt Sekunden weiter. */
 		advance(dt) {
+			this.time += dt;
 			this.nextDecision -= dt;
 			if (this.nextDecision <= 0) {
 				// Nach einer Geraden kommt immer eine Kurve, nach einer Kurve meist wieder
@@ -427,6 +453,27 @@
 
 		/** Schräglage in Grad: in die Kurve hinein, Linkskurve = nach links geneigt. */
 		bank() { return -this.turnRate * 38; }
+
+		/**
+		 * Wo die Biene gerade vor der Kamera schwirrt, in Pixeln, und wie nah sie ist.
+		 *
+		 * In der Kurve zieht sie nach innen voraus – die Kamera folgt ihr erst, dann
+		 * dreht die Welt. Dazu ein unregelmässiges Pendeln aus zwei Schwingungen, deren
+		 * Perioden nicht zueinander passen; so wiederholt sich die Bahn nicht sichtbar.
+		 *
+		 * @param limit wie weit sie seitlich ausweichen darf, in Pixeln
+		 */
+		hover(limit) {
+			const t = this.time;
+			const x = -this.turnRate * 300 + 80 * Math.sin(t * 0.63) + 28 * Math.sin(t * 1.87);
+			return {
+				// Weich begrenzt (tanh): Die Biene bleibt im freien Raum und bremst am Rand
+				// sanft ab, statt dort hart anzuschlagen oder aus dem Bild zu fliegen.
+				x: limit * Math.tanh(x / limit),
+				y: 30 * Math.sin(t * 1.07) + 11 * Math.sin(t * 2.71),
+				scale: 1 + 0.14 * Math.sin(t * 0.51)
+			};
+		}
 	}
 
 	/** Masse der Welt – müssen zu den Werten in .meadow passen. */
@@ -501,6 +548,8 @@
 			this.tileX = null;
 			this.tileZ = null;
 			this.last = null;
+			this.running = false;
+			this.button = null;
 			this.frame = this.frame.bind(this);
 		}
 
@@ -618,6 +667,15 @@
 				plant.look(blur, Math.round(fog * fade * 20) / 20);
 			}
 
+			// Freier Raum für das Schwirren: Auf breiten Schirmen fliegt die Biene links
+			// neben dem Text (siehe .bee, 70rem), sonst in der Mitte. Abzüglich der
+			// halben Bienenbreite, damit sie nie über den Rand ragt.
+			const width = window.innerWidth;
+			const room = width >= 1120 ? width / 4 - 160 : width / 2;
+			const hover = flight.hover(Math.max(24, room - 62));
+			this.bee.style.setProperty('--bee-x', hover.x.toFixed(1));
+			this.bee.style.setProperty('--bee-y', hover.y.toFixed(1));
+			this.bee.style.setProperty('--bee-s', hover.scale.toFixed(3));
 			this.bee.style.setProperty('--bank', flight.bank().toFixed(2));
 			// Die Kamera legt sich mit in die Kurve, aber nur zu einem Drittel – sonst
 			// kippt die ganze Welt, und aus dem Flug wird Seegang.
@@ -625,12 +683,38 @@
 		}
 
 		frame(time) {
+			if (!this.running) { return; }
 			// Nach einem Tabwechsel nicht mit einem Riesenschritt weiterfliegen.
 			const dt = this.last === null ? 0 : Math.min(0.05, (time - this.last) / 1000);
 			this.last = time;
 			this.flight.advance(dt);
 			this.show();
 			requestAnimationFrame(this.frame);
+		}
+
+		/** Flug starten oder anhalten; der Schalter zeigt den Zustand. */
+		fly(on) {
+			this.running = on;
+			this.last = null;
+			this.root.classList.toggle('paused', !on);
+			// Wer den Flug trotz „Bewegung reduzieren" startet, hat sich dafür
+			// entschieden – dann laufen auch Flügelschlag und Schweben.
+			this.root.classList.toggle('flying', on);
+			if (this.button) {
+				this.button.setAttribute('aria-pressed', on ? 'true' : 'false');
+				this.button.querySelector('.icon').textContent = on ? '❚❚' : '▶';
+				this.button.title = on ? 'Flug anhalten' : 'Flug starten';
+			}
+			if (on) {
+				requestAnimationFrame(this.frame);
+			}
+		}
+
+		/** Verbindet den Schalter; er erscheint erst, wenn es etwas zu schalten gibt. */
+		attach(button) {
+			this.button = button;
+			button.hidden = false;
+			button.addEventListener('click', () => this.fly(!this.running));
 		}
 
 		/**
@@ -648,9 +732,7 @@
 			this.plant(620);
 			this.fastForward(skip);
 			this.show();
-			if (animate) {
-				requestAnimationFrame(this.frame);
-			}
+			this.fly(animate);
 		}
 	}
 
@@ -660,12 +742,14 @@
 	const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 	// ?t=12.5 spult 12,5 Sekunden vor und hält an – für Prüfbilder, begrenzt auf 10 Minuten.
 	const skip = Math.min(600, Math.max(0, parseFloat(new URLSearchParams(location.search).get('t')) || 0));
-	new Meadow(
+	const meadow = new Meadow(
 		document.getElementById('scene'),
 		document.querySelector('.ground'),
 		document.getElementById('bee'),
 		document.querySelector('.meadow')
-	).start(!still && skip === 0, skip);
+	);
+	meadow.attach(document.getElementById('flight'));
+	meadow.start(!still && skip === 0, skip);
 })();
 </script>
 </body>

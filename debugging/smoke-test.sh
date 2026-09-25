@@ -46,8 +46,9 @@ cleanup
 echo "== CLI"
 vhost add smoke-test.example --subdir public >/dev/null
 expect 401 "gesperrt" -H 'Host: smoke-test.example' http://127.0.0.1/
-printf 'geheim\n' | vhost user-add smoke-test.example alice >/dev/null
-expect 200 "Login" -u alice:geheim -H 'Host: smoke-test.example' http://127.0.0.1/
+# Mindestens 12 Zeichen (VhostService::MIN_PASSWORD_LENGTH, seit 2026-09-25).
+printf 'geheim-geheim\n' | vhost user-add smoke-test.example alice >/dev/null
+expect 200 "Login" -u alice:geheim-geheim -H 'Host: smoke-test.example' http://127.0.0.1/
 expect 401 "falsches Passwort" -u alice:falsch -H 'Host: smoke-test.example' http://127.0.0.1/
 vhost ip-add smoke-test.example 127.0.0.1 >/dev/null
 expect 200 "IP-Freigabe" -H 'Host: smoke-test.example' http://127.0.0.1/
@@ -232,6 +233,10 @@ grep -q '\.env' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/
 
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
+
+echo "== Passwort-Mindestlaenge"
+printf 'zu-kurz\n' | vhost user-add smoke-test.example carol >/dev/null 2>&1 \
+	&& fail "ein 7-Zeichen-Passwort wurde angenommen" || echo "ok   kurzes Passwort abgelehnt"
 
 echo "== Logrotation"
 # Spielt nach, was logrotate nachts tut: Datei umbenennen, nginx neu oeffnen lassen.

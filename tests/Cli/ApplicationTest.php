@@ -103,6 +103,21 @@ final class ApplicationTest extends TestCase
 		return [$code, (string)stream_get_contents($out), (string)stream_get_contents($err)];
 	}
 
+	/**
+	 * SECURITY_RISKS.md, „Optionen-Einschleusung": Ein Feldwert wie "--purge" aus der
+	 * Oberfläche darf nie als Option gelesen werden. Nach "--" ist alles Argument.
+	 */
+	public function testParseTreatsEverythingAfterDoubleDashAsPositional(): void
+	{
+		$parsed = Application::parse(['vhost', 'remove', '--', '--purge', 'a.de']);
+		self::assertSame(['--purge', 'a.de'], $parsed['positional']);
+		self::assertSame([], $parsed['options']);
+
+		$mixed = Application::parse(['vhost', 'add', '--subdir', 'pub', '--', 'a.de']);
+		self::assertSame(['a.de'], $mixed['positional']);
+		self::assertSame(['subdir' => 'pub'], $mixed['options'], 'Optionen davor gelten weiter');
+	}
+
 	public function testParseSeparatesCommandPositionalsAndOptions(): void
 	{
 		$parsed = Application::parse(['vhost', 'add', 'a.de', '--subdir', 'pub', '--no-protect', '--x=1']);
@@ -166,13 +181,13 @@ final class ApplicationTest extends TestCase
 	public function testUserPasswordComesFromStdin(): void
 	{
 		$this->runCli(['add', 'a.example']);
-		[$code, $out] = $this->runCli(['user-add', 'a.example', 'alice'], "geheim\n");
+		[$code, $out] = $this->runCli(['user-add', 'a.example', 'alice'], "geheim-geheim\n");
 		self::assertSame(0, $code);
 		self::assertSame("Benutzer alice gespeichert.\n", $out);
 		self::assertStringStartsWith('alice:$6$', (string)file_get_contents($this->dir . '/auth/a.example.htpasswd'));
 		[$code, , $err] = $this->runCli(['user-add', 'a.example', 'bob'], "\n");
 		self::assertSame(1, $code);
-		self::assertStringContainsString('Leeres Passwort', $err);
+		self::assertStringContainsString('mindestens 12 Zeichen', $err, 'auch ein leeres Passwort ist zu kurz');
 		[$code] = $this->runCli(['user-del', 'a.example', 'alice']);
 		self::assertSame(0, $code);
 		self::assertSame('', file_get_contents($this->dir . '/auth/a.example.htpasswd'));

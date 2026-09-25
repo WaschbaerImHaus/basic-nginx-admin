@@ -63,30 +63,47 @@ final class AdminPageTest extends TestCase
 		self::assertStringContainsString('Fehler: Simulation', $out);
 	}
 
+	/**
+	 * Jeder Wert aus dem Formular steht hinter "--": Das CLI liest ihn dann nie als
+	 * Option, auch wenn er mit "--" beginnt (SECURITY_RISKS.md, Optionen-Einschleusung).
+	 * Beabsichtigte Optionen wie --subdir stehen davor.
+	 */
 	public function testCommandForMapsEveryAction(): void
 	{
-		self::assertSame(['args' => ['add', 'a.de'], 'stdin' => null], AdminPage::commandFor('create', ['domain' => ' a.de ', 'subdir' => '']));
-		self::assertSame(['args' => ['add', 'a.de', '--subdir', 'pub'], 'stdin' => null], AdminPage::commandFor('create', ['domain' => 'a.de', 'subdir' => 'pub']));
-		self::assertSame(['args' => ['protect', 'a.de', 'off'], 'stdin' => null], AdminPage::commandFor('protect', ['name' => 'a.de', 'state' => 'off']));
-		self::assertSame(['args' => ['user-add', 'a.de', 'alice'], 'stdin' => "p w\n"], AdminPage::commandFor('user_add', ['name' => 'a.de', 'username' => 'alice', 'password' => 'p w']));
-		self::assertSame(['args' => ['user-del', 'a.de', 'alice'], 'stdin' => null], AdminPage::commandFor('user_del', ['name' => 'a.de', 'username' => 'alice']));
-		self::assertSame(['args' => ['ip-add', 'a.de', '10.0.0.0/8'], 'stdin' => null], AdminPage::commandFor('ip_add', ['name' => 'a.de', 'cidr' => '10.0.0.0/8']));
-		self::assertSame(['args' => ['ip-del', 'a.de', '10.0.0.0/8'], 'stdin' => null], AdminPage::commandFor('ip_del', ['name' => 'a.de', 'cidr' => '10.0.0.0/8']));
-		self::assertSame(['args' => ['ssl', 'a.de', 'on'], 'stdin' => null], AdminPage::commandFor('ssl', ['name' => 'a.de', 'state' => 'on']));
-		self::assertSame(['args' => ['remove', 'a.de'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => 'a.de']));
-		self::assertSame(['args' => ['set', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
+		self::assertSame(['args' => ['add', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('create', ['domain' => ' a.de ', 'subdir' => '']));
+		self::assertSame(['args' => ['add', '--subdir', 'pub', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('create', ['domain' => 'a.de', 'subdir' => 'pub']));
+		self::assertSame(['args' => ['protect', '--', 'a.de', 'off'], 'stdin' => null], AdminPage::commandFor('protect', ['name' => 'a.de', 'state' => 'off']));
+		self::assertSame(['args' => ['user-add', '--', 'a.de', 'alice'], 'stdin' => "p w\n"], AdminPage::commandFor('user_add', ['name' => 'a.de', 'username' => 'alice', 'password' => 'p w']));
+		self::assertSame(['args' => ['user-del', '--', 'a.de', 'alice'], 'stdin' => null], AdminPage::commandFor('user_del', ['name' => 'a.de', 'username' => 'alice']));
+		self::assertSame(['args' => ['ip-add', '--', 'a.de', '10.0.0.0/8'], 'stdin' => null], AdminPage::commandFor('ip_add', ['name' => 'a.de', 'cidr' => '10.0.0.0/8']));
+		self::assertSame(['args' => ['ip-del', '--', 'a.de', '10.0.0.0/8'], 'stdin' => null], AdminPage::commandFor('ip_del', ['name' => 'a.de', 'cidr' => '10.0.0.0/8']));
+		self::assertSame(['args' => ['ssl', '--', 'a.de', 'on'], 'stdin' => null], AdminPage::commandFor('ssl', ['name' => 'a.de', 'state' => 'on']));
+		self::assertSame(['args' => ['remove', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => 'a.de']));
+		self::assertSame(['args' => ['set', '--', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
 		self::assertNull(AdminPage::commandFor('hack', []));
 		self::assertNull(AdminPage::commandFor('', []));
+	}
+
+	/**
+	 * Durchgespielt bis zum Parser: Ein Formularwert "--purge" kommt beim CLI als
+	 * Argument an, nicht als Option – remove löscht damit nie Dateien.
+	 */
+	public function testAFormValueThatLooksLikeAnOptionStaysAnArgument(): void
+	{
+		$command = AdminPage::commandFor('remove', ['name' => '--purge']);
+		$parsed = \VhostAdmin\Cli\Application::parse(array_merge(['vhost'], $command['args']));
+		self::assertSame([], $parsed['options']);
+		self::assertSame(['--purge'], $parsed['positional']);
 	}
 
 	public function testCommandForConfPassesTextOnStdin(): void
 	{
 		self::assertSame(
-			['args' => ['conf', 'a.de'], 'stdin' => "expires 1d;\n"],
+			['args' => ['conf', '--', 'a.de'], 'stdin' => "expires 1d;\n"],
 			AdminPage::commandFor('conf', ['name' => 'a.de', 'snippet' => "expires 1d;\n"])
 		);
 		self::assertSame(
-			['args' => ['conf', 'a.de'], 'stdin' => ''],
+			['args' => ['conf', '--', 'a.de'], 'stdin' => ''],
 			AdminPage::commandFor('conf', ['name' => 'a.de', 'snippet' => ''])
 		);
 	}
@@ -132,14 +149,13 @@ final class AdminPageTest extends TestCase
 	}
 
 	/**
-	 * Befund 8: das "name"-Feld landet ungefiltert als Positionsargument; ein Wert wie
-	 * "--purge" erzeugt deshalb ["remove", "--purge"], nicht ["remove", "--purge", ...].
-	 * Das CLI selbst fängt das ab (Application::parse() liest "--purge" als Option, nicht
-	 * als Name), siehe ApplicationTest::testPurgeAsNameIsNotTreatedAsPositionalArgument().
+	 * Befund 8, seit 2026-09-25 geschlossen: Früher erzeugte ein Namensfeld "--purge"
+	 * ["remove", "--purge"], und das CLI las den Wert als Option. Jetzt steht er hinter
+	 * "--" und bleibt ein Name – den das CLI dann als ungültigen Domainnamen ablehnt.
 	 */
 	public function testCommandForPassesPurgeLikeNameThrough(): void
 	{
-		self::assertSame(['args' => ['remove', '--purge'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => '--purge']));
+		self::assertSame(['args' => ['remove', '--', '--purge'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => '--purge']));
 	}
 
 	public function testRedirectTargets(): void
@@ -155,7 +171,7 @@ final class AdminPageTest extends TestCase
 	{
 		$target = $this->page->handlePost(['action' => 'protect', 'name' => 'a.de', 'state' => 'on']);
 		self::assertSame('/?v=a.de', $target);
-		self::assertSame(['ok', "ARGS=protect|a.de|on\nSTDIN="], $this->page->takeFlash());
+		self::assertSame(['ok', "ARGS=protect|--|a.de|on\nSTDIN="], $this->page->takeFlash());
 		self::assertNull($this->page->takeFlash());
 
 		$this->page->handlePost(['action' => 'remove', 'name' => 'fail']);

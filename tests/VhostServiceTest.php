@@ -205,12 +205,12 @@ final class VhostServiceTest extends TestCase
 	public function testUsersAndIpsEndUpInFiles(): void
 	{
 		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
-		$this->service->addUser($v, Username::fromString('alice'), 'geheim');
+		$this->service->addUser($v, Username::fromString('alice'), 'geheim-geheim');
 		$this->service->addIp($v, Cidr::fromString('10.0.0.0/8'));
 		$htpasswd = (string)file_get_contents($this->dir . '/auth/example.com.htpasswd');
 		self::assertMatchesRegularExpression('/^alice:\$6\$[^\n]+\n$/', $htpasswd);
 		$hash = trim(substr($htpasswd, strlen('alice:')));
-		self::assertSame($hash, crypt('geheim', $hash));
+		self::assertSame($hash, crypt('geheim-geheim', $hash));
 		self::assertNotSame($hash, crypt('falsch', $hash));
 		self::assertStringContainsString("allow 10.0.0.0/8;\n", (string)file_get_contents($this->dir . '/auth/example.com.conf'));
 		$this->service->removeUser($v, Username::fromString('alice'));
@@ -966,7 +966,7 @@ final class VhostServiceTest extends TestCase
 	public function testEffectiveConfigInlinesTheVhostsOwnIncludes(): void
 	{
 		$v = $this->service->createDomain(DomainName::fromString('zeig.example'), null);
-		$this->service->addUser($v, Username::fromString('alice'), 'geheim');
+		$this->service->addUser($v, Username::fromString('alice'), 'geheim-geheim');
 		$this->service->setSnippet(
 			$this->repo->byName('zeig.example'),
 			NginxSnippet::fromString("location = /health {\n    return 200 \"ok\";\n}\n", $this->layout->snippetScope($v))
@@ -1262,5 +1262,71 @@ final class VhostServiceTest extends TestCase
 
 		$this->expectException(\RuntimeException::class);
 		$this->service->extendCertificate($this->repo->byName('shop.um.example'));
+	}
+
+	/**
+	 * SECURITY_RISKS.md, „Schwache Parameter beim Passwort-Hash": Mehr Hash-Runden
+	 * wären hier falsch – nginx prüft Basic-Auth bei JEDER Anfrage neu. Die Oberfläche
+	 * erzeugt ohnehin 20 Zeichen Zufall; das CLI nimmt jetzt mindestens 12 Zeichen.
+	 */
+	public function testRefusesPasswordsShorterThanTwelveCharacters(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pw.example'), null);
+		try {
+			$this->service->addUser($v, Username::fromString('alice'), 'kurz12345');
+			self::fail('ein kurzes Passwort muss abgelehnt werden');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('12', $e->getMessage());
+		}
+		$this->service->addUser($v, Username::fromString('alice'), 'zwoelf-zeichen');
+		self::assertSame(['alice'], array_column($this->repo->users((int)$v->id), 'username'));
+	}
+
+	/**
+	 * SECURITY_RISKS.md, „Zeitfenster mit zu offenen Rechten auf der htpasswd-Datei":
+	 * Die Datei entsteht jetzt nie mit den Rechten der Prozessmaske. Auch mit einer
+	 * durchlässigen Maske darf sie nach dem Schreiben nur 0640 haben, und es bleibt
+	 * keine Zwischendatei liegen.
+	 */
+	public function testWritesTheHtpasswdFileWithoutAWindowOfLooseRights(): void
+	{
+		$previous = umask(0);
+		try {
+			$v = $this->service->createDomain(DomainName::fromString('pw.example'), null);
+			$this->service->addUser($v, Username::fromString('alice'), 'zwoelf-zeichen');
+		} finally {
+			umask($previous);
+		}
+		$file = $this->dir . '/auth/pw.example.htpasswd';
+		self::assertSame('0640', sprintf('%04o', (fileperms($file) ?: 0) & 07777));
+		self::assertSame([], glob($this->dir . '/auth/.*.tmp*') ?: [], 'keine Zwischendatei');
+		self::assertStringStartsWith('alice:$6$', (string)file_get_contents($file));
+	}
+
+	/**
+	 * SECURITY_RISKS.md, „certbot schreibt als root in .well-known": Bisher wurde nur
+	 * acme-challenge auf einen Symlink geprüft, nicht der Ordner darüber. War
+	 * .well-known selbst ein Symlink, legte root dort Ordner und Datei an – und certbot
+	 * schrieb seine Challenge danach ebenfalls dorthin.
+	 */
+	public function testRefusesAWellKnownDirectoryThatIsASymlink(): void
+	{
+		$this->service->setLetsEncryptEmail('admin@example.com');
+		$v = $this->service->createDomain(DomainName::fromString('link.example'), null);
+		mkdir($this->dir . '/anderswo');
+		// Beim Anlegen entsteht .well-known als echter Ordner; der Angreifer (www-data,
+		// darf in web/ schreiben) ersetzt ihn durch einen Symlink.
+		$wellKnown = $this->dir . '/www/link.example/web/.well-known';
+		exec('rm -rf ' . escapeshellarg($wellKnown));
+		symlink($this->dir . '/anderswo', $wellKnown);
+
+		try {
+			$this->service->enableSsl($this->repo->byName('link.example'));
+			self::fail('ein Symlink in .well-known muss abgelehnt werden');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('.well-known', $e->getMessage());
+		}
+		self::assertSame([], $this->certbot->calls, 'certbot darf nicht laufen');
+		self::assertSame(['.', '..'], scandir($this->dir . '/anderswo'), 'dort darf nichts entstehen');
 	}
 }

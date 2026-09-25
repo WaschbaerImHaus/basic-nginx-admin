@@ -32,6 +32,9 @@ use VhostAdmin\Value\Username;
 
 final class VhostService
 {
+	/** Mindestlänge für Passwörter, die über das CLI gesetzt werden. */
+	public const MIN_PASSWORD_LENGTH = 12;
+
 	private const SETTING_EMAIL = 'le_email';
 	private const SETTING_HSTS = 'hsts';
 
@@ -182,8 +185,12 @@ final class VhostService
 	 */
 	public function addUser(Vhost $vhost, Username $user, string $password): void
 	{
-		if ($password === '') {
-			throw new \RuntimeException('Leeres Passwort');
+		// Mindestlänge statt mehr Hash-Runden: nginx prüft Basic-Auth bei JEDER Anfrage
+		// neu, ohne Zwischenspeicher. 100 000 Runden kosteten je Anfrage spürbar
+		// Rechenzeit im Worker – und böten einen billigen Weg, die CPU auszulasten.
+		// Die Oberfläche erzeugt ohnehin 20 Zeichen Zufall (Value\Password).
+		if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
+			throw new \RuntimeException('Passwort zu kurz: mindestens ' . self::MIN_PASSWORD_LENGTH . ' Zeichen.');
 		}
 		$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password));
 		$this->render($vhost);
@@ -460,9 +467,7 @@ final class VhostService
 		$symlinkExistedBefore = is_link($enabled);
 		$enabledExistedBefore = $symlinkExistedBefore || file_exists($enabled);
 
-		file_put_contents($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
-		$this->group($htpasswd);
-		chmod($htpasswd, 0640);
+		$this->writeProtected($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
 
 		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
 
@@ -899,8 +904,17 @@ final class VhostService
 			$vhost = $this->repository->byId((int)$vhost->id);
 		}
 		$dir = $this->layout->acmeDir($vhost);
-		if (is_link($dir)) {
-			throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $dir");
+		// JEDEN Abschnitt unterhalb von web/ prüfen, nicht nur den letzten: web/ ist für
+		// www-data beschreibbar. War .well-known selbst ein Symlink, legte root dort
+		// Ordner und Datei an – und certbot schrieb seine Challenge danach ebenfalls
+		// dorthin (SECURITY_RISKS.md). enableSsl() und extendCertificate() laufen beide
+		// hier durch, bevor certbot startet.
+		$path = $this->layout->webDir($vhost);
+		foreach (explode('/', trim(substr($dir, strlen($path)), '/')) as $segment) {
+			$path .= '/' . $segment;
+			if (is_link($path)) {
+				throw new \RuntimeException("Symlink gehört hier nicht hin, wird nicht angefasst: $path");
+			}
 		}
 		if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
 			// Kein harter Fehler: ohne Marker fehlt nur die Anzeige, der vHost selbst
@@ -1254,6 +1268,36 @@ final class VhostService
 	/**
 	 * SHA-512-crypt-Hash, den nginx (libxcrypt) auswerten kann.
 	 */
+	/**
+	 * Schreibt eine Datei, die nur root und die Gruppe www-data lesen dürfen, ohne
+	 * Zeitfenster mit zu offenen Rechten.
+	 *
+	 * tempnam() legt die Zwischendatei mit 0600 an; Gruppe und Rechte werden gesetzt,
+	 * BEVOR sie per rename() an ihren Platz kommt. Vorher entstand die Datei mit den
+	 * Rechten der Prozessmaske und bekam 0640 erst danach (SECURITY_RISKS.md).
+	 */
+	private function writeProtected(string $path, string $content): void
+	{
+		$temp = tempnam(dirname($path), '.' . basename($path) . '.tmp');
+		if ($temp === false) {
+			throw new \RuntimeException("Kann Zwischendatei nicht anlegen neben: $path");
+		}
+		try {
+			if (file_put_contents($temp, $content) === false) {
+				throw new \RuntimeException("Kann nicht schreiben: $temp");
+			}
+			$this->group($temp);
+			chmod($temp, 0640);
+			if (!rename($temp, $path)) {
+				throw new \RuntimeException("Kann Datei nicht ersetzen: $path");
+			}
+		} finally {
+			if (is_file($temp)) {
+				@unlink($temp);
+			}
+		}
+	}
+
 	private function hashPassword(string $password): string
 	{
 		return crypt($password, '$6$' . substr(bin2hex(random_bytes(12)), 0, 16) . '$');

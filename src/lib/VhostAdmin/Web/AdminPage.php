@@ -158,31 +158,35 @@ final class AdminPage
 	{
 		$field = static fn(string $key): string => trim((string)($post[$key] ?? ''));
 		$name = $field('name');
+		// Jeder Formularwert steht hinter "--": Das CLI liest ihn dann nie als Option,
+		// auch wenn er mit "--" beginnt. Beabsichtigte Optionen stehen davor.
+		$line = static fn(string $command, array $values, array $options = []): array
+			=> array_merge([$command], $options, ['--'], $values);
 		return match ($action) {
 			'create' => [
-				'args' => array_merge(['add', $field('domain')], $field('subdir') !== '' ? ['--subdir', $field('subdir')] : []),
+				'args' => $line('add', [$field('domain')], $field('subdir') !== '' ? ['--subdir', $field('subdir')] : []),
 				'stdin' => null,
 			],
-			'protect' => ['args' => ['protect', $name, $field('state')], 'stdin' => null],
-			'user_add' => ['args' => ['user-add', $name, $field('username')], 'stdin' => (string)($post['password'] ?? '') . "\n"],
+			'protect' => ['args' => $line('protect', [$name, $field('state')]), 'stdin' => null],
+			'user_add' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],
 			// Passwort neu setzen: derselbe Befehl, das Passwort erzeugt handlePost().
-			'user_reset' => ['args' => ['user-add', $name, $field('username')], 'stdin' => (string)($post['password'] ?? '') . "\n"],
-			'user_del' => ['args' => ['user-del', $name, $field('username')], 'stdin' => null],
-			'ip_add' => ['args' => ['ip-add', $name, $field('cidr')], 'stdin' => null],
-			'ip_del' => ['args' => ['ip-del', $name, $field('cidr')], 'stdin' => null],
-			'ssl' => ['args' => ['ssl', $name, $field('state')], 'stdin' => null],
-			'cert_extend' => ['args' => ['cert-extend', $name], 'stdin' => null],
-			'php' => ['args' => ['php', $name, $field('state')], 'stdin' => null],
-			'www' => ['args' => ['www', $name, $field('mode')], 'stdin' => null],
+			'user_reset' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],
+			'user_del' => ['args' => $line('user-del', [$name, $field('username')]), 'stdin' => null],
+			'ip_add' => ['args' => $line('ip-add', [$name, $field('cidr')]), 'stdin' => null],
+			'ip_del' => ['args' => $line('ip-del', [$name, $field('cidr')]), 'stdin' => null],
+			'ssl' => ['args' => $line('ssl', [$name, $field('state')]), 'stdin' => null],
+			'cert_extend' => ['args' => $line('cert-extend', [$name]), 'stdin' => null],
+			'php' => ['args' => $line('php', [$name, $field('state')]), 'stdin' => null],
+			'www' => ['args' => $line('www', [$name, $field('mode')]), 'stdin' => null],
 			// Leeres Feld = Docroot ist web/ selbst; das CLI erwartet dann kein Argument.
 			'subdir' => [
-				'args' => array_merge(['subdir', $name], $field('subdir') !== '' ? [$field('subdir')] : []),
+				'args' => $line('subdir', array_merge([$name], $field('subdir') !== '' ? [$field('subdir')] : [])),
 				'stdin' => null,
 			],
-			'remove' => ['args' => ['remove', $name], 'stdin' => null],
-			'restore' => ['args' => ['restore', $name], 'stdin' => null],
-			'email' => ['args' => ['set', 'le_email', $field('le_email')], 'stdin' => null],
-			'conf' => ['args' => ['conf', $name], 'stdin' => (string)($post['snippet'] ?? '')],
+			'remove' => ['args' => $line('remove', [$name]), 'stdin' => null],
+			'restore' => ['args' => $line('restore', [$name]), 'stdin' => null],
+			'email' => ['args' => $line('set', ['le_email', $field('le_email')]), 'stdin' => null],
+			'conf' => ['args' => $line('conf', [$name]), 'stdin' => (string)($post['snippet'] ?? '')],
 			default => null,
 		};
 	}

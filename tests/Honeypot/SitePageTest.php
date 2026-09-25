@@ -86,4 +86,26 @@ final class SitePageTest extends TestCase
 			self::assertSame(substr_count($script, '('), substr_count($script, ')'), 'Klammerbilanz');
 		}
 	}
+
+	/**
+	 * WCAG 2.2.2 (Pausieren, Beenden, Ausblenden): Eine Bewegung, die von selbst
+	 * startet und länger als fünf Sekunden läuft, braucht einen Schalter zum Anhalten.
+	 * Umgekehrt startet er den Flug, wenn „Bewegung reduzieren" ihn angehalten hat –
+	 * sonst sieht die stehende Wiese aus wie ein Fehler (gemeldet am 2026-09-25).
+	 */
+	public function testOffersAButtonToPauseAndStartTheFlight(): void
+	{
+		self::assertMatchesRegularExpression('~<button[^>]+id="flight"[^>]*>~', $this->html);
+		self::assertMatchesRegularExpression('~<button[^>]+aria-pressed=~', $this->html, 'Schalterzustand für Screenreader');
+	}
+
+	/**
+	 * Die Biene steht nicht still auf dem Bildschirm, während nur die Welt unter ihr
+	 * durchzieht: Sie schwirrt umher. Geprüft wird, dass das Skript ihre Lage setzt.
+	 */
+	public function testTheBeeMovesAcrossTheScreen(): void
+	{
+		self::assertStringContainsString("'--bee-x'", $this->html);
+		self::assertStringContainsString("'--bee-y'", $this->html);
+	}
 }

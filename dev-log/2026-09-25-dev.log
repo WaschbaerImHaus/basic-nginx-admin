@@ -36,3 +36,21 @@ ganze Transformationsabbildung; performance.now() laeuft unter --virtual-time-bu
 virtuell; headless liefert ohne sichtbare Flaeche keine rAF-Bilder.
 Kurven: Zufall zog anfangs zweimal "geradeaus" (12 s ohne Kurve) - jetzt folgt auf
 eine Gerade immer eine Kurve. Kamera legt sich zu einem Drittel mit in die Kurve.
+
+2026-09-25 21:05 - Stehende Biene, Sicherheitsrunde, Scheduler
+Nutzer meldete: "noch bewegt sich die biene nicht ueber die wiese". Log: seine Aufrufe
+20:46-20:49 bekamen die alte Seite, ausgerollt war erst 20:53. Eigener Fehler in der
+Pruefung: Ich hatte nur den Vorlauf ?t= getestet, nie die echte Schleife - und eine
+Messung mit --timeout hielt ich fuer "echte Zeit", dabei bricht --timeout das Laden ab
+und schreibt das DOM sofort. Richtig: requestAnimationFrame durch setTimeout ersetzen
+und unter virtueller Zeit laufen lassen - dann Kamera -149 -> -449, Schleife in Ordnung.
+Trotzdem zwei echte Luecken behoben: Schalter "Bienenflug" (WCAG 2.2.2; bei
+"Bewegung reduzieren" sah die stehende Wiese wie ein Fehler aus) und sichtbares
+Schwirren der Biene (tanh-begrenzt auf den freien Raum links vom Text).
+
+Sicherheit (SECURITY_RISKS.md): .well-known-Symlink vor certbot, "--" vor jedem
+Formularwert, htpasswd ohne Rechte-Zeitfenster, Passwort-Mindestlaenge 12. Bewusst NICHT:
+mehr Hash-Runden (nginx prueft Basic-Auth je Anfrage - CPU-Last, und erzeugte
+Passwoerter haben ~123 Bit) und default_server 443 (wuerde IP-Scanner aus dem
+Honigtopf entfernen - Nutzerentscheidung).
+Scheduler: CronCreate alle 4 h (:17), sitzungsgebunden, laeuft nach 7 Tagen ab.

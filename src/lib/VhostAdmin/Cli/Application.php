@@ -103,6 +103,12 @@ TXT;
 		$count = count($argv);
 		for ($i = 0; $i < $count; $i++) {
 			$arg = $argv[$i];
+			// "--" beendet die Optionen: Alles danach ist Argument, auch wenn es mit
+			// "--" beginnt. Die Oberfläche setzt es vor jeden Formularwert.
+			if ($arg === '--') {
+				array_push($positional, ...array_slice($argv, $i + 1));
+				break;
+			}
 			if (!str_starts_with($arg, '--')) {
 				$positional[] = $arg;
 				continue;

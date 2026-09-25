@@ -51,6 +51,31 @@ Z=$(timeout 60 "$CHROME" --no-sandbox --force-prefers-reduced-motion --virtual-t
 	--dump-dom "http://127.0.0.1:$PORT/" 2>/dev/null | grep -oE -- '--cam-z: ?[-0-9.]+' | head -1)
 [ "$Z" = "--cam-z: 0.00" ] && echo "ok   Kamera steht ($Z)" || { echo "FEHLER: Kamera bewegt sich ($Z)" >&2; exit 1; }
 
+echo "== Fliegt sie von selbst?"
+# Der kopflose Chrome liefert ohne sichtbare Flaeche keine Animationsbilder. Eine Kopie
+# ersetzt requestAnimationFrame deshalb durch einen 16-ms-Takt; unter virtueller Zeit
+# laufen die Timer dann deterministisch. So wird die echte Schleife geprueft, nicht der
+# Vorlauf ?t= (gemeldet am 2026-09-25: "die Biene bewegt sich nicht").
+LIVE="$(mktemp -d)"
+python3 - "$SITE/index.html" "$LIVE/index.html" <<'PY2'
+import sys
+s = open(sys.argv[1], encoding='utf-8').read()
+shim = ("<script>window.requestAnimationFrame = function (cb) {"
+        " return setTimeout(function () { cb(performance.now()); }, 16); };</script>\n")
+open(sys.argv[2], 'w', encoding='utf-8').write(s.replace('<script>', shim + '<script>', 1))
+PY2
+python3 -m http.server $((PORT + 1)) --bind 127.0.0.1 --directory "$LIVE" >/dev/null 2>&1 &
+LIVESERVER=$!
+trap 'kill $SERVER $LIVESERVER 2>/dev/null; rm -rf "$LIVE"' EXIT
+sleep 1
+flight() { timeout 90 "$CHROME" --no-sandbox --window-size=1280,800 --virtual-time-budget="$1" --dump-dom \
+	"http://127.0.0.1:$((PORT + 1))/" 2>/dev/null | grep -oE -- "--$2: ?[-0-9.]+" | head -1 | grep -oE -- '-?[0-9.]+$'; }
+Z1=$(flight 1000 cam-z); Z3=$(flight 3000 cam-z)
+X1=$(flight 1000 bee-x); X3=$(flight 3000 bee-x)
+python3 -c "import sys; z1,z3=float('$Z1'),float('$Z3'); sys.exit(0 if z3 < z1 - 200 else 1)" \
+	&& echo "ok   die Wiese zieht vorbei (z: $Z1 -> $Z3)" || { echo "FEHLER: Kamera steht (z: $Z1 -> $Z3)" >&2; exit 1; }
+[ "$X1" != "$X3" ] && echo "ok   die Biene schwirrt (x: $X1 -> $X3)" || { echo "FEHLER: Biene steht (x: $X1)" >&2; exit 1; }
+
 echo "== Bildschirmfotos"
 shot geradeaus 1280x800 2
 shot linkskurve 1280x800 7
