@@ -30,10 +30,16 @@ require is_file($bootstrap) ? $bootstrap : dirname(__DIR__) . '/bootstrap.php';
 use Honeypot\DayReport;
 use Honeypot\LoginAttempts;
 use Honeypot\LogParser;
+use Honeypot\NetworkRegistry;
+use Honeypot\PeerFinder;
+use Honeypot\PeerResolver;
 use Honeypot\ReportStore;
 use Honeypot\Suggestions;
+use Honeypot\SystemDns;
 
 const WWW_ROOT = '/var/www';
+/** Netz- und Ländertabelle; gebaut von honeypot/update-networks.php. */
+const NETWORK_TABLE = '/var/lib/vhost-admin/networks.txt';
 const REPORT_DIR = __DIR__ . '/../research/honeypot';
 
 /** Balken für die Stundenverteilung im Markdown-Bericht. */
@@ -145,6 +151,14 @@ if ($dashboard !== null) {
 }
 
 $parser = new LogParser();
+$dns = new SystemDns();
+$networks = new NetworkRegistry(NETWORK_TABLE);
+// Ein Resolver für den ganzen Lauf: Er merkt sich Antworten über alle Tage und Hosts.
+$resolver = new PeerResolver($dns, $networks);
+if (!$networks->isAvailable()) {
+	fwrite(STDERR, 'Hinweis: keine Netztabelle unter ' . NETWORK_TABLE
+		. " - Gegenstellen erscheinen ohne Netz und Land (sudo php honeypot/update-networks.php).\n");
+}
 $attempts = new LoginAttempts();
 $suggester = new Suggestions();
 $today = date('Y-m-d');
@@ -159,16 +173,30 @@ foreach ($names as $name) {
 		$markdown .= "\n## $name\n\nKein Logverzeichnis: `$logs`\n";
 		continue;
 	}
-	$lines = array_merge(
-		$parser->readFile($logs . '/access.log'),
-		$parser->readFile($logs . '/access.log.1'),
-		$parser->readFile($logs . '/access.log.2')
-	);
+	// Alle noch vorhandenen Fassungen lesen, nicht nur die letzten zwei: Gruppiert wird
+	// ohnehin nach dem Datum in der Zeile, und ältere Tage bekommen so bei jedem Lauf
+	// ihren vollständigen Bericht (readFile() nimmt auch die .gz-Fassung).
+	$lines = $parser->readFile($logs . '/access.log');
+	for ($generation = 1; $generation <= 14; $generation++) {
+		$lines = array_merge($lines, $parser->readFile($logs . '/access.log.' . $generation));
+	}
 	$parsed = $parser->parse($lines);
-	$logins = $attempts->byDate(array_merge(
-		$parser->readFile($logs . '/error.log'),
-		$parser->readFile($logs . '/error.log.1')
-	));
+	$errorLines = $parser->readFile($logs . '/error.log');
+	for ($generation = 1; $generation <= 14; $generation++) {
+		$errorLines = array_merge($errorLines, $parser->readFile($logs . '/error.log.' . $generation));
+	}
+	$logins = $attempts->byDate($errorLines);
+
+	// Eigene Namen und Adressen sind keine Gegenstelle. Der Portscanner MGLNDD etwa
+	// schreibt die Adresse des ZIELS in seine Anfrage – das wären wir selbst.
+	$ownNames = [$name, 'www.' . $name];
+	foreach ([$name, 'www.' . $name] as $ownName) {
+		$ownAddress = $dns->addressFor($ownName);
+		if ($ownAddress !== null) {
+			$ownNames[] = $ownAddress;
+		}
+	}
+	$finder = new PeerFinder($ownNames);
 
 	$markdown .= "\n## $name\n";
 	if ($parsed->days === []) {
@@ -187,7 +215,7 @@ foreach ($names as $name) {
 			$date === $today ? $parsed->unreadable : 0,
 			$logins[$date] ?? [],
 			$date !== $today
-		);
+		)->withPeers($resolver->resolve($finder->find($parsed->days[$date])));
 		$store?->save($name, $report);
 		if (in_array($date, array_slice($dates, 0, 2), true)) {
 			$markdown .= section($report, $suggester->forReport($report));

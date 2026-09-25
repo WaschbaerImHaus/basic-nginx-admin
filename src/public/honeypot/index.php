@@ -13,12 +13,14 @@ declare(strict_types=1);
  * wird nach Verhalten – Werkzeug, gesuchte Pfade, Zeitmuster, Protokolltreue.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 18:10
+ * @version Letzte Änderung: 2026-09-25 12:30
  */
 
 require __DIR__ . '/bootstrap.php';
 
 use Honeypot\DayReport;
+use Honeypot\PathTrend;
+use Honeypot\Peer;
 use Honeypot\ReportStore;
 use Honeypot\Suggestions;
 
@@ -26,6 +28,30 @@ use Honeypot\Suggestions;
 function h(?string $value): string
 {
 	return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/**
+ * Deutscher Name eines Ländercodes. Nur die geläufigen; alles andere bleibt beim Code,
+ * der ist eindeutig. Eine vollständige Liste hiesse eine weitere Datei, die gepflegt
+ * werden will – oder eine Anfrage ins Netz, und die macht diese Seite nicht.
+ */
+function country_name(string $code): string
+{
+	static $names = [
+		'DE' => 'Deutschland', 'AT' => 'Österreich', 'CH' => 'Schweiz', 'NL' => 'Niederlande',
+		'FR' => 'Frankreich', 'GB' => 'Vereinigtes Königreich', 'IE' => 'Irland', 'BE' => 'Belgien',
+		'LU' => 'Luxemburg', 'PL' => 'Polen', 'CZ' => 'Tschechien', 'SE' => 'Schweden',
+		'FI' => 'Finnland', 'NO' => 'Norwegen', 'DK' => 'Dänemark', 'ES' => 'Spanien',
+		'PT' => 'Portugal', 'IT' => 'Italien', 'RO' => 'Rumänien', 'BG' => 'Bulgarien',
+		'UA' => 'Ukraine', 'RU' => 'Russland', 'TR' => 'Türkei', 'US' => 'USA', 'CA' => 'Kanada',
+		'BR' => 'Brasilien', 'MX' => 'Mexiko', 'AR' => 'Argentinien', 'CN' => 'China',
+		'HK' => 'Hongkong', 'TW' => 'Taiwan', 'JP' => 'Japan', 'KR' => 'Südkorea', 'IN' => 'Indien',
+		'SG' => 'Singapur', 'VN' => 'Vietnam', 'ID' => 'Indonesien', 'TH' => 'Thailand',
+		'AU' => 'Australien', 'NZ' => 'Neuseeland', 'ZA' => 'Südafrika', 'IR' => 'Iran',
+		'IL' => 'Israel', 'AE' => 'Vereinigte Arabische Emirate', 'SC' => 'Seychellen',
+		'PA' => 'Panama', 'BZ' => 'Belize', 'EU' => 'Europa (ohne Land)', 'AP' => 'Asien/Pazifik (ohne Land)',
+	];
+	return $names[strtoupper($code)] ?? strtoupper($code);
 }
 
 /** Ein Parameter aus der Adresszeile, als Zeichenkette. */
@@ -87,13 +113,29 @@ if ($report !== null) {
 	$earlier = is_int($index) ? ($days[$index + 1] ?? null) : null;
 	$previous = $earlier !== null ? $store->load($host, $earlier) : null;
 }
+// Verlauf für den Pfadvergleich: der gewählte Tag und bis zu 14 Tage davor. Nicht
+// „die letzten 14 Tage" schlechthin – wer einen älteren Tag aufruft, will wissen, was
+// DAMALS neu war.
+$trend = null;
+if ($report !== null) {
+	$history = [$report];
+	foreach (array_slice($days, (int)array_search($day, $days, true) + 1, 14) as $earlierDay) {
+		$loaded = $store->load($host, $earlierDay);
+		if ($loaded !== null) {
+			$history[] = $loaded;
+		}
+	}
+	$trend = new PathTrend($history);
+}
 $view = param('ansicht');
-$views = ['pfade', 'kennungen', 'dienste', 'anmeldungen', 'ereignisse'];
+$views = ['pfade', 'verlauf', 'kennungen', 'dienste', 'anmeldungen', 'herkunft', 'ereignisse'];
 if (!in_array($view, $views, true)) {
 	$view = '';
 }
 $titles = [
 	'pfade' => 'Gesuchte Pfade',
+	'verlauf' => 'Pfade über Tage',
+	'herkunft' => 'Herkunft',
 	'kennungen' => 'Kennungen',
 	'dienste' => 'Kein Webzugriff',
 	'anmeldungen' => 'Anmeldeversuche',
@@ -198,6 +240,25 @@ $title = $view === '' ? 'Honigtopf' : $titles[$view];
 		</div>
 
 		<div class="tile">
+			<h2>Neu gesucht <a href="<?= h(link_to(['ansicht' => 'verlauf'])) ?>">Verlauf &rarr;</a></h2>
+			<?php if ($trend === null || !$trend->hasHistory()): ?>
+				<p class="empty">Noch kein Vortag zum Vergleichen.</p>
+			<?php else: $fresh = $trend->newToday(); ?>
+				<div class="figures">
+					<div class="figure">
+						<div class="value <?= $fresh === [] ? '' : 'bad' ?>"><?= count($fresh) ?></div>
+						<div class="label">Pfade, die in <?= count($trend->dates()) - 1 ?> Vortagen niemand suchte</div>
+					</div>
+				</div>
+				<?php if ($fresh !== []): ?>
+					<?= bars(array_slice($fresh, 0, 6, true), (int)max($fresh), 'bad', true) ?>
+				<?php endif ?>
+			<?php endif ?>
+			<p class="hint">Die nützlichste Frühwarnung dieser Seite: Ein Pfad, der plötzlich auftaucht, ist
+				meist eine frisch bekannt gewordene Lücke, die gerade reihum ausprobiert wird.</p>
+		</div>
+
+		<div class="tile">
 			<h2>Wonach gesucht wird <a href="<?= h(link_to(['ansicht' => 'pfade'])) ?>">alle Pfade &rarr;</a></h2>
 			<?php $loot = array_filter($report->loot); arsort($loot); ?>
 			<?= bars($loot, (int)(max($loot ?: [0]) ?: 1), 'bad') ?>
@@ -208,6 +269,17 @@ $title = $view === '' ? 'Honigtopf' : $titles[$view];
 			<h2>Womit <a href="<?= h(link_to(['ansicht' => 'kennungen'])) ?>">alle Kennungen &rarr;</a></h2>
 			<?php $classes = array_filter($report->agentClasses()); ?>
 			<?= bars($classes, (int)(max($classes ?: [0]) ?: 1), 'warn') ?>
+			<?php if ($report->rotating !== []): ?>
+				<table class="compact">
+					<?php foreach ($report->rotating as $count => $list): ?>
+						<tr>
+							<td class="num"><?= count($list) ?>&times;</td>
+							<td>Kennungen mit je genau <strong><?= (int)$count ?></strong> Anfragen –
+								<span class="mono"><?= h(substr((string)$list[0], 0, 48)) ?>…</span></td>
+						</tr>
+					<?php endforeach ?>
+				</table>
+			<?php endif ?>
 			<p class="hint">„Tarnt sich“ sind Kennungen, die <em>genau gleich oft</em> vorkamen – ein Werkzeug,
 				das durchwechselt. Das erkennt auch die, die auf keiner Bot-Liste stehen.</p>
 		</div>
@@ -230,6 +302,13 @@ $title = $view === '' ? 'Honigtopf' : $titles[$view];
 		<div class="tile">
 			<h2>Kein Webzugriff <a href="<?= h(link_to(['ansicht' => 'dienste'])) ?>">Rohdaten &rarr;</a></h2>
 			<?= bars($report->probeKinds, (int)(max($report->probeKinds ?: [0]) ?: 1), 'warn') ?>
+			<?php if ($report->probes !== []): ?>
+				<table class="compact">
+					<?php foreach (array_slice($report->probes, 0, 4, true) as $raw => $count): ?>
+						<tr><td class="num"><?= (int)$count ?></td><td class="mono"><?= h(substr((string)$raw, 0, 56)) ?></td></tr>
+					<?php endforeach ?>
+				</table>
+			<?php endif ?>
 			<p class="hint">Gesucht wurde nicht nach Webinhalten, sondern nach Diensten: SSH auf Port 443,
 				ein offener Proxy, ein Binärprotokoll. Bei gewöhnlichen Auswertungen fällt das hinten runter.</p>
 		</div>
@@ -240,6 +319,39 @@ $title = $view === '' ? 'Honigtopf' : $titles[$view];
 			<?= bars($logins, (int)(max($report->logins ?: [0]) ?: 1), 'bad', true) ?>
 			<p class="hint">Die Namen sind aufschlussreicher als ihre Zahl: <span class="mono">admin</span> und
 				<span class="mono">root</span> sind geraten, der Domainname ist gezielt.</p>
+		</div>
+
+		<div class="tile">
+			<h2>Woher <a href="<?= h(link_to(['ansicht' => 'herkunft'])) ?>">alle Gegenstellen &rarr;</a></h2>
+			<?php
+				$countries = $report->countries();
+				$networks = $report->networks();
+				$connected = count(array_filter($report->peers, static fn(Peer $p): bool => $p->kind === Peer::CONNECTION));
+			?>
+			<?php if ($report->peers === []): ?>
+				<p class="empty">An diesem Tag hat sich keine Gegenstelle zu erkennen gegeben.</p>
+			<?php else: ?>
+				<?php $named = []; foreach ($countries as $code => $count) { $named[country_name((string)$code) . ' (' . $code . ')'] = $count; } ?>
+				<?= bars(array_slice($named, 0, 6, true), (int)(max($countries ?: [0]) ?: 1)) ?>
+				<?php if ($networks !== []): ?>
+					<p class="hint" style="margin-top:.5rem">Netze:
+						<?php foreach (array_slice($networks, 0, 5, true) as $net => $count): ?>
+							<span class="mono"><?= h((string)$net) ?></span> <span class="tag"><?= (int)$count ?></span>
+						<?php endforeach ?>
+					</p>
+				<?php endif ?>
+			<?php endif ?>
+			<p class="hint">
+				<?php if ($connected > 0): ?>
+					Aus der tatsächlichen Verbindungsadresse.
+				<?php else: ?>
+					Aus <strong>Selbstauskünften</strong>: der URL, mit der ein Scanner sich ausweist, dem Ziel eines
+					Proxy-Versuchs, dem Ablageserver eines Exploits. Die Verbindungsadresse selbst geht im Tunnel
+					verloren. Vorsicht beim Lesen: Liegt die Webseite eines Betreibers hinter einem CDN (Cloudflare,
+					Akamai, GitHub), steht hier das Land des CDN – nicht das des Scanners. Land und Netz nach Zuteilung
+					der Registry, nicht nach Standort.
+				<?php endif ?>
+			</p>
 		</div>
 
 		<div class="tile">
@@ -262,11 +374,11 @@ $title = $view === '' ? 'Honigtopf' : $titles[$view];
 
 		<div class="tile wide">
 			<h2>Was diese Ansicht nicht zeigt</h2>
-			<p class="note">Es gibt <strong>keine Client-Adresse</strong>. Vor diesem Rechner sitzt eine
-				Adressumsetzung; jede Anfrage von aussen erscheint im Log als
-				<span class="mono">10.200.0.1</span>, und es liegt kein
-				<span class="mono">X-Forwarded-For</span> an. Jede Kennzahl über „eindeutige Besucher“,
-				Herkunftsländer oder Top-Angreifer wäre deshalb erfunden. Unterschieden wird nach Verhalten.
+			<p class="note">Solange der Verkehr durch den WireGuard-Tunnel mit Adressumsetzung kommt, gibt es
+				<strong>keine Verbindungsadresse</strong>: Jede Anfrage erscheint im Log als
+				<span class="mono">10.200.0.1</span>. „Eindeutige Besucher“ oder Top-Angreifer nach Adresse wären
+				deshalb erfunden. Die Kachel „Woher“ stützt sich auf das, was Anfragen selbst nennen; sobald die
+				echte Adresse ankommt, nimmt sie die, ohne dass hier etwas umgestellt werden muss.
 				<?php if ($report->unreadable > 0): ?>
 					<br><?= $report->unreadable ?> Logzeilen liessen sich nicht lesen.
 				<?php endif ?>

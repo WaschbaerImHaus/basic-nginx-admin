@@ -12,6 +12,8 @@ namespace Tests\Honeypot;
 
 use Honeypot\DayReport;
 use Honeypot\LogEntry;
+use Honeypot\NetworkInfo;
+use Honeypot\Peer;
 use PHPUnit\Framework\TestCase;
 
 final class DayReportTest extends TestCase
@@ -177,5 +179,57 @@ final class DayReportTest extends TestCase
 		self::assertSame('tarnt sich', $report->agentClass('Firefox/4.0'));
 		self::assertSame('nennt nichts', $report->agentClass('-'));
 		self::assertSame('nennt sich', $report->agentClass('libredtail-http'));
+	}
+
+	/**
+	 * Herkunft entsteht in einem eigenen Schritt (sie braucht Namensauflösung) und muss
+	 * die Ablage überleben – die Ansicht liest ausschliesslich die gespeicherte Fassung.
+	 */
+	public function testCarriesPeersThroughJsonIncludingNetworkAndCountry(): void
+	{
+		$peer = new Peer(
+			'about.censys.io', Peer::SELF_DECLARED, 5, '192.0.2.10',
+			new NetworkInfo('192.0.2.10', '192.0.2.0/24', 'US', 'arin'), 'scanner.censys.io'
+		);
+		$report = DayReport::fromEntries('2026-09-21', [], 0, [], true)->withPeers([$peer]);
+
+		$copy = DayReport::fromArray(json_decode(
+			(string)json_encode($report, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR
+		));
+
+		self::assertEquals($report, $copy);
+		self::assertSame('US', $copy->peers[0]->network?->country);
+		self::assertSame('192.0.2.0/24', $copy->peers[0]->network?->network);
+		self::assertSame('scanner.censys.io', $copy->peers[0]->reverse);
+	}
+
+	/**
+	 * Gezählt werden Anfragen, nicht Gegenstellen: Zwei Scanner aus demselben Land mit
+	 * sehr verschiedener Betriebsamkeit sind nicht dasselbe wie zwei gleich laute.
+	 */
+	public function testGroupsPeersByCountryAndNetworkWeightedByRequests(): void
+	{
+		$report = DayReport::fromEntries('2026-09-21', [], 0, [], true)->withPeers([
+			new Peer('a.example', Peer::SELF_DECLARED, 10, '192.0.2.1', new NetworkInfo('192.0.2.1', '192.0.2.0/24', 'US', 'arin'), null),
+			new Peer('b.example', Peer::SELF_DECLARED, 4, '192.0.2.2', new NetworkInfo('192.0.2.2', '192.0.2.0/24', 'US', 'arin'), null),
+			new Peer('c.example', Peer::SELF_DECLARED, 7, '198.51.100.1', new NetworkInfo('198.51.100.1', '198.51.100.0/24', 'DE', 'ripencc'), null),
+		]);
+
+		self::assertSame(['US' => 14, 'DE' => 7], $report->countries());
+		self::assertSame(['192.0.2.0/24' => 14, '198.51.100.0/24' => 7], $report->networks());
+	}
+
+	/**
+	 * Ohne aufgelöste Herkunft bleiben die Listen leer, statt eine Zeile „unbekannt"
+	 * zu erfinden, die wie eine Aussage aussieht.
+	 */
+	public function testPeersWithoutResolutionDoNotAppearInCountriesOrNetworks(): void
+	{
+		$report = DayReport::fromEntries('2026-09-21', [], 0, [], true)
+			->withPeers([new Peer('gibtsnicht.example', Peer::SELF_DECLARED, 3)]);
+
+		self::assertSame([], $report->countries());
+		self::assertSame([], $report->networks());
+		self::assertCount(1, $report->peers, 'die Gegenstelle selbst bleibt sichtbar');
 	}
 }

@@ -233,6 +233,24 @@ grep -q '\.env' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 
+echo "== Logrotation"
+# Spielt nach, was logrotate nachts tut: Datei umbenennen, nginx neu oeffnen lassen.
+# Danach muss die NEUE Datei beschrieben werden. Scheitert das Neuoeffnen im Worker
+# (www-data kommt nicht in logs/), schreibt er in die alte weiter - und logrotate
+# loescht sie am Folgetag samt Inhalt (belegt am 2026-09-25).
+LOGS=/var/www/smoke-test.example/logs
+[ "$(stat -c '%a' "$LOGS")" = "751" ] || fail "logs/ hat $(stat -c '%a' "$LOGS") statt 751"
+mv "$LOGS/access.log" "$LOGS/access.log.rotiert"
+nginx -s reopen
+sleep 1
+curl -s -o /dev/null -H 'Host: smoke-test.example' http://127.0.0.1/public/ || true
+sleep 1
+[ -s "$LOGS/access.log" ] && echo "ok   nach der Rotation wird die neue Datei beschrieben" \
+	|| fail "nach nginx -s reopen schreibt nginx nicht in die neue access.log"
+grep -q 'nicht in logs/\|Permission denied' <(tail -n 20 /var/log/nginx/error.log 2>/dev/null | grep smoke-test) \
+	&& fail "nginx meldet Permission denied beim Neuoeffnen" || true
+rm -f "$LOGS/access.log.rotiert"
+
 echo "== Sicherheit, Cache, Komprimierung"
 printf 'body{color:red}/* Fuellung */\n%.0s' $(seq 60) > /var/www/smoke-test.example/web/public/t.css
 printf '<h1>x</h1>\n' > /var/www/smoke-test.example/web/public/t.html

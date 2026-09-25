@@ -88,7 +88,8 @@ final class VhostLayoutTest extends TestCase
 		$expect($byPath['/srv/www/example.com/conf'], 'root', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/cert'], 'root', 'max', 0750);
 		$expect($byPath['/srv/www/example.com/private'], 'max', 'max', 0750);
-		$expect($byPath['/srv/www/example.com/logs'], 'root', 'max', 0750);
+		// logs/: durchquerbar für alle (0751), siehe testLogsDirIsTraversableForTheNginxWorkers().
+		$expect($byPath['/srv/www/example.com/logs'], 'root', 'max', 0751);
 	}
 
 	/**
@@ -236,17 +237,23 @@ final class VhostLayoutTest extends TestCase
 		self::assertNull($this->layout->snippetScope($v)->phpSocket);
 	}
 	/**
-	 * logs/ gehört root (nginx schreibt dort als root). Mit PHP muss der eigene
-	 * Benutzer des Hosts trotzdem an seine php.log herankommen – dazu braucht er das
-	 * Durchgangsrecht auf dem Ordner. Lesen kann er die übrigen Logs damit nicht,
-	 * die stehen auf 0640 root:<owner>.
+	 * Belegt am 2026-09-25: Die Annahme „nginx schreibt dort als root" stimmt nur beim
+	 * Start. Nach der Rotation (nginx -s reopen) öffnen die WORKER die Logdateien selbst
+	 * neu – als www-data. Stand logs/ auf 0750 root:<besitzer>, scheiterte das mit
+	 * "Permission denied"; der Worker schrieb weiter in die umbenannte access.log.1, und
+	 * am Folgetag komprimierte logrotate diese Datei und löschte sie, während noch
+	 * hineingeschrieben wurde. Diese Zeilen waren verloren.
+	 *
+	 * Deshalb immer 0751, mit und ohne PHP: nur Durchgang, kein Auflisten. Lesen kann
+	 * damit niemand etwas, die Dateien selbst stehen auf 0640.
 	 */
-	public function testLogsDirIsTraversableForThePhpUser(): void
+	public function testLogsDirIsTraversableForTheNginxWorkers(): void
 	{
 		$withPhp = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, true);
 		$withoutPhp = new Vhost(7, 'example.com', VhostKind::Domain, null, null, true, false, false);
 		self::assertSame(0751, $this->modeOf($withPhp, '/srv/www/example.com/logs'));
-		self::assertSame(0750, $this->modeOf($withoutPhp, '/srv/www/example.com/logs'));
+		self::assertSame(0751, $this->modeOf($withoutPhp, '/srv/www/example.com/logs'), 'auch ohne PHP');
+		self::assertSame(0, $this->modeOf($withoutPhp, '/srv/www/example.com/logs') & 0004, 'Auflisten bleibt verboten');
 	}
 
 	private function modeOf(Vhost $vhost, string $path): int

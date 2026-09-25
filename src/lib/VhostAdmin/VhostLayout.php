@@ -231,11 +231,14 @@ final class VhostLayout
 				0750,
 				'nicht ausgelieferte Dateien (mit PHP für den Pool lesbar)'
 			),
-			// Mit PHP zusätzlich für andere durchquerbar (0751): PHP läuft als eigener
-			// Benutzer und schreibt selbst in logs/php.log – ohne Durchgangsrecht käme es
-			// nicht an die Datei. Lesen kann es die übrigen Logs dadurch nicht, die
-			// stehen auf 0640 root:<owner>.
-			new DirectorySpec($this->logsDir($vhost), 'root', $owner, $vhost->php ? 0751 : 0750, 'Logdateien dieses vHosts'),
+			// Für alle durchquerbar (0751), mit und ohne PHP. Nach der Rotation öffnen die
+			// nginx-WORKER die Logdateien selbst neu, als www-data – nicht der Master als
+			// root. Ohne Durchgangsrecht scheitert das, der Worker schreibt in die
+			// umbenannte Datei weiter, und logrotate löscht sie am Folgetag samt der
+			// neuen Zeilen (belegt am 2026-09-25). Mit PHP braucht zudem der Pool-Benutzer
+			// den Durchgang zu logs/php.log. Auflisten kann niemand, lesen auch nicht:
+			// Die Dateien stehen auf 0640.
+			new DirectorySpec($this->logsDir($vhost), 'root', $owner, 0751, 'Logdateien dieses vHosts'),
 		];
 		$path = $this->webDir($vhost);
 		foreach ($vhost->subdir !== null ? explode('/', $vhost->subdir) : [] as $segment) {

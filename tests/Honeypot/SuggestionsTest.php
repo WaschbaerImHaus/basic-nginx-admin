@@ -54,4 +54,27 @@ final class SuggestionsTest extends TestCase
 		));
 		self::assertStringContainsString('25', $out, 'die Zahl der Sondierungen gehört in den Vorschlag');
 	}
+
+	/**
+	 * Umgesetzt am 2026-09-25: eigene Kachel für Nicht-HTTP, Gruppierung nach gleicher
+	 * Häufigkeit, Vergleich der Pfade über Tage. Ein Vorschlag, der vorschlägt, was die
+	 * Seite schon zeigt, ist Rauschen – und lässt die echten Vorschläge untergehen.
+	 */
+	public function testDoesNotSuggestWhatTheViewAlreadyShows(): void
+	{
+		$entries = $this->probing(30, '/impressum');
+		foreach (['Firefox/4.0', 'Chrome/6.0'] as $agent) {
+			for ($i = 0; $i < 6; $i++) {
+				$entries[] = LogEntry::fromLine('10.200.0.1 - - [21/Sep/2026:08:0' . $i . ':00 +0200] "GET / HTTP/1.1" 404 5 "-" "' . $agent . '"');
+			}
+		}
+		for ($i = 0; $i < 4; $i++) {
+			$entries[] = LogEntry::fromLine('10.200.0.1 - - [21/Sep/2026:09:00:0' . $i . ' +0200] "SSH-2.0-Go" 400 150 "-" "-"');
+		}
+		$out = implode("\n", (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $entries, 0, [], true)));
+
+		self::assertStringNotContainsString('Eigene Kachel', $out);
+		self::assertStringNotContainsString('nach Häufigkeit gruppieren', $out);
+		self::assertStringNotContainsString('über Tage vergleichen', $out);
+	}
 }

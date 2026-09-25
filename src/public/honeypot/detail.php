@@ -8,13 +8,14 @@ declare(strict_types=1);
  * $view bereits geprüft. Eigene Datei, damit die Übersicht lesbar bleibt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 18:30
+ * @version Letzte Änderung: 2026-09-25 12:00
  */
 
 /** @var \Honeypot\DayReport $report */
 /** @var string $view */
 /** @var string $host */
 /** @var string $day */
+/** @var ?\Honeypot\PathTrend $trend */
 
 $classifier = new \Honeypot\LootClassifier();
 ?>
@@ -117,6 +118,68 @@ $classifier = new \Honeypot\LootClassifier();
 	<p class="hint">Aus dem <span class="mono">error.log</span>, solange der Host einen Verzeichnisschutz
 		trägt. Passwörter stehen dort nicht und werden hier auch nicht gesammelt – wer Zugangsdaten
 		einsammelt, betreibt keinen Honigtopf mehr.</p>
+
+<?php elseif ($view === 'verlauf'): ?>
+
+	<h2>Sondierungspfade über Tage</h2>
+	<?php if ($trend === null || !$trend->hasHistory()): ?>
+		<p class="empty">Noch kein Vortag zum Vergleichen – die Matrix entsteht ab dem zweiten Berichtstag.</p>
+	<?php else: $fresh = $trend->newToday(); $dates = $trend->dates(); ?>
+		<p class="hint" style="margin-top:0"><?= count($fresh) ?> Pfade wurden am <?= h($day) ?> zum ersten Mal
+			seit <?= count($dates) - 1 ?> Tagen gesucht – sie stehen rot. Leere Felder heissen: an dem Tag nicht gesucht.</p>
+		<div class="scroll">
+		<table class="matrix">
+			<tr>
+				<th>Pfad</th>
+				<?php foreach ($dates as $date): ?>
+					<th class="num"><?= h(substr($date, 8, 2) . '.' . substr($date, 5, 2) . '.') ?></th>
+				<?php endforeach ?>
+				<th>zuerst</th>
+			</tr>
+			<?php foreach ($trend->matrix() as $path => $row): $isNew = isset($fresh[$path]); ?>
+				<tr class="<?= $isNew ? 'violation' : '' ?>">
+					<td class="mono"><?= h((string)$path) ?></td>
+					<?php foreach ($row as $count): ?>
+						<td class="num cell<?= $count > 0 ? ' hit' : '' ?>"><?= $count > 0 ? (int)$count : '' ?></td>
+					<?php endforeach ?>
+					<td class="mono"><?= h((string)$trend->firstSeen((string)$path)) ?></td>
+				</tr>
+			<?php endforeach ?>
+		</table>
+		</div>
+		<p class="hint">Häufigste Pfade über den ganzen Zeitraum oben. Ein roter Pfad mit Treffern nur ganz links
+			ist frisch; einer, der jeden Tag gleichmässig kommt, gehört zum Grundrauschen der Scanner.</p>
+	<?php endif ?>
+
+<?php elseif ($view === 'herkunft'): ?>
+
+	<h2>Gegenstellen</h2>
+	<?php if ($report->peers === []): ?>
+		<p class="empty">An diesem Tag hat sich keine Gegenstelle zu erkennen gegeben.</p>
+	<?php else: ?>
+	<table>
+		<tr><th class="num">Anfragen</th><th>Quelle</th><th>Name</th><th>Adresse</th><th>Netz</th><th>Land</th><th>Rückwärtsname</th></tr>
+		<?php foreach ($report->peers as $peer): ?>
+			<tr>
+				<td class="num"><?= (int)$peer->requests ?></td>
+				<td><span class="tag <?= $peer->kind === \Honeypot\Peer::PAYLOAD ? 'bad' : ($peer->kind === \Honeypot\Peer::CONNECTION ? 'ok' : '') ?>"><?= h($peer->kind) ?></span></td>
+				<td class="mono"><?= h($peer->host) ?></td>
+				<td class="mono"><?= h($peer->address ?? '–') ?></td>
+				<td class="mono"><?= h($peer->network?->network ?? '–') ?></td>
+				<td><?= $peer->network !== null ? h(country_name($peer->network->country)) . ' <span class="tag">' . h($peer->network->country) . '</span>' : '–' ?></td>
+				<td class="mono"><?= h($peer->reverse ?? '–') ?></td>
+			</tr>
+		<?php endforeach ?>
+	</table>
+	<?php endif ?>
+	<p class="hint"><strong>Was die Quellen bedeuten.</strong>
+		<em>Selbstauskunft</em>: die URL, mit der ein Werkzeug sich in seiner Kennung ausweist – nachprüfbar, aber
+		frei behauptet. <em>Proxy-Ziel</em>: wohin jemand über diesen Rechner weiter wollte.
+		<em>Nachgeladen</em>: die Stelle, von der ein Exploit-Versuch etwas holen wollte – meist die Ablage
+		des Angreifers und der härteste Fund hier. <em>Verbindung</em>: die tatsächliche Gegenstelle; erscheint
+		erst, wenn der Tunnel die echte Adresse durchreicht.</p>
+	<p class="hint">Netz und Land stammen aus den Statistikdateien der fünf Registries (RIPE, ARIN, APNIC,
+		LACNIC, AFRINIC) und sagen, <em>an wen</em> ein Block vergeben ist – nicht, wo das Gerät steht.</p>
 
 <?php else: /* ereignisse */
 	$what = param('was');

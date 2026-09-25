@@ -41,6 +41,7 @@ final class DayReport implements \JsonSerializable
 	 * @param list<int>              $gaps      Sekunden zwischen robots.txt und /admin
 	 * @param array<string, int>     $logins    Benutzername => Fehlversuche
 	 * @param list<array<string, string>> $events auffällige Anfragen für die Detailansicht
+	 * @param list<Peer>             $peers     Gegenstellen, die in den Daten sichtbar wurden
 	 */
 	public function __construct(
 		public readonly string $date,
@@ -63,6 +64,7 @@ final class DayReport implements \JsonSerializable
 		public readonly array $logins,
 		public readonly int $unreadable,
 		public readonly array $events,
+		public readonly array $peers = [],
 	) {
 	}
 
@@ -187,6 +189,61 @@ final class DayReport implements \JsonSerializable
 	}
 
 	/**
+	 * Derselbe Bericht mit nachgetragenen Gegenstellen.
+	 *
+	 * Eigener Schritt, weil das Auflösen von Namen und Netzen ins Netz greift –
+	 * die Kennzahlen selbst entstehen ohne jede Fremdauskunft.
+	 *
+	 * @param list<Peer> $peers
+	 */
+	public function withPeers(array $peers): self
+	{
+		return new self(
+			$this->date, $this->complete, $this->requests, $this->status, $this->hours,
+			$this->agents, $this->rotating, $this->notFound, $this->loot, $this->methods,
+			$this->probeCount, $this->probeKinds, $this->probes, $this->robots, $this->admin,
+			$this->robotsThenAdmin, $this->gaps, $this->logins, $this->unreadable,
+			$this->events, $peers
+		);
+	}
+
+	/**
+	 * Gegenstellen je Land, häufigste zuerst. Leer, solange keine Herkunft bekannt ist.
+	 *
+	 * @return array<string, int>
+	 */
+	public function countries(): array
+	{
+		$out = [];
+		foreach ($this->peers as $peer) {
+			if ($peer->network === null || $peer->network->country === '') {
+				continue;
+			}
+			$out[$peer->network->country] = ($out[$peer->network->country] ?? 0) + $peer->requests;
+		}
+		arsort($out);
+		return $out;
+	}
+
+	/**
+	 * Gegenstellen je Netzblock, häufigste zuerst.
+	 *
+	 * @return array<string, int>
+	 */
+	public function networks(): array
+	{
+		$out = [];
+		foreach ($this->peers as $peer) {
+			if ($peer->network === null || $peer->network->network === '') {
+				continue;
+			}
+			$out[$peer->network->network] = ($out[$peer->network->network] ?? 0) + $peer->requests;
+		}
+		arsort($out);
+		return $out;
+	}
+
+	/**
 	 * Kennungen in drei Klassen, nach Verhalten statt nach einer Liste bekannter Bots.
 	 *
 	 * „tarnt sich" sind die Kennungen, die in einer Gruppe gleicher Häufigkeit stehen –
@@ -263,6 +320,7 @@ final class DayReport implements \JsonSerializable
 			'logins' => $this->logins,
 			'unreadable' => $this->unreadable,
 			'events' => $this->events,
+			'peers' => $this->peers,
 		];
 	}
 
@@ -300,6 +358,10 @@ final class DayReport implements \JsonSerializable
 			(array)($data['logins'] ?? []),
 			(int)($data['unreadable'] ?? 0),
 			array_values((array)($data['events'] ?? [])),
+			array_values(array_map(
+				static fn(mixed $peer): Peer => Peer::fromArray(is_array($peer) ? $peer : []),
+				(array)($data['peers'] ?? [])
+			)),
 		);
 	}
 }

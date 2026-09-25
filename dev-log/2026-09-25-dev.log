@@ -1,0 +1,23 @@
+2026-09-25 20:40 - Honigtopf: Herkunft, Frühwarnung, Logrotation
+
+Netze und Laender: Die Verbindungsadresse fehlt (WireGuard-Tunnel mit Adressumsetzung,
+am 2026-09-23 per Testlog belegt: ein selbst gesetzter X-Forwarded-For kommt durch,
+echte Anfragen haben keinen). Herkunft deshalb aus dem, was Anfragen selbst nennen:
+Scanner-URL in der Kennung, CONNECT-Ziel, Exploit-Ablage im Pfad. Netz und Land aus
+den RIR-Statistikdateien (332144 Bloecke, 29 MB, lokal, 0,4 s je Lauf). Geprueft gegen
+bekannte Adressen (8.8.8.8 US/arin, 1.1.1.1 AU/apnic, 87.106.116.167 DE/ripencc,
+TEST-NET-3 nicht gefunden). Ehrliche Schwaeche: Die meisten Betreiber-Webseiten liegen
+hinter CDNs - "US" heisst dann Cloudflare. Steht so in der Kachel.
+Stolperstellen: Chrome/108.0.0.0 ist syntaktisch eine IP (nur URLs werden gelesen);
+"wget%20http://" hat keine Wortgrenze vor dem h; der LXC hat DNS64 (64:ff9b::/96).
+Mein eigener Test zu /35 hatte die falsche Erwartung - der Code rechnete richtig.
+
+Logrotation: access.log war leer, nginx schrieb weiter in access.log.1. Ursache:
+logs/ stand ohne PHP auf 0750, und nach "nginx -s reopen" oeffnen die WORKER
+(www-data) die Dateien neu, nicht der Master. Folge: logrotate komprimierte und
+loeschte die weiter beschriebene Datei - Zeilen verloren. logs/ jetzt immer 0751.
+Mit Wegwerf-Host reproduziert (0750: neue Datei 0 Bytes; 0751: beschrieben).
+
+Vorschlaege umgesetzt: Kachel "Neu gesucht" + Matrix Pfad x Tag; Gruppen gleicher
+Haeufigkeit und Rohdaten der Nicht-HTTP-Anfragen direkt in den Kacheln. Die drei
+Regeln sind aus Suggestions entfernt. 531 Tests gruen.

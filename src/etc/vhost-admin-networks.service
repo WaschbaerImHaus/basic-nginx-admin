@@ -1,0 +1,13 @@
+[Unit]
+Description=vhost-admin: Netz- und Laendertabelle der Registries auffrischen
+Documentation=file:///opt/vhost-admin/docs/specs/2026-09-22-honeypot-dashboard.md
+
+[Service]
+Type=oneshot
+# Der einzige Teil des Honigtopfs, der Dateien aus dem Netz holt. Absichtlich ein
+# eigener Dienst: Wer das nicht will, schaltet diesen Timer ab - die Auswertung laeuft
+# weiter, nur ohne Netz- und Laenderangaben.
+ExecStart=/usr/bin/php /opt/vhost-admin/honeypot/update-networks.php
+ProtectSystem=full
+PrivateTmp=true
+ReadWritePaths=/var/lib/vhost-admin

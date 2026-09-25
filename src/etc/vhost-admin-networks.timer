@@ -1,0 +1,12 @@
+[Unit]
+Description=vhost-admin: Netztabelle woechentlich auffrischen
+
+[Timer]
+# Adressvergaben aendern sich in Wochen, nicht in Stunden. Persistent=true holt einen
+# verpassten Lauf nach - auch den ersten nach der Installation.
+OnCalendar=Sun 04:40
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

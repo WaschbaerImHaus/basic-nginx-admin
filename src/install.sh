@@ -56,7 +56,11 @@ echo "== Oberfläche nach /var/www/localhost-8080/web"
 install -d -m 755 -o "$OWNER" -g "$OWNER" /var/www/localhost-8080
 install -d -m 2775 -o "$OWNER" -g www-data /var/www/localhost-8080/web
 install -d -m 750 -o root -g www-data /var/www/localhost-8080/conf
-install -d -m 750 -o root -g "$OWNER" /var/www/localhost-8080/cert /var/www/localhost-8080/logs
+install -d -m 750 -o root -g "$OWNER" /var/www/localhost-8080/cert
+# logs/ durchquerbar (0751): Nach der Rotation oeffnen die nginx-Worker (www-data) die
+# Dateien selbst neu. Ohne Durchgang schreiben sie in die umbenannte Datei weiter, die
+# logrotate am Folgetag loescht (siehe BUGS.md, 2026-09-25).
+install -d -m 751 -o root -g "$OWNER" /var/www/localhost-8080/logs
 install -d -m 750 -o "$OWNER" -g "$OWNER" /var/www/localhost-8080/private
 # Aus einer früheren Fassung liegt index.php eventuell noch flach im Basisordner.
 if [ -f /var/www/localhost-8080/index.php ]; then
@@ -109,6 +113,7 @@ install -m 644 "$SRC/etc/vhost-admin-honeypot.timer" /etc/systemd/system/vhost-a
 if [ -f "$SRC/../honeypot/analyse.php" ]; then
 	install -d -m 755 "$APP/honeypot" "$APP/research/honeypot"
 	install -m 755 "$SRC/../honeypot/analyse.php" "$APP/honeypot/analyse.php"
+	install -m 755 "$SRC/../honeypot/update-networks.php" "$APP/honeypot/update-networks.php"
 	for script in install-site.sh install-dashboard.sh; do
 		[ -f "$SRC/../honeypot/$script" ] && install -m 755 "$SRC/../honeypot/$script" "$APP/honeypot/$script"
 	done
@@ -121,9 +126,14 @@ fi
 # ein entfernter vHost unbegrenzt gesperrt liegen, statt nach der Frist zu verschwinden.
 install -m 644 "$SRC/etc/vhost-admin-purge.service" /etc/systemd/system/vhost-admin-purge.service
 install -m 644 "$SRC/etc/vhost-admin-purge.timer" /etc/systemd/system/vhost-admin-purge.timer
+# Netz- und Laendertabelle der Registries. Eigener Timer, weil das der einzige Teil ist,
+# der Dateien aus dem Netz holt - abschaltbar, ohne die Auswertung zu verlieren.
+install -m 644 "$SRC/etc/vhost-admin-networks.service" /etc/systemd/system/vhost-admin-networks.service
+install -m 644 "$SRC/etc/vhost-admin-networks.timer" /etc/systemd/system/vhost-admin-networks.timer
 systemctl daemon-reload
 systemctl enable --now vhost-admin-purge.timer >/dev/null
 systemctl enable --now vhost-admin-honeypot.timer >/dev/null
+systemctl enable --now vhost-admin-networks.timer >/dev/null
 
 /usr/local/sbin/vhost migrate-layout
 # Rechte bestehender vHosts auf den aktuellen Stand bringen. Nötig, weil sich die
