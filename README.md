@@ -420,3 +420,56 @@ Liste mit Filtern.
 diesem Rechner sitzt eine Adressumsetzung; jede Anfrage von aussen erscheint im Log als
 `10.200.0.1`, ein `X-Forwarded-For` liegt nicht an. „Eindeutige Besucher", Herkunftsländer
 oder Top-Angreifer wären deshalb erfunden. Unterschieden wird nach Verhalten.
+
+### Echte Client-Adressen durch den WireGuard-Tunnel
+
+Kommt der Verkehr über einen WireGuard-Tunnel mit Adressumsetzung, steht in jedem Log
+die Tunneladresse (hier `10.200.0.1`). Ein `X-Forwarded-For` lässt sich auf dem
+Tunnelserver **nicht** einfach hinzufügen: WireGuard arbeitet auf IP-Ebene und sieht nie
+eine HTTP-Anfrage, und bei HTTPS ist der Inhalt verschlüsselt – einen Header setzen
+könnte nur, wer das Zertifikat hat.
+
+**Empfohlen: PROXY-Protokoll.** Der Tunnelserver reicht die TCP-Verbindung unverändert
+durch (TLS bleibt Ende-zu-Ende, Zertifikate bleiben im LXC) und stellt ihr eine Zeile mit
+der echten Adresse voran. Auf dem Tunnelserver ersetzt ein nginx-`stream`-Block die
+bisherige Portweiterleitung für TCP 80 und 443 (die DNAT-Regeln für diese beiden Ports
+dort entfernen, sonst kommt der Verkehr am Proxy vorbei):
+
+```nginx
+# /etc/nginx/nginx.conf auf dem Tunnelserver, auf oberster Ebene (nicht in http {})
+stream {
+    server {
+        listen 80;
+        proxy_pass <LXC-Adresse im Tunnel>:8081;
+        proxy_protocol on;
+    }
+    server {
+        listen 443;
+        proxy_pass <LXC-Adresse im Tunnel>:8444;
+        proxy_protocol on;
+    }
+}
+```
+
+`<LXC-Adresse im Tunnel>` ist dieselbe Adresse, auf die heute die DNAT-Regel zeigt. Im LXC
+braucht nginx dafür eigene Ports mit `proxy_protocol` (80/443 bleiben unverändert für das
+lokale Netz, denn eine Verbindung ohne PROXY-Zeile würde auf einem solchen Port abgewiesen)
+und die Anweisung, der Zeile nur vom Tunnel zu glauben:
+
+```nginx
+listen 8444 ssl proxy_protocol;     # je öffentlichem Host, zusätzlich zu 443
+set_real_ip_from 10.200.0.1;        # nur dem Tunnel glauben – sonst könnte jeder im
+real_ip_header proxy_protocol;      # lokalen Netz eine beliebige Adresse vortäuschen
+```
+
+Diese LXC-Seite erzeugt vhost-admin noch nicht; sie gehört in den Renderer, weil die
+Konfiguration generiert wird. HTTP/3 (UDP 443) kann kein PROXY-Protokoll; bleibt dort die
+alte Weiterleitung, kommen QUIC-Anfragen weiter mit der Tunneladresse an.
+
+**Alternative ohne Proxy:** auf dem Tunnelserver nur DNAT, kein MASQUERADE – dann bleibt
+die Quelladresse erhalten, für alle Protokolle. Dafür müssen die Antworten des LXC über
+den Tunnel zurück statt über den Heimrouter, was auf der Heimseite Policy-Routing
+(connmark) verlangt. Sauberer auf IP-Ebene, aber deutlich fummeliger.
+
+Die Honigtopf-Auswertung muss für beide Wege nicht angepasst werden: Sobald im Log eine
+öffentliche Adresse steht, wird sie als Gegenstelle mit Netz und Land ausgewertet.
