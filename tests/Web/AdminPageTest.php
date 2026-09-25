@@ -335,4 +335,21 @@ final class AdminPageTest extends TestCase
 		self::assertNotSame($this->page->suggestedPassword(), $this->page->suggestedPassword());
 		self::assertSame(20, strlen($this->page->suggestedPassword()));
 	}
+
+	/**
+	 * SECURITY_RISKS.md, „Keine Härtung des Sitzungs-Cookies": Ein anderer
+	 * localhost-Host (den dieses Werkzeug selbst anlegt) könnte der Oberfläche sonst eine
+	 * bekannte Sitzungs-ID unterschieben und den CSRF-Schutz aushebeln.
+	 */
+	public function testTheSessionCookieIsHardenedBeforeTheSessionStarts(): void
+	{
+		$source = (string)file_get_contents(dirname(__DIR__, 2) . '/src/public/index.php');
+		$params = strpos($source, 'session_set_cookie_params(');
+		$start = strpos($source, 'session_start(');
+		self::assertNotFalse($params, 'Cookie-Parameter fehlen');
+		self::assertLessThan($start, $params, 'erst die Parameter, dann session_start()');
+		self::assertMatchesRegularExpression("~'httponly'\s*=>\s*true~", $source);
+		self::assertMatchesRegularExpression("~'samesite'\s*=>\s*'Strict'~", $source);
+		self::assertStringContainsString("ini_set('session.use_strict_mode', '1')", $source);
+	}
 }

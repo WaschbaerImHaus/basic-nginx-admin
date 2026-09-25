@@ -31,6 +31,12 @@ use VhostAdmin\Vhost;
 use VhostAdmin\Web\AdminPage;
 use VhostAdmin\Web\CommandRunner;
 
+// Sitzungs-Cookie härten, bevor die Sitzung beginnt (SECURITY_RISKS.md): Ohne diese
+// Angaben könnte ein anderer localhost-Host – den dieses Werkzeug selbst anlegt – der
+// Oberfläche eine bekannte Sitzungs-ID unterschieben und den CSRF-Schutz aushebeln.
+// use_strict_mode verwirft IDs, die der Server nicht selbst vergeben hat.
+ini_set('session.use_strict_mode', '1');
+session_set_cookie_params(['httponly' => true, 'samesite' => 'Strict', 'path' => '/']);
 session_start();
 $config = Config::defaults();
 $layout = new VhostLayout($config);
