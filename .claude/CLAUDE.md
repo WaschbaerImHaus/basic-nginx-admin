@@ -32,7 +32,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/public/honeypot/` – Vorlage der Honigtopf-Ansicht (`index.php`, `detail.php`, `bootstrap.php`, `style.css`); `honeypot/install-dashboard.sh` kopiert sie in den Docroot des Ansichtshosts und die Klassen nach `private/honeypot-lib/`
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (531 Tests, Stand 2026-09-25); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (537 Tests, Stand 2026-09-25); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -76,4 +76,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Die Netztabelle (`/var/lib/vhost-admin/networks.txt`) holt **nur** `update-networks.php` aus dem Netz, als eigener Dienst. Auswertung und Ansicht schlagen ausschliesslich lokal nach.
 - **`logs/` immer `0751`.** Nach der Rotation öffnen die nginx-Worker (`www-data`) die Logs selbst neu; ohne Durchgangsrecht schreiben sie in die umbenannte Datei weiter, und logrotate löscht sie samt neuer Zeilen (belegt am 2026-09-25).
 - `robots.txt` wird auf dem Honigtopf **protokolliert** (nur `log_not_found off`). Ein `/admin/`-Abruf **nach** dem Lesen der `robots.txt` ist die schärfste Aussage der Seite; ohne ist es blosses Raten. `access_log off` an dieser Stelle würde genau das Signal vernichten.
+- **Die Honigtopf-Seite lädt nichts nach** – CSS, Skript und Pflanzenbilder stehen in `index.html`. Jede weitere Datei wäre eine eigene Anfrage im Log. `tests/Honeypot/SitePageTest.php` prüft das.
+- Blumenwiese (cssDOOM-Prinzip): Nur `#scene` hängt an der Kameraposition (`--cam-x`/`--cam-z` mit `inherits: false`); Pflanzen haben feste Weltkoordinaten und erben nur `--cam-a` zum Zurückdrehen. Eine erste Fassung liess jede Pflanze ihre Lage mit `mod()`/`hypot()`/`sin()` selbst rechnen – 30 bis 70 ms Stilberechnung je Bild statt 9,5 ms. Unschärfe und Dunst werden gestuft und nur bei Stufenwechsel geschrieben. Bilder je Pflanzenart über Klassen, nie als Data-URI in einer Custom Property.
+- Prüfen der Wiese: `debugging/meadow-check.sh` (kopfloser Chrome unter `~/tools/`). `?t=Sekunden` spult den Flug vor – ohne Grafikkarte kommt die Animation im kopflosen Browser nicht von selbst voran, und `performance.now()` läuft unter `--virtual-time-budget` in virtueller Zeit (Messungen dort sind wertlos).
 - Keine Köderformulare, die Zugangsdaten mitschreiben: Wer fremde Zugangsdaten einsammelt, betreibt keinen Honigtopf mehr. `/admin/` bleibt eine schlichte Seite, die Anfrage allein ist das Signal.

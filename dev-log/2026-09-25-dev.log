@@ -21,3 +21,18 @@ Mit Wegwerf-Host reproduziert (0750: neue Datei 0 Bytes; 0751: beschrieben).
 Vorschlaege umgesetzt: Kachel "Neu gesucht" + Matrix Pfad x Tag; Gruppen gleicher
 Haeufigkeit und Rohdaten der Nicht-HTTP-Anfragen direkt in den Kacheln. Die drei
 Regeln sind aus Suggestions entfernt. 531 Tests gruen.
+
+2026-09-25 21:10 - Blumenwiese auf mfsvr.de
+Nach cssDOOM (Niels Leenheer): Welt bewegt sich statt Kamera, Billboards, preserve-3d.
+Starfield-Prinzip: Pflanzen, die hinten aus dem Feld fallen, werden nach vorn versetzt.
+Geprueft mit chrome-headless-shell (Chrome for Testing 154, unter ~/tools/, Libs per apt).
+Erste Fassung: jede Pflanze rechnete mit mod()/hypot()/sin() selbst - schoen im Sinne
+von "CSS rechnet", aber jede der 620 Pflanzen hing in jedem Bild an der Kamera: 30-70 ms
+Stil je Bild. cssDOOM macht es anders - dort haengt nur #scene an der Position. Umbau:
+--cam-x/z mit inherits:false an #scene, Pflanzen mit festen Koordinaten, Unschaerfe
+und Dunst gestuft und nur bei Stufenwechsel geschrieben: 9,5 ms stabil (1 Kern, ohne
+GPU). Stolperstellen beim Messen: getBoundingClientRect() erzwingt in 3D-Szenen die
+ganze Transformationsabbildung; performance.now() laeuft unter --virtual-time-budget
+virtuell; headless liefert ohne sichtbare Flaeche keine rAF-Bilder.
+Kurven: Zufall zog anfangs zweimal "geradeaus" (12 s ohne Kurve) - jetzt folgt auf
+eine Gerade immer eine Kurve. Kamera legt sich zu einem Drittel mit in die Kurve.

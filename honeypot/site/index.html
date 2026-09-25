@@ -8,32 +8,235 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="32x32">
 <style>
-	:root { --honey:#e9a21c; --dark:#6f4403; --paper:#fbf7ee; --ink:#2b2418; --mut:#6d6353; }
+	/*
+	 * Imkerei am Hang – Gestaltung
+	 *
+	 * Hinter dem Text fliegt eine Biene über eine Blumenwiese. Die Wiese ist eine
+	 * 3D-Szene aus reinem CSS nach dem Vorbild von cssDOOM (Niels Leenheer, 2026):
+	 *
+	 *   - Die Welt bewegt sich, nicht die Kamera. JavaScript setzt je Bild drei Werte
+	 *     an #scene (--cam-x, --cam-z, --cam-a); CSS verschiebt und dreht daraus die
+	 *     ganze Szene. Die Blumen selbst haben feste Weltkoordinaten.
+	 *   - Jede Blume ist ein „Billboard": Sie dreht sich um genau den Kamerawinkel
+	 *     zurück und zeigt der Kamera immer ihre Vorderseite.
+	 *   - Wie ein Sternenfeld ist die Wiese endlos: Fällt eine Blume hinter der Kamera
+	 *     aus dem Feld, wird sie auf die andere Seite versetzt und taucht im Dunst
+	 *     wieder auf.
+	 *   - Tiefenunschärfe: Jede Blume wird nach ihrem Abstand zur Schärfeebene
+	 *     weichgezeichnet; der Boden direkt vor der Kamera über ein Band am unteren Rand.
+	 *
+	 * Eine erste Fassung liess jede Blume ihre Lage selbst mit mod()/hypot()/sin()
+	 * ausrechnen. Damit hing jede der 620 Blumen in jedem Bild von der Kamera ab – genau
+	 * das vermeidet cssDOOM: Dort hängt nur #scene an der Spielerposition.
+	 *
+	 * Die Seite lädt nichts nach. Sie ist ein Honigtopf; jede weitere Datei wäre eine
+	 * eigene Anfrage im Log.
+	 *
+	 * @author Kurt Ingwer
+	 * @version Letzte Änderung: 2026-09-25 21:30
+	 */
+
+	/* Typisierte Kamerawerte. Position NICHT vererbbar: Nur #scene braucht sie; würden
+	   die Blumen sie erben, müsste der Browser jede von ihnen in jedem Bild neu
+	   berechnen. Der Winkel wird vererbt – die Blumen drehen sich mit ihm zur Kamera,
+	   und er ändert sich nur in Kurven. */
+	@property --cam-x { syntax: "<number>"; inherits: false; initial-value: 0; }
+	@property --cam-z { syntax: "<number>"; inherits: false; initial-value: 0; }
+	@property --cam-a { syntax: "<number>"; inherits: true; initial-value: 0; }
+
+	:root { --honey:#e9a21c; --ink:#f4eddd; --mut:#d9ceb8; }
 	* { box-sizing:border-box; }
+	html { background:#9cc3e6; }
 	body {
-		margin:0; background:var(--paper); color:var(--ink);
+		margin:0; color:var(--ink);
 		font:17px/1.65 Georgia, "Iowan Old Style", "Times New Roman", serif;
 	}
-	.wrap { max-width:40rem; margin:0 auto; padding:3rem 1.25rem 4rem; }
-	header { display:flex; align-items:center; gap:.9rem; margin-bottom:2.5rem; }
+
+	/* ---------- Text ---------- */
+	.wrap {
+		position:relative; z-index:1;
+		max-width:40rem; margin:3rem auto 4rem; padding:2.2rem 1.9rem 2rem;
+		background:rgba(0, 0, 0, .5);
+		border-radius:6px;
+		/* Die Wiese dahinter ist hell und bunt; der Schatten hält die Schrift auch dort
+		   lesbar, wo eine Blüte direkt hinter einem Wort steht. */
+		text-shadow:0 1px 2px rgba(0, 0, 0, .55);
+	}
+	@media (max-width:44rem) { .wrap { margin:1rem; padding:1.6rem 1.2rem; } }
+	header { display:flex; align-items:center; gap:.9rem; margin-bottom:2.2rem; }
 	header img { width:44px; height:44px; }
 	h1 { font-size:1.6rem; margin:0; letter-spacing:.01em; }
-	h2 { font-size:1.15rem; margin:2.2rem 0 .5rem; }
+	h2 { font-size:1.15rem; margin:2.2rem 0 .5rem; color:#ffd57a; }
 	p { margin:.7rem 0; }
 	.lead { font-size:1.12rem; }
 	dl { display:grid; grid-template-columns:max-content 1fr; gap:.35rem 1.2rem; margin:.6rem 0 0; }
 	dt { color:var(--mut); }
 	dd { margin:0; }
 	footer {
-		margin-top:3rem; padding-top:1.2rem; border-top:2px solid var(--honey);
+		margin-top:2.6rem; padding-top:1.1rem; border-top:2px solid var(--honey);
 		color:var(--mut); font-size:.92rem;
 	}
-	@media (prefers-color-scheme: dark) {
-		:root { --paper:#1a1610; --ink:#eee6d6; --mut:#a2977f; }
+
+	/* ---------- Wiese ---------- */
+	.meadow {
+		/* Masse der Welt in Pixeln. Die Wiese ist ein Torus von --field Kantenlänge
+		   um die Kamera; hinter --fog-end ist alles im Dunst verschwunden, deshalb
+		   sieht man nie, wie eine Blume von hinten nach vorn springt. */
+		--field:1800; --half:900;
+		--fog-start:420; --fog-end:860;
+		--focus:230;          /* Schärfeebene: etwa dort, wo die Biene fliegt */
+		--eye:64;             /* Augenhöhe über dem Boden – Bienenperspektive */
+		--persp:520;
+		position:fixed; inset:0; z-index:0; overflow:hidden;
+		/* Himmel oben, dunstige Wiesenferne ab dem Horizont (42 %). */
+		background:
+			radial-gradient(circle at 78% 12%, rgba(255, 246, 214, .95) 0, rgba(255, 238, 190, .35) 9%, transparent 26%),
+			linear-gradient(to bottom, #5f9fd6 0%, #9cc9ec 28%, #dfeaf0 41%, #bcd29a 42.2%, #8fb865 55%, #6f9d45 100%);
+	}
+	/* Die Bühne ist grösser als das Fenster (160 %), damit beim Kippen in der Kurve keine
+	   Ecke frei wird. Der Horizont liegt so bei 45 % der Bühne = 42 % des Fensters. */
+	.stage {
+		position:absolute; inset:-30%;
+		perspective:calc(var(--persp) * 1px);
+		perspective-origin:50% 45%;
+		/* Die Kamera folgt der Biene und legt sich ein Stück mit in die Kurve; von
+		   innen gesehen kippt dabei die Welt entgegen. */
+		transform:rotate(calc(var(--roll, 0) * -1deg));
+		background:
+			radial-gradient(circle at 67.5% 26%, rgba(255, 246, 214, .95) 0, rgba(255, 238, 190, .35) 5.6%, transparent 16%),
+			linear-gradient(to bottom, #4f93cf 0%, #5f9fd6 18%, #9cc9ec 36%, #dfeaf0 44.4%,
+				#bcd29a 45.1%, #8fb865 53%, #6f9d45 81%, #6a9742 100%);
+	}
+	.scene {
+		position:absolute; left:50%; top:45%; width:0; height:0;
+		transform-style:preserve-3d;
+		/* Wie #scene in cssDOOM: die Welt um die Kameraposition zurückschieben, um den
+		   Blickwinkel zurückdrehen und schliesslich ans Auge rücken (translate wirkt
+		   nach transform). */
+		translate:0 0 calc(var(--persp) * 1px);
+		transform:
+			rotateY(calc(var(--cam-a) * -1rad))
+			translate3d(calc(var(--cam-x) * -1px), 0, calc(var(--cam-z) * -1px));
+	}
+
+	/* Der Boden liegt auf dem Kachelraster um die Kamera (--gx/--gz, Vielfache von 240)
+	   und springt nur, wenn die Kamera eine Kachelgrenze überquert – dank gleicher
+	   Musterung unsichtbar. Ein wanderndes Hintergrundbild müsste jedes Bild neu gemalt
+	   werden. Die Fläche ist um eine Kachel grösser als die Sichtweite. */
+	.ground {
+		position:absolute; left:-1200px; top:-1200px; width:2400px; height:2400px;
+		transform:
+			translate3d(calc(var(--gx, 0) * 1px), calc(var(--eye) * 1px), calc(var(--gz, 0) * 1px))
+			rotateX(90deg);
+		background-color:#6f9d45;
+		/* Nur weiche Flecken und Punkte, keine feinen Linien: Linien erzeugen bei flachem
+		   Blickwinkel ein Moiré, das wie ein gepflügter Acker aussieht. Alle Kachelmasse
+		   teilen 240, sonst sähe man beim Zurückspringen um eine Kachel einen Ruck. */
+		background-image:
+			radial-gradient(circle at 18% 22%, #fffc 0 1.5px, transparent 2.3px),
+			radial-gradient(circle at 63% 71%, #ffe36b 0 1.6px, transparent 2.4px),
+			radial-gradient(circle at 81% 30%, #e0504a 0 1.4px, transparent 2.2px),
+			radial-gradient(circle at 35% 83%, #9a86f0 0 1.4px, transparent 2.2px),
+			radial-gradient(circle at 52% 44%, #f4f1e2 0 1.3px, transparent 2px),
+			radial-gradient(ellipse 34% 22% at 30% 40%, #86b556 0, transparent 100%),
+			radial-gradient(ellipse 28% 36% at 75% 70%, #5d8a37 0, transparent 100%),
+			radial-gradient(ellipse 40% 30% at 70% 20%, #7aa84c 0, transparent 100%),
+			radial-gradient(ellipse 30% 26% at 20% 80%, #648f3c 0, transparent 100%);
+		background-size:120px 120px, 120px 120px, 60px 60px, 40px 40px, 40px 40px,
+			120px 120px, 120px 120px, 240px 240px, 240px 240px;
+	}
+
+	/* Eine Blume oder ein Grasbüschel. --x/--z: feste Lage in der Welt, --h: Höhe.
+	   Unschärfe (filter), Dunst (opacity) und Sichtbarkeit (display) setzt das Skript –
+	   und nur, wenn sich die gestufte Stufe ändert. */
+	.f {
+		position:absolute;
+		width:calc(var(--h) * .42px); height:calc(var(--h) * 1px);
+		left:calc(var(--h) * -.21px); top:calc(var(--h) * -1px);
+		transform-origin:50% 100%;
+		background:center bottom / contain no-repeat;
+		transform:
+			translate3d(calc(var(--x) * 1px), calc(var(--eye) * 1px), calc(var(--z) * 1px))
+			rotateY(calc(var(--cam-a) * 1rad));
+	}
+
+	/* Dunst am Horizont, Unschärfe am unteren Rand (dort liegt der Boden direkt vor
+	   der Kamera – nah und damit unscharf, wie bei einem Makro-Objektiv). */
+	.haze {
+		position:absolute; inset:0; pointer-events:none;
+		background:linear-gradient(to bottom,
+			transparent 37.5%, rgba(228, 236, 222, .62) 44.7%, rgba(214, 228, 196, .28) 48.1%, transparent 57.5%);
+	}
+	.near {
+		position:absolute; left:0; right:0; bottom:0; height:26%; pointer-events:none;
+		-webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+		-webkit-mask-image:linear-gradient(to top, #000 35%, transparent);
+		mask-image:linear-gradient(to top, #000 35%, transparent);
+	}
+
+	/* ---------- Biene ---------- */
+	/* Sie fliegt vor der Kamera her, wir folgen ihr. --bank: Schräglage in der Kurve. */
+	.bee {
+		--bank:0;
+		position:absolute; left:50%; top:62%; width:110px; height:110px;
+		margin:-55px 0 0 -55px;
+		transform:
+			translateX(calc(var(--bank) * 2.2px))
+			rotate(calc(var(--bank) * 1deg));
+		filter:drop-shadow(0 14px 6px rgba(20, 40, 10, .28));
+	}
+	/* Auf breiten Schirmen fliegt sie links neben dem Text, sonst verschwände sie
+	   dahinter. Die Kamera folgt ihr trotzdem – sie fliegt nur etwas seitlich versetzt. */
+	@media (min-width:70rem) { .bee { left:calc(50% - 20rem - (50vw - 20rem) / 2); } }
+	.bee svg { width:100%; height:100%; overflow:visible; animation:bob 1.7s ease-in-out infinite; }
+	.bee .wing { transform-box:fill-box; animation:flap .07s linear infinite alternate; }
+	.bee .wing-l { transform-origin:100% 60%; }
+	.bee .wing-r { transform-origin:0 60%; animation-delay:-.035s; }
+	@keyframes flap { from { transform:scaleY(1) rotate(0); } to { transform:scaleY(.45) rotate(-8deg); } }
+	@keyframes bob { 0%, 100% { translate:0 -4px; } 50% { translate:0 5px; } }
+
+	/* Wer „Bewegung reduzieren" eingestellt hat, bekommt ein stehendes Bild. */
+	@media (prefers-reduced-motion: reduce) {
+		.bee svg, .bee .wing { animation:none; }
 	}
 </style>
 </head>
 <body>
+<div class="meadow" aria-hidden="true">
+	<div class="stage">
+		<div class="scene" id="scene"><div class="ground"></div></div>
+		<div class="haze"></div>
+	</div>
+	<div class="near"></div>
+	<div class="bee" id="bee">
+		<svg viewBox="-60 -60 120 120">
+			<!-- Von hinten oben gesehen: Kopf oben, Hinterleib unten, Flügel darüber. -->
+			<g stroke="#2a1d08" stroke-width="2.4" stroke-linecap="round" fill="none">
+				<path d="M-6 -30 Q-12 -44 -20 -46"/>
+				<path d="M6 -30 Q12 -44 20 -46"/>
+				<path d="M-12 -4 L-24 4 M-12 6 L-25 16 M-11 16 L-22 27"/>
+				<path d="M12 -4 L24 4 M12 6 L25 16 M11 16 L22 27"/>
+			</g>
+			<defs>
+				<clipPath id="abdomen"><ellipse cx="0" cy="12" rx="15" ry="24"/></clipPath>
+			</defs>
+			<ellipse cx="0" cy="12" rx="15" ry="24" fill="#f2b31e"/>
+			<g clip-path="url(#abdomen)" fill="#2a1d08">
+				<rect x="-20" y="4" width="40" height="6"/>
+				<rect x="-20" y="16" width="40" height="6"/>
+				<rect x="-20" y="28" width="40" height="10"/>
+			</g>
+			<path d="M0 35 L0 42" stroke="#2a1d08" stroke-width="2.4" stroke-linecap="round"/>
+			<ellipse cx="0" cy="-10" rx="12" ry="11" fill="#6b4a12"/>
+			<ellipse cx="0" cy="-10" rx="12" ry="11" fill="url(#fuzz)" opacity=".7"/>
+			<radialGradient id="fuzz"><stop offset="0" stop-color="#e8b64a"/><stop offset="1" stop-color="#6b4a12"/></radialGradient>
+			<circle cx="0" cy="-27" r="8" fill="#2a1d08"/>
+			<g class="wing wing-l"><ellipse cx="-27" cy="-14" rx="27" ry="12" transform="rotate(-18 -27 -14)" fill="#eef8ffcc" stroke="#9fb7c8" stroke-width="1"/></g>
+			<g class="wing wing-r"><ellipse cx="27" cy="-14" rx="27" ry="12" transform="rotate(18 27 -14)" fill="#eef8ffcc" stroke="#9fb7c8" stroke-width="1"/></g>
+		</svg>
+	</div>
+</div>
+
 <div class="wrap">
 	<header>
 		<img src="/favicon.svg" alt="">
@@ -65,5 +268,405 @@
 		Diese Seite kommt ohne Zählpixel, ohne fremde Schriften und ohne Einwilligungsbanner aus.
 	</footer>
 </div>
+
+<script>
+/**
+ * Flug über die Blumenwiese.
+ *
+ * Dieses Skript rechnet nur die Kamera: Lage, Blickwinkel, Kurvenflug. Wo jede Blume
+ * steht, wie gross und wie unscharf sie ist, rechnet CSS selbst aus drei
+ * Eigenschaften – so wie cssDOOM seine Wände aus den Spielerkoordinaten.
+ *
+ * @author Kurt Ingwer
+ * @version Letzte Änderung: 2026-09-25 21:30
+ */
+(function () {
+	'use strict';
+
+	/**
+	 * Die Blumen der Wiese als SVG, von unten nach oben gezeichnet (Stiel unten Mitte).
+	 * Blickfeld je 42 × 100; die Höhe gibt das Element vor.
+	 */
+	const PLANTS = {
+		// Margerite: weisse Zungenblüten um eine gelbe Mitte
+		daisy: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 C20 70 22 45 21 24" stroke="#4d7a2a" stroke-width="2.2" fill="none"/>'
+			+ '<path d="M21 72 C13 66 9 62 7 55 C14 58 18 63 21 68" fill="#5c8d32"/>'
+			+ '<g fill="#fdfdf6" stroke="#dcdccc" stroke-width=".5">'
+			+ [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map(function (a) {
+				return '<ellipse cx="21" cy="11" rx="3.2" ry="8.5" transform="rotate(' + a + ' 21 19)"/>';
+			}).join('')
+			+ '</g><circle cx="21" cy="19" r="5" fill="#f2c318"/></svg>',
+		// Klatschmohn: vier rote Blütenblätter, dunkle Mitte, gebogener Stiel
+		poppy: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 C17 72 26 50 21 28" stroke="#4d7a2a" stroke-width="2" fill="none"/>'
+			+ '<path d="M21 26 C6 30 3 10 15 8 C18 2 26 2 28 8 C40 10 37 30 21 26Z" fill="#d7261e"/>'
+			+ '<path d="M21 26 C12 24 12 12 21 13 C30 12 30 24 21 26Z" fill="#b8150f"/>'
+			+ '<circle cx="21" cy="18" r="3.6" fill="#241a12"/></svg>',
+		// Kornblume: ausgefranster blauer Kranz
+		cornflower: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 C22 74 19 50 21 26" stroke="#5f8a4a" stroke-width="1.8" fill="none"/>'
+			+ '<path d="M21 60 L13 50 M21 76 L29 67" stroke="#6d955a" stroke-width="1.4"/>'
+			+ '<g fill="#3d6fd6">'
+			+ [0, 40, 80, 120, 160, 200, 240, 280, 320].map(function (a) {
+				return '<path d="M21 17 L17 5 L19.5 7 L21 3 L22.5 7 L25 5Z" transform="rotate(' + a + ' 21 17)"/>';
+			}).join('')
+			+ '</g><circle cx="21" cy="17" r="3.6" fill="#2a3f8f"/></svg>',
+		// Butterblume / Hahnenfuss: fünf glänzend gelbe Blätter
+		buttercup: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 C20 76 23 52 21 30" stroke="#4d7a2a" stroke-width="1.8" fill="none"/>'
+			+ '<g fill="#f7d71f" stroke="#d4a90e" stroke-width=".6">'
+			+ [0, 72, 144, 216, 288].map(function (a) {
+				return '<ellipse cx="21" cy="16" rx="5.4" ry="7" transform="rotate(' + a + ' 21 23)"/>';
+			}).join('')
+			+ '</g><circle cx="21" cy="23" r="3" fill="#cf9a08"/></svg>',
+		// Rotklee: kugeliger rosa Kopf aus kleinen Blüten
+		clover: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 C21 80 20 60 21 34" stroke="#4d7a2a" stroke-width="2" fill="none"/>'
+			+ '<path d="M21 64 C12 60 8 64 10 70 C14 72 18 68 21 64 C24 68 28 72 32 70 C34 64 30 60 21 64Z" fill="#5f9235"/>'
+			+ '<circle cx="21" cy="25" r="10" fill="#c24f8e"/>'
+			+ '<g fill="#e37fb6">'
+			+ '<circle cx="16" cy="20" r="2.6"/><circle cx="22" cy="17" r="2.6"/><circle cx="27" cy="22" r="2.6"/>'
+			+ '<circle cx="18" cy="27" r="2.6"/><circle cx="25" cy="29" r="2.4"/><circle cx="14" cy="25" r="2.2"/>'
+			+ '</g></svg>',
+		// Wiesensalbei: violette Ähre
+		sage: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<path d="M21 100 L21 12" stroke="#557a38" stroke-width="2" fill="none"/>'
+			+ '<g fill="#7a4fc9">'
+			+ [14, 22, 30, 38, 46, 54].map(function (y, i) {
+				const w = 7 - i * 0.6;
+				return '<ellipse cx="' + (21 - w / 2) + '" cy="' + y + '" rx="' + (w / 1.4) + '" ry="3" transform="rotate(-25 21 ' + y + ')"/>'
+					+ '<ellipse cx="' + (21 + w / 2) + '" cy="' + (y + 3) + '" rx="' + (w / 1.4) + '" ry="3" transform="rotate(25 21 ' + (y + 3) + ')"/>';
+			}).join('')
+			+ '</g></svg>',
+		// Grasbüschel: füllt die Wiese zwischen den Blüten
+		grass: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 100">'
+			+ '<g fill="none" stroke-linecap="round" stroke-width="2.2">'
+			+ '<path d="M21 100 C19 70 12 50 4 34" stroke="#4f7d2c"/>'
+			+ '<path d="M21 100 C22 66 24 40 22 10" stroke="#669a38"/>'
+			+ '<path d="M21 100 C24 74 30 56 39 44" stroke="#5a8a31"/>'
+			+ '<path d="M19 100 C17 80 14 66 10 58" stroke="#76a948"/>'
+			+ '</g></svg>'
+	};
+
+	/** Häufigkeit je Pflanze: Gras und Margeriten tragen die Wiese, Mohn setzt Akzente. */
+	const MIX = [
+		['grass', 34], ['daisy', 20], ['buttercup', 14], ['clover', 11],
+		['poppy', 9], ['cornflower', 8], ['sage', 6]
+	];
+
+	/**
+	 * Kleiner Zufallsgenerator mit festem Startwert (mulberry32): Die Wiese sieht bei
+	 * jedem Aufruf gleich aus, und ein Bildschirmfoto zum Prüfen ist wiederholbar.
+	 */
+	class Random {
+		constructor(seed) { this.state = seed >>> 0; }
+
+		next() {
+			this.state = (this.state + 0x6D2B79F5) >>> 0;
+			let t = this.state;
+			t = Math.imul(t ^ (t >>> 15), t | 1);
+			t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		}
+
+		between(min, max) { return min + (max - min) * this.next(); }
+
+		/** Wählt nach Gewicht aus einer Liste [name, gewicht]. */
+		weighted(list) {
+			const total = list.reduce(function (sum, item) { return sum + item[1]; }, 0);
+			let pick = this.next() * total;
+			for (const [name, weight] of list) {
+				pick -= weight;
+				if (pick < 0) { return name; }
+			}
+			return list[list.length - 1][0];
+		}
+	}
+
+	/**
+	 * Der Flug der Biene: gleichmässig vorwärts, ab und zu eine Kurve nach links oder
+	 * rechts. Die Drehgeschwindigkeit nähert sich ihrem Ziel weich an – eine Biene
+	 * reisst nicht herum, sie legt sich in die Kurve.
+	 */
+	class BeeFlight {
+		constructor(random) {
+			this.random = random;
+			this.x = 0;
+			this.z = 0;
+			this.angle = 0;          // Bogenmass; wachsend = Linkskurve
+			this.turnRate = 0;       // aktuelle Drehgeschwindigkeit in rad/s
+			this.targetRate = 0;     // angestrebte Drehgeschwindigkeit
+			this.nextDecision = 3;   // Sekunden bis zur nächsten Entscheidung
+			this.speed = 150;        // Pixel je Sekunde
+		}
+
+		/** Rückt den Flug um dt Sekunden weiter. */
+		advance(dt) {
+			this.nextDecision -= dt;
+			if (this.nextDecision <= 0) {
+				// Nach einer Geraden kommt immer eine Kurve, nach einer Kurve meist wieder
+				// eine Gerade. Reiner Zufall zog sonst gern mehrmals „geradeaus" – wer die
+				// Seite öffnet, sah dann zwölf Sekunden lang keine Kurve.
+				if (this.targetRate !== 0 && this.random.next() < 0.55) {
+					this.targetRate = 0;
+					this.nextDecision = this.random.between(2.2, 4.5);
+				} else {
+					const turns = [0.24, -0.24, 0.42, -0.42];
+					this.targetRate = turns[Math.floor(this.random.next() * turns.length)];
+					this.nextDecision = this.random.between(2.8, 5.5);
+				}
+			}
+			// Exponentielle Annäherung, Zeitkonstante etwa 0,9 s.
+			this.turnRate += (this.targetRate - this.turnRate) * Math.min(1, dt / 0.9);
+			this.angle += this.turnRate * dt;
+			// Blickrichtung ist (-sin a, -cos a), siehe CSS (--ahead).
+			this.x -= Math.sin(this.angle) * this.speed * dt;
+			this.z -= Math.cos(this.angle) * this.speed * dt;
+		}
+
+		/** Schräglage in Grad: in die Kurve hinein, Linkskurve = nach links geneigt. */
+		bank() { return -this.turnRate * 38; }
+	}
+
+	/** Masse der Welt – müssen zu den Werten in .meadow passen. */
+	const WORLD = {
+		field: 1800,       // Kantenlänge des Feldes, in dem die Pflanzen umlaufen
+		fogStart: 420,     // ab hier verblasst eine Blume im Dunst
+		fogEnd: 860,       // ab hier ist sie weg (und wird gar nicht gezeichnet)
+		focus: 230,        // Schärfeebene
+		tile: 240,         // Kachelmass des Bodens
+		recenter: 20000    // ab diesem Abstand vom Ursprung wird die Welt zurückgeschoben
+	};
+
+	/**
+	 * Eine Pflanze: ihr Element und was zuletzt an ihm eingestellt wurde. Geschrieben
+	 * wird nur bei einer Änderung – die meisten Pflanzen bleiben in den meisten Bildern
+	 * unberührt.
+	 */
+	class Plant {
+		constructor(element, x, z) {
+			this.element = element;
+			this.x = x;
+			this.z = z;
+			this.moved = true;
+			this.shown = true;
+			this.blur = -1;
+			this.alpha = -1;
+		}
+
+		/** Weltlage an das Element weitergeben, wenn sie sich geändert hat. */
+		place() {
+			if (!this.moved) { return; }
+			this.element.style.setProperty('--x', this.x.toFixed(1));
+			this.element.style.setProperty('--z', this.z.toFixed(1));
+			this.moved = false;
+		}
+
+		show(visible) {
+			if (visible === this.shown) { return; }
+			this.element.style.display = visible ? '' : 'none';
+			this.shown = visible;
+		}
+
+		/** Unschärfe in halben Pixeln, Deckkraft in 5-%-Stufen – nur bei Stufenwechsel. */
+		look(blur, alpha) {
+			if (blur !== this.blur) {
+				this.element.style.filter = blur > 0 ? 'blur(' + blur + 'px)' : '';
+				this.blur = blur;
+			}
+			if (alpha !== this.alpha) {
+				this.element.style.opacity = alpha < 1 ? String(alpha) : '';
+				this.alpha = alpha;
+			}
+		}
+	}
+
+	/**
+	 * Die Wiese: baut die Pflanzen einmal auf und bewegt danach die Welt.
+	 *
+	 * Je Bild setzt sie drei Werte an #scene. Ausserdem prüft sie jede Pflanze in
+	 * einfacher Arithmetik – Hunderte davon kosten Mikrosekunden – und schreibt nur an
+	 * die wenigen Elemente, deren Lage, Unschärfe- oder Dunststufe sich geändert hat.
+	 */
+	class Meadow {
+		constructor(scene, ground, bee, root) {
+			this.scene = scene;
+			this.ground = ground;
+			this.bee = bee;
+			this.root = root;
+			this.random = new Random(20260925);
+			this.flight = new BeeFlight(this.random);
+			this.plants = [];
+			this.tileX = null;
+			this.tileZ = null;
+			this.last = null;
+			this.frame = this.frame.bind(this);
+		}
+
+		/** Kann dieser Browser 3D-Szenen darstellen? Sonst bleibt der Himmel stehen. */
+		static supported() {
+			return typeof CSS !== 'undefined' && CSS.supports
+				&& CSS.supports('transform-style', 'preserve-3d')
+				&& CSS.supports('translate', '0 0 1px');
+		}
+
+		/** Legt die Pflanzen gleichmässig verteilt um den Startpunkt. */
+		plant(count) {
+			// Je Pflanzenart eine Regel – das Bild wird einmal zerlegt, nicht je Blume.
+			let rules = '';
+			for (const name in PLANTS) {
+				rules += '.p-' + name + '{background-image:url("data:image/svg+xml,'
+					+ encodeURIComponent(PLANTS[name]) + '")}';
+			}
+			const sheet = document.createElement('style');
+			sheet.textContent = rules;
+			document.head.appendChild(sheet);
+
+			const half = WORLD.field / 2;
+			const fragment = document.createDocumentFragment();
+			for (let i = 0; i < count; i++) {
+				const kind = this.random.weighted(MIX);
+				const element = document.createElement('div');
+				element.className = 'f p-' + kind;
+				const height = kind === 'grass'
+					? this.random.between(34, 70)
+					: this.random.between(46, 118);
+				element.style.setProperty('--h', height.toFixed(1));
+				this.plants.push(new Plant(
+					element,
+					this.random.between(-half, half),
+					this.random.between(-half, half)
+				));
+				fragment.appendChild(element);
+			}
+			this.scene.appendChild(fragment);
+		}
+
+		/**
+		 * Verschiebt Kamera und alle Pflanzen um ein Vielfaches der Kachel zurück zum
+		 * Ursprung. Ohne das wüchsen die Koordinaten beim stundenlangen Flug so weit,
+		 * dass die Rechengenauigkeit der Grafik sichtbar zu zittern beginnt.
+		 */
+		recenter() {
+			const flight = this.flight;
+			if (Math.abs(flight.x) < WORLD.recenter && Math.abs(flight.z) < WORLD.recenter) { return; }
+			const shiftX = Math.round(flight.x / WORLD.tile) * WORLD.tile;
+			const shiftZ = Math.round(flight.z / WORLD.tile) * WORLD.tile;
+			flight.x -= shiftX;
+			flight.z -= shiftZ;
+			for (const plant of this.plants) {
+				plant.x -= shiftX;
+				plant.z -= shiftZ;
+				plant.moved = true;
+			}
+			this.tileX = null;
+		}
+
+		/** Überträgt die Kamera an CSS und stellt jede Pflanze nach. */
+		show() {
+			this.recenter();
+			const flight = this.flight;
+			const half = WORLD.field / 2;
+			const sin = Math.sin(flight.angle);
+			const cos = Math.cos(flight.angle);
+
+			const scene = this.scene.style;
+			scene.setProperty('--cam-x', flight.x.toFixed(2));
+			scene.setProperty('--cam-z', flight.z.toFixed(2));
+			scene.setProperty('--cam-a', flight.angle.toFixed(4));
+
+			// Boden auf das Kachelraster um die Kamera setzen – nur beim Überqueren einer
+			// Kachelgrenze, also etwa alle anderthalb Sekunden.
+			const tileX = Math.floor(flight.x / WORLD.tile) * WORLD.tile;
+			const tileZ = Math.floor(flight.z / WORLD.tile) * WORLD.tile;
+			if (tileX !== this.tileX || tileZ !== this.tileZ) {
+				this.ground.style.setProperty('--gx', String(tileX));
+				this.ground.style.setProperty('--gz', String(tileZ));
+				this.tileX = tileX;
+				this.tileZ = tileZ;
+			}
+
+			for (const plant of this.plants) {
+				// Sternenfeld: Wer das Feld um die Kamera verlässt, kommt auf der anderen
+				// Seite wieder herein – dort liegt er weit hinten im Dunst.
+				while (plant.x - flight.x < -half) { plant.x += WORLD.field; plant.moved = true; }
+				while (plant.x - flight.x >= half) { plant.x -= WORLD.field; plant.moved = true; }
+				while (plant.z - flight.z < -half) { plant.z += WORLD.field; plant.moved = true; }
+				while (plant.z - flight.z >= half) { plant.z -= WORLD.field; plant.moved = true; }
+
+				const rx = plant.x - flight.x;
+				const rz = plant.z - flight.z;
+				// Blickrichtung ist (-sin a, -cos a).
+				const ahead = -(sin * rx + cos * rz);
+				const side = cos * rx - sin * rz;
+				const dist = Math.hypot(rx, rz);
+				// Hinter der Kamera, im Dunst oder weit ausserhalb des Blickfelds: gar
+				// nicht zeichnen. Das spart dem Browser die meiste Arbeit.
+				const visible = ahead > 18 && dist < WORLD.fogEnd && Math.abs(side) < ahead * 1.4 + 160;
+				plant.show(visible);
+				if (!visible) { continue; }
+				plant.place();
+
+				// Tiefenunschärfe: vor der Schärfeebene deutlich schneller als dahinter,
+				// wie bei einem Makro-Objektiv; in halben Pixeln gestuft.
+				const soft = Math.max((dist - WORLD.focus) / 170, (WORLD.focus - dist) / 55) - 0.3;
+				const blur = Math.round(Math.min(7, Math.max(0, soft)) * 2) / 2;
+				// Dunst in der Ferne, sanftes Auftauchen ganz vorn; in 5-%-Stufen.
+				const fog = Math.min(1, Math.max(0, (WORLD.fogEnd - dist) / (WORLD.fogEnd - WORLD.fogStart)));
+				const fade = Math.min(1, Math.max(0, (ahead - 18) / 60));
+				plant.look(blur, Math.round(fog * fade * 20) / 20);
+			}
+
+			this.bee.style.setProperty('--bank', flight.bank().toFixed(2));
+			// Die Kamera legt sich mit in die Kurve, aber nur zu einem Drittel – sonst
+			// kippt die ganze Welt, und aus dem Flug wird Seegang.
+			this.root.style.setProperty('--roll', (flight.bank() * 0.34).toFixed(2));
+		}
+
+		frame(time) {
+			// Nach einem Tabwechsel nicht mit einem Riesenschritt weiterfliegen.
+			const dt = this.last === null ? 0 : Math.min(0.05, (time - this.last) / 1000);
+			this.last = time;
+			this.flight.advance(dt);
+			this.show();
+			requestAnimationFrame(this.frame);
+		}
+
+		/**
+		 * Spult den Flug in festen Schritten vor. Nur für Prüfbilder (?t=Sekunden):
+		 * Ein kopfloser Browser ohne Grafikkarte liefert zu wenige Bilder, und der
+		 * Schutz gegen Riesenschritte in frame() bremst den Flug dann aus.
+		 */
+		fastForward(seconds) {
+			for (let t = 0; t < seconds; t += 1 / 60) {
+				this.flight.advance(1 / 60);
+			}
+		}
+
+		start(animate, skip) {
+			this.plant(620);
+			this.fastForward(skip);
+			this.show();
+			if (animate) {
+				requestAnimationFrame(this.frame);
+			}
+		}
+	}
+
+	if (!Meadow.supported()) {
+		return;
+	}
+	const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	// ?t=12.5 spult 12,5 Sekunden vor und hält an – für Prüfbilder, begrenzt auf 10 Minuten.
+	const skip = Math.min(600, Math.max(0, parseFloat(new URLSearchParams(location.search).get('t')) || 0));
+	new Meadow(
+		document.getElementById('scene'),
+		document.querySelector('.ground'),
+		document.getElementById('bee'),
+		document.querySelector('.meadow')
+	).start(!still && skip === 0, skip);
+})();
+</script>
 </body>
 </html>
