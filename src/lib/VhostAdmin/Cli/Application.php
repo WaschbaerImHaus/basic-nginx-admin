@@ -15,6 +15,7 @@ namespace VhostAdmin\Cli;
 
 use VhostAdmin\Config;
 use VhostAdmin\Migration\LayoutMigrator;
+use VhostAdmin\Value\ProtectPath;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\NginxSnippet;
@@ -40,6 +41,7 @@ vhost – nginx-vHosts verwalten
   vhost restore <name>                  (ein angestossenes Entfernen zurücknehmen)
   vhost purge-due                       (abgelaufene Vormerkungen endgültig entfernen)
   vhost protect <name> on|off
+  vhost protect-path <name> [pfad]      (Schutz nur für diesen Pfad; leer = ganze Seite)
   vhost user-add <name> <user>        (Passwort per stdin)
   vhost user-del <name> <user>
   vhost ip-add <name> <ip|cidr>
@@ -177,7 +179,9 @@ TXT;
 						$vhost->name,
 						$vhost->kind->value,
 						$this->layout->docroot($vhost),
-						$vhost->protect ? 'an' : 'aus',
+						// Mit Pfad steht der Pfad selbst da – so ist auf einen Blick klar,
+						// was geschützt ist.
+						$vhost->protect ? ($vhost->protectPath ?? 'an') : 'aus',
 						$vhost->ssl ? 'an' : 'aus',
 						$vhost->isPendingDeletion()
 							? 'GESPERRT, wird entfernt am '
@@ -246,6 +250,13 @@ TXT;
 				$on = $onOff($arg(1, 'on|off'));
 				$this->service->setProtection($this->service->load($arg(0, 'Name')), $on);
 				$this->out('Verzeichnisschutz ' . ($on ? 'aktiviert' : 'deaktiviert') . ".\n");
+				return 0;
+
+			case 'protect-path':
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$path = ProtectPath::fromString((string)($positional[1] ?? ''));
+				$this->service->setProtectPath($vhost, $path);
+				$this->out('Verzeichnisschutz gilt für ' . ($path === null ? 'die ganze Seite' : $path->value) . ".\n");
 				return 0;
 
 			case 'user-add':

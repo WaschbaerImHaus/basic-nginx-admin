@@ -80,6 +80,8 @@ final class AdminPageTest extends TestCase
 		self::assertSame(['args' => ['ssl', '--', 'a.de', 'on'], 'stdin' => null], AdminPage::commandFor('ssl', ['name' => 'a.de', 'state' => 'on']));
 		self::assertSame(['args' => ['remove', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => 'a.de']));
 		self::assertSame(['args' => ['set', '--', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
+		self::assertSame(['args' => ['protect-path', '--', 'a.de', '/admin'], 'stdin' => null], AdminPage::commandFor('protect_path', ['name' => 'a.de', 'path' => ' /admin ']));
+		self::assertSame(['args' => ['protect-path', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('protect_path', ['name' => 'a.de', 'path' => '']), 'leer = ganze Seite');
 		self::assertNull(AdminPage::commandFor('hack', []));
 		self::assertNull(AdminPage::commandFor('', []));
 	}

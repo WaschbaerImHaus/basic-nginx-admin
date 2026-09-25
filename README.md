@@ -321,6 +321,7 @@ sudo vhost remove <name> --purge                             # sofort entfernen,
 sudo vhost purge-due                                         # abgelaufene Vormerkungen aufräumen
 sudo vhost protect <name> on|off
 printf 'passwort\n' | sudo vhost user-add <name> <user>
+sudo vhost protect-path <name> [pfad]                         # Schutz nur für diesen Pfad (leer = ganze Seite)
 sudo vhost user-del <name> <user>
 sudo vhost ip-add <name> <ip|cidr>
 sudo vhost ip-del <name> <ip|cidr>
@@ -473,3 +474,23 @@ den Tunnel zurück statt über den Heimrouter, was auf der Heimseite Policy-Rout
 
 Die Honigtopf-Auswertung muss für beide Wege nicht angepasst werden: Sobald im Log eine
 öffentliche Adresse steht, wird sie als Gegenstelle mit Netz und Land ausgewertet.
+
+## Verzeichnisschutz für einen Pfad
+
+Ohne Angabe schützt der Verzeichnisschutz die ganze Seite. Mit einem Pfad nur ihn und
+alles darunter:
+
+```bash
+sudo vhost protect-path example.com /admin    # /admin, /admin/, /admin/x.php – nicht /administrator
+sudo vhost protect-path example.com           # wieder die ganze Seite
+```
+
+IP-Freigaben und Benutzer gelten wie bisher: Wer von einer freigegebenen Adresse kommt,
+braucht keine Anmeldung. Der Pfad darf nur Buchstaben (ohne Umlaute), Ziffern und
+`. _ ~ -` enthalten – er landet als regulärer Ausdruck in der nginx-Konfiguration.
+
+Technisch hängt die Anmeldung an einer Variablen statt an einem `location`-Block; so
+ist PHP unterhalb des Pfads mitgeschützt, und Umwege wie `//admin` oder
+`/x/../admin` führen nicht vorbei. Eine Grenze bleibt: Eigene `rewrite`- oder
+`return`-Direktiven wirken in nginx vor der Anmeldung und können einen Pfad umlenken,
+bevor er geprüft wird.

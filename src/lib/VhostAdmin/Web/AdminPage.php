@@ -168,6 +168,11 @@ final class AdminPage
 				'stdin' => null,
 			],
 			'protect' => ['args' => $line('protect', [$name, $field('state')]), 'stdin' => null],
+			// Leeres Feld = ganze Seite; das CLI erwartet dann kein Argument.
+			'protect_path' => [
+				'args' => $line('protect-path', array_merge([$name], $field('path') !== '' ? [$field('path')] : [])),
+				'stdin' => null,
+			],
 			'user_add' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],
 			// Passwort neu setzen: derselbe Befehl, das Passwort erzeugt handlePost().
 			'user_reset' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],

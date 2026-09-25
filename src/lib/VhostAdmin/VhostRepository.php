@@ -113,6 +113,14 @@ final class VhostRepository
 	}
 
 	/**
+	 * Pfad des Verzeichnisschutzes setzen (null = ganze Seite).
+	 */
+	public function setProtectPath(int $id, ?string $path): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET protect_path = ? WHERE id = ?')->execute([$path, $id]);
+	}
+
+	/**
 	 * Docroot-Unterordner setzen (null = Docroot ist web/ selbst).
 	 */
 	public function setSubdir(int $id, ?string $subdir): void

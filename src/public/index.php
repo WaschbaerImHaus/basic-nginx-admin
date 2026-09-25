@@ -507,14 +507,28 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 
 	<div>
 		<div class="panel">
-			<h2>Verzeichnisschutz <?= badge($view->protect, 'aktiv', 'aus') ?></h2>
+			<h2>Verzeichnisschutz <?= badge($view->protect, 'aktiv', 'aus') ?>
+				<?php if ($view->protect): ?><span class="mono hint"><?= h($view->protectPath ?? 'ganze Seite') ?></span><?php endif ?></h2>
 			<?php if ($view->protect): ?>
-				<p class="hint">Zugriff nur mit freigegebener IP <em>oder</em> Benutzer und Passwort. Ohne Einträge ist der Docroot komplett gesperrt.</p>
+				<p class="hint">Zugriff nur mit freigegebener IP <em>oder</em> Benutzer und Passwort<?= $view->protectPath === null
+					? '. Ohne Einträge ist der Docroot komplett gesperrt.'
+					: ' – aber nur für <span class="mono">' . h($view->protectPath) . '</span> und alles darunter, auch PHP. Der Rest der Seite ist frei erreichbar.' ?></p>
 				<?= form('protect', ['name' => $view->name, 'state' => 'off'], 'Schutz abschalten', 'danger', 'Verzeichnisschutz wirklich abschalten? Der Docroot ist dann frei erreichbar.') ?>
 			<?php else: ?>
 				<p class="hint">Der Docroot ist ohne Anmeldung erreichbar.</p>
 				<?= form('protect', ['name' => $view->name, 'state' => 'on'], 'Schutz einschalten', 'primary') ?>
 			<?php endif ?>
+			<form method="post" class="row" style="margin-top:.7rem">
+				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="protect_path"><input type="hidden" name="name" value="<?= h($view->name) ?>">
+				<label for="protect-path" class="hint">Nur für Pfad</label>
+				<input id="protect-path" type="text" name="path" class="mono" value="<?= h($view->protectPath ?? '') ?>"
+					placeholder="leer = ganze Seite, z. B. /admin" pattern="[\/A-Za-z0-9._~\-]*" maxlength="200">
+				<button><?= $view->protectPath === null ? 'Übernehmen' : 'Ändern' ?></button>
+			</form>
+			<p class="hint">Gilt für den Pfad und alles darunter: <span class="mono">/admin</span> schützt
+				<span class="mono">/admin/</span> und <span class="mono">/admin/x.php</span>, nicht aber
+				<span class="mono">/administrator</span>. Eigene <span class="mono">rewrite</span>- oder
+				<span class="mono">return</span>-Direktiven wirken vor der Anmeldung und können den Pfad umgehen.</p>
 
 			<h2 style="margin-top:1.2rem">Benutzer</h2>
 			<?php if ($users): ?>

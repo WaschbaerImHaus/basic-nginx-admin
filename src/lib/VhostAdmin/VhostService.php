@@ -20,6 +20,7 @@ use VhostAdmin\Ssl\CertbotInterface;
 use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Ssl\ReachabilityResult;
 use VhostAdmin\Ssl\ReachabilityStatus;
+use VhostAdmin\Value\ProtectPath;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Php\FpmReloaderInterface;
@@ -194,6 +195,18 @@ final class VhostService
 		}
 		$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password));
 		$this->render($vhost);
+	}
+
+	/**
+	 * Beschränkt den Verzeichnisschutz auf einen Pfad; null = ganze Seite.
+	 *
+	 * Der Schutz selbst wird dabei nicht ein- oder ausgeschaltet – ein Pfad bei
+	 * abgeschaltetem Schutz ist gespeichert und gilt, sobald der Schutz wieder an ist.
+	 */
+	public function setProtectPath(Vhost $vhost, ?ProtectPath $path): void
+	{
+		$this->repository->setProtectPath((int)$vhost->id, $path?->value);
+		$this->render($this->load($vhost->name));
 	}
 
 	/**
@@ -469,9 +482,14 @@ final class VhostService
 
 		$this->writeProtected($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
 
-		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost, $this->repository->ips($vhost->id)));
+		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost));
 
-		file_put_contents($available, $this->renderer->serverConfig($vhost, $this->hstsEnabled()));
+		// Die IP-Freigaben stehen seit 2026-09-25 im geo-Block der Server-Konfiguration.
+		file_put_contents($available, $this->renderer->serverConfig(
+			$vhost,
+			$this->hstsEnabled(),
+			$this->repository->ips((int)$vhost->id)
+		));
 		// Ein zum Entfernen vorgemerkter vHost darf durch ein Neuschreiben (z.B. aus
 		// install.sh oder renderAll()) nicht wieder aktiv werden.
 		if ($vhost->isPendingDeletion()) {

@@ -76,4 +76,27 @@ final class DatabaseTest extends TestCase
 		$row = $db->pdo()->query("SELECT php FROM vhosts WHERE name = 'alt.de'")->fetch();
 		self::assertSame(0, (int)$row['php'], 'Bestehende Hosts behalten PHP aus');
 	}
+
+	/**
+	 * Bestandsdatenbanken bekommen die Spalte für den geschützten Pfad nachgereicht;
+	 * bestehende Hosts bleiben dabei ohne Pfad, also für die ganze Seite geschützt.
+	 */
+	public function testInitSchemaAddsProtectPathColumnToOlderDatabase(): void
+	{
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/alt.sqlite']));
+		$db->pdo()->exec(
+			'CREATE TABLE vhosts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, '
+			. "kind TEXT NOT NULL CHECK (kind IN ('domain', 'localhost')), port INTEGER, "
+			. 'subdir TEXT, protect INTEGER NOT NULL DEFAULT 1, ssl INTEGER NOT NULL DEFAULT 0, '
+			. "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+		);
+		$db->pdo()->exec("INSERT INTO vhosts (name, kind) VALUES ('alt.de', 'domain')");
+
+		$db->initSchema();
+
+		$columns = array_column($db->pdo()->query('PRAGMA table_info(vhosts)')->fetchAll(), 'name');
+		self::assertContains('protect_path', $columns);
+		$row = $db->pdo()->query("SELECT protect_path FROM vhosts WHERE name = 'alt.de'")->fetch();
+		self::assertNull($row['protect_path'], 'bestehende Hosts bleiben ganz geschützt');
+	}
 }

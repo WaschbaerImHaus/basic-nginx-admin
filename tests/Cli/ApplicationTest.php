@@ -193,6 +193,34 @@ final class ApplicationTest extends TestCase
 		self::assertSame('', file_get_contents($this->dir . '/auth/a.example.htpasswd'));
 	}
 
+	public function testProtectPathLimitsAndResetsTheProtection(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		[$code, $out] = $this->runCli(['protect-path', 'a.example', '/admin/']);
+		self::assertSame(0, $code);
+		self::assertSame("Verzeichnisschutz gilt für /admin.\n", $out);
+
+		[$code, $out] = $this->runCli(['protect-path', 'a.example']);
+		self::assertSame(0, $code);
+		self::assertSame("Verzeichnisschutz gilt für die ganze Seite.\n", $out);
+
+		[$code, , $err] = $this->runCli(['protect-path', 'a.example', '/a;b']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('Unzulässiges Zeichen', $err);
+	}
+
+	/**
+	 * vhost list zeigt den Pfad statt nur „an", damit auf einen Blick klar ist, was
+	 * geschützt ist.
+	 */
+	public function testListShowsTheProtectedPath(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		$this->runCli(['protect-path', 'a.example', '/admin']);
+		[, $out] = $this->runCli(['list']);
+		self::assertStringContainsString('schutz:/admin', $out);
+	}
+
 	public function testProtectIpsAndSsl(): void
 	{
 		$this->runCli(['add', 'a.example']);

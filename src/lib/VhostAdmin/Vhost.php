@@ -21,6 +21,8 @@ declare(strict_types=1);
 
 namespace VhostAdmin;
 
+use VhostAdmin\Value\ProtectPath;
+
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\SubDirectory;
 
@@ -62,6 +64,8 @@ final class Vhost
 		public readonly ?string $healthToken = null,
 		public readonly ?string $deletedAt = null,
 		public readonly ?string $createdAt = null,
+		// Pfad, auf den der Verzeichnisschutz beschränkt ist; null = ganze Seite.
+		public readonly ?string $protectPath = null,
 	) {
 		$this->assertConsistent();
 	}
@@ -79,6 +83,18 @@ final class Vhost
 	 */
 	private function assertConsistent(): void
 	{
+		// Der Pfad landet als Ausdruck in der nginx-Konfiguration; auch ein Wert aus der
+		// Datenbank muss deshalb dieselbe Prüfung bestehen wie eine Eingabe.
+		if ($this->protectPath !== null) {
+			try {
+				$checked = ProtectPath::fromString($this->protectPath);
+			} catch (\InvalidArgumentException $e) {
+				throw new \RuntimeException('Ungültiger Datensatz in der Datenbank: ' . $e->getMessage());
+			}
+			if ($checked === null || $checked->value !== $this->protectPath) {
+				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: Schutzpfad \"{$this->protectPath}\"");
+			}
+		}
 		if ($this->kind === VhostKind::Domain) {
 			if ($this->port !== null) {
 				throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: Domain mit Port ({$this->port})");
@@ -148,6 +164,7 @@ final class Vhost
 			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
 			($row['deleted_at'] ?? null) === null || $row['deleted_at'] === '' ? null : (string)$row['deleted_at'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
+			($row['protect_path'] ?? null) === null || $row['protect_path'] === '' ? null : (string)$row['protect_path'],
 		);
 	}
 

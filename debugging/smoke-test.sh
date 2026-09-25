@@ -53,6 +53,26 @@ expect 401 "falsches Passwort" -u alice:falsch -H 'Host: smoke-test.example' htt
 vhost ip-add smoke-test.example 127.0.0.1 >/dev/null
 expect 200 "IP-Freigabe" -H 'Host: smoke-test.example' http://127.0.0.1/
 vhost ip-del smoke-test.example 127.0.0.1 >/dev/null
+
+echo "== Schutz nur für einen Pfad"
+# Umsetzung ohne location-Block: auth_basic mit Variable, map auf $uri (normalisiert).
+mkdir -p /var/www/smoke-test.example/web/public/intern /var/www/smoke-test.example/web/public/internet
+echo intern > /var/www/smoke-test.example/web/public/intern/index.html
+echo internet > /var/www/smoke-test.example/web/public/internet/index.html
+vhost protect-path smoke-test.example /intern >/dev/null
+expect 200 "ausserhalb des Pfads frei" -H 'Host: smoke-test.example' http://127.0.0.1/
+expect 401 "im Pfad gesperrt" -H 'Host: smoke-test.example' http://127.0.0.1/intern/
+expect 401 "ohne Schrägstrich" -H 'Host: smoke-test.example' http://127.0.0.1/intern
+expect 200 "gleicher Anfang, anderer Name" -H 'Host: smoke-test.example' http://127.0.0.1/internet/
+expect 401 "doppelter Schrägstrich" --path-as-is -H 'Host: smoke-test.example' http://127.0.0.1//intern/
+expect 401 "Umweg über .." --path-as-is -H 'Host: smoke-test.example' http://127.0.0.1/internet/../intern/
+expect 401 "prozentkodiert" --path-as-is -H 'Host: smoke-test.example' 'http://127.0.0.1/%69ntern/'
+expect 200 "im Pfad mit Login" -u alice:geheim-geheim -H 'Host: smoke-test.example' http://127.0.0.1/intern/
+vhost ip-add smoke-test.example 127.0.0.1 >/dev/null
+expect 200 "im Pfad mit IP-Freigabe" -H 'Host: smoke-test.example' http://127.0.0.1/intern/
+vhost ip-del smoke-test.example 127.0.0.1 >/dev/null
+vhost protect-path smoke-test.example >/dev/null
+expect 401 "wieder ganze Seite" -H 'Host: smoke-test.example' http://127.0.0.1/
 vhost protect smoke-test.example off >/dev/null
 expect 200 "Schutz aus" -H 'Host: smoke-test.example' http://127.0.0.1/
 # Kein direktes "curl | grep -q": grep -q schließt die Pipe beim ersten Treffer,
@@ -230,6 +250,19 @@ grep -q 'Sondierungen' <<<"$OUT" || fail "Honigtopf-Ansicht ohne Kennzahlen"
 echo "ok   Honigtopf-Ansicht liefert aus"
 grep -q '\.env' <<<"$(curl -s -H 'Host: smoke-php.example' 'http://127.0.0.1/hp/?ansicht=pfade')" \
 	&& echo "ok   Detailansicht liefert aus" || fail "Detailansicht ohne Inhalt"
+
+# PHP unter einem geschützten Pfad muss mitgeschützt sein. Genau hier versagt ein
+# location-Block: Als Präfix gewönne der PHP-Regex-Block, mit ^~ käme der Quelltext.
+mkdir -p /var/www/smoke-php.example/web/intern
+printf '<?php echo "PHP-GESCHUETZT"; ?>\n' > /var/www/smoke-php.example/web/intern/p.php
+vhost protect smoke-php.example on >/dev/null
+vhost protect-path smoke-php.example /intern >/dev/null
+expect 401 "PHP im geschützten Pfad" -H 'Host: smoke-php.example' http://127.0.0.1/intern/p.php
+grep -q 'PHP-GESCHUETZT' <<<"$(curl -s -H 'Host: smoke-php.example' http://127.0.0.1/intern/p.php)" \
+	&& fail "PHP-Ausgabe oder Quelltext trotz Schutz ausgeliefert" || echo "ok   weder Ausgabe noch Quelltext"
+expect 200 "PHP ausserhalb des Pfads" -H 'Host: smoke-php.example' http://127.0.0.1/t.php
+vhost protect-path smoke-php.example >/dev/null
+vhost protect smoke-php.example off >/dev/null
 
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"

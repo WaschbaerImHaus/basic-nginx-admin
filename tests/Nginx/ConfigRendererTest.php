@@ -46,17 +46,68 @@ final class ConfigRendererTest extends TestCase
 		);
 	}
 
-	public function testAuthSnippetEnabledWithIps(): void
+	/**
+	 * Seit 2026-09-25 (Pfad für den Verzeichnisschutz): Die Anmeldung hängt an einer
+	 * Variablen statt an satisfy/allow/deny. Ergibt sie "off", entfällt die Anmeldung –
+	 * für jede Anfrage, auch PHP, ohne location-Blöcke und deren Vorrangfallen.
+	 */
+	public function testAuthSnippetUsesTheRealmVariable(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
 		$expected = "# generiert von vhost – nicht manuell bearbeiten\n"
-			. "satisfy any;\n"
-			. "allow 10.0.0.0/8;\n"
-			. "allow 203.0.113.5;\n"
-			. "deny all;\n"
-			. "auth_basic \"Geschützter Bereich\";\n"
+			. "# Anmeldung nur, wo \$vhostadmin_1_realm nicht \"off\" ist (Kopf der Server-Konfiguration).\n"
+			. "auth_basic \$vhostadmin_1_realm;\n"
 			. "auth_basic_user_file /etc/nginx/auth/example.com.htpasswd;\n";
-		self::assertSame($expected, $this->renderer()->authSnippet($v, ['10.0.0.0/8', '203.0.113.5']));
+		self::assertSame($expected, $this->renderer()->authSnippet($v));
+	}
+
+	/**
+	 * Ganze Seite: Wer nicht von einer freigegebenen Adresse kommt, muss sich anmelden.
+	 */
+	public function testAccessMapsForTheWholeSite(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->accessMaps($v, ['10.0.0.0/8', '2001:db8::/32']);
+
+		self::assertStringContainsString("geo \$vhostadmin_1_ip {\n    default 0;\n    10.0.0.0/8 1;\n    2001:db8::/32 1;\n}\n", $out);
+		self::assertStringContainsString("map \$uri \$vhostadmin_1_path {\n    default 1;\n}\n", $out);
+		self::assertStringContainsString(
+			"map \$vhostadmin_1_ip\$vhostadmin_1_path \$vhostadmin_1_realm {\n    default off;\n    01 \"Geschützter Bereich\";\n}\n",
+			$out
+		);
+	}
+
+	/**
+	 * Mit Pfad: nur er und alles darunter. Die Zuordnung läuft über $uri, den nginx
+	 * vorher dekodiert und normalisiert – "//admin" oder "/x/../admin" landen beim
+	 * selben Pfad.
+	 */
+	public function testAccessMapsForAPath(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, protectPath: '/admin');
+		$out = $this->renderer()->accessMaps($v, []);
+		self::assertStringContainsString("map \$uri \$vhostadmin_1_path {\n    default 0;\n    ~^/admin(?:/|\$) 1;\n}\n", $out);
+		self::assertStringContainsString("geo \$vhostadmin_1_ip {\n    default 0;\n}\n", $out, 'ohne Freigaben');
+	}
+
+	public function testNoAccessMapsWithoutProtection(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, false, false);
+		self::assertSame('', $this->renderer()->accessMaps($v, ['10.0.0.0/8']));
+	}
+
+	/**
+	 * geo und map gehören auf die http-Ebene. Die Server-Konfiguration wird dort
+	 * eingebunden, also stehen sie in ihr vor dem ersten server-Block.
+	 */
+	public function testServerConfigCarriesTheMapsBeforeTheFirstServerBlock(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, protectPath: '/admin');
+		$out = $this->renderer()->serverConfig($v, true, ['203.0.113.5']);
+		$maps = strpos($out, 'geo $vhostadmin_1_ip');
+		self::assertNotFalse($maps);
+		self::assertLessThan(strpos($out, 'server {'), $maps);
+		self::assertStringContainsString('    203.0.113.5 1;', $out);
 	}
 
 	public function testAuthSnippetDisabled(): void
@@ -64,7 +115,7 @@ final class ConfigRendererTest extends TestCase
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, false, false);
 		self::assertSame(
 			"# generiert von vhost – nicht manuell bearbeiten\n# Verzeichnisschutz deaktiviert\n",
-			$this->renderer()->authSnippet($v, ['10.0.0.0/8'])
+			$this->renderer()->authSnippet($v)
 		);
 	}
 
@@ -84,7 +135,9 @@ final class ConfigRendererTest extends TestCase
 		$v = new Vhost(1, 'test.example.com', VhostKind::Domain, null, 'public', true, false);
 		$out = $this->renderer()->serverConfig($v);
 
-		self::assertStringStartsWith("# generiert von vhost – nicht manuell bearbeiten\nserver {\n", $out);
+		// Geschützt: geo/map des Verzeichnisschutzes stehen vor dem server-Block.
+		self::assertStringStartsWith("# generiert von vhost – nicht manuell bearbeiten\n# Verzeichnisschutz:", $out);
+		self::assertStringContainsString("}\n\nserver {\n    listen 80;", $out);
 		self::assertStringEndsWith("    # <<<<\n}\n", $out);
 		self::assertSame(1, substr_count($out, 'server {'), 'eine Unterdomain braucht nur einen Block');
 

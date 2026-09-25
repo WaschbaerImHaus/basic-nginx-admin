@@ -54,3 +54,14 @@ mehr Hash-Runden (nginx prueft Basic-Auth je Anfrage - CPU-Last, und erzeugte
 Passwoerter haben ~123 Bit) und default_server 443 (wuerde IP-Scanner aus dem
 Honigtopf entfernen - Nutzerentscheidung).
 Scheduler: CronCreate alle 4 h (:17), sitzungsgebunden, laeuft nach 7 Tagen ab.
+
+2026-09-25 21:30 - Verzeichnisschutz fuer einen Pfad (Nutzerwunsch)
+Kein location-Block: Als Praefix gewinnt der PHP-Regex-Block (/admin/x.php
+ungeschuetzt), mit ^~ greift PHP nicht mehr (Quelltext ausgeliefert). Stattdessen
+auth_basic mit Variable, geo fuer IP-Freigaben, map auf $uri. Vorher mit einer
+Wegwerf-nginx-Instanz belegt, dass auth_basic den Wert "off" zur Laufzeit auswertet und
+$uri //admin, /x/../admin und /%61dmin abdeckt. Mein erster Test dort zeigte /admin/x.php
+ungeschuetzt - Testfehler: "return" wirkt in der Rewrite-Phase vor der Zugriffspruefung;
+mit einem Content-Phasen-Block 401 wie erwartet.
+Der Mechanismus ersetzt satisfy/allow/deny auch fuer die ganze Seite (ein Mechanismus
+statt zwei). Smoke-Test prueft alle Umwege und PHP im Pfad. 575 Tests gruen.

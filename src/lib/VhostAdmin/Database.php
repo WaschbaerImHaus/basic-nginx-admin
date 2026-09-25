@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	port       INTEGER,
 	subdir     TEXT,
 	protect    INTEGER NOT NULL DEFAULT 1,
+	protect_path TEXT,
 	ssl        INTEGER NOT NULL DEFAULT 0,
 	php        INTEGER NOT NULL DEFAULT 0,
 	health_token TEXT,
@@ -109,6 +110,10 @@ SQL);
 			// Zeitpunkt, zu dem das Entfernen angestossen wurde; bis zum Ablauf der
 			// Schonfrist bleibt der Eintrag bestehen und lässt sich zurückholen.
 			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN deleted_at TEXT');
+		}
+		if (!in_array('protect_path', $columns, true)) {
+			// Ohne Standardwert: NULL heisst ganze Seite, wie bisher.
+			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN protect_path TEXT');
 		}
 		if (!in_array('health_token', $columns, true)) {
 			// Ohne Standardwert: der Wert wird je vHost beim ersten Schreiben der

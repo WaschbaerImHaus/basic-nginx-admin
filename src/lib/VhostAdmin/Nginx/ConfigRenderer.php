@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace VhostAdmin\Nginx;
 
+use VhostAdmin\Value\ProtectPath;
+
 use VhostAdmin\Config;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostLayout;
@@ -75,25 +77,86 @@ final class ConfigRenderer
 	}
 
 	/**
-	 * Auth-Snippet: freigegebene IPs ODER gültiger Login (satisfy any).
-	 * Ohne IPs und ohne Benutzer ist der Docroot komplett gesperrt.
+	 * Auth-Snippet (Server-Ebene): Anmeldung, wo die Realm-Variable nicht "off" ist.
 	 *
-	 * @param list<string> $ips
+	 * Seit 2026-09-25 kein satisfy/allow/deny mehr. Wer sich anmelden muss, entscheiden
+	 * geo und map am Kopf der Server-Konfiguration (accessMaps()): freigegebene Adresse
+	 * ODER Login, und nur innerhalb des geschützten Pfads. auth_basic wertet eine
+	 * Variable bei jeder Anfrage aus; ergibt sie "off", entfällt die Anmeldung. Das gilt
+	 * für jede Anfrage, auch für PHP – ein location-Block für den Pfad hätte dagegen
+	 * zwei Fallen: Als Präfix verlöre er /admin/x.php an den PHP-Block (Regex gewinnt,
+	 * PHP ungeschützt), mit ^~ griffe der PHP-Block nicht mehr (Quelltext ausgeliefert).
 	 */
-	public function authSnippet(Vhost $v, array $ips): string
+	public function authSnippet(Vhost $v): string
 	{
 		if (!$v->protect) {
 			return self::HEADER . "# Verzeichnisschutz deaktiviert\n";
 		}
-		$out = self::HEADER . "satisfy any;\n";
-		foreach ($ips as $ip) {
-			$out .= "allow $ip;\n";
-		}
-		return $out . "deny all;\nauth_basic \"Geschützter Bereich\";\nauth_basic_user_file " . $this->htpasswdPath($v) . ";\n";
+		$realm = $this->variable($v, 'realm');
+		return self::HEADER
+			. "# Anmeldung nur, wo \$$realm nicht \"off\" ist (Kopf der Server-Konfiguration).\n"
+			. "auth_basic \$$realm;\n"
+			. 'auth_basic_user_file ' . $this->htpasswdPath($v) . ";\n";
 	}
 
 	/**
-	 * Vollständige Server-Konfiguration des vHosts.
+	 * geo und map für den Verzeichnisschutz (http-Ebene; leer ohne Schutz).
+	 *
+	 *   ip    1 = Anfrage von einer freigegebenen Adresse (geo auf $remote_addr)
+	 *   path  1 = Anfrage im geschützten Bereich (map auf $uri)
+	 *   realm Anmeldung nötig genau bei ip=0 und path=1, sonst "off"
+	 *
+	 * $uri ist von nginx dekodiert und normalisiert: "//admin", "/x/../admin" und
+	 * "/%61dmin" landen beim selben Pfad (am 2026-09-25 gegen eine Wegwerf-Instanz
+	 * geprüft). Grenze: Eine eigene rewrite- oder return-Direktive wirkt in einer Phase
+	 * VOR der Zugriffsprüfung und kann den Pfad vorher umlenken.
+	 *
+	 * @param list<string> $ips freigegebene Adressen und Netze
+	 */
+	public function accessMaps(Vhost $v, array $ips): string
+	{
+		if (!$v->protect) {
+			return '';
+		}
+		$ip = $this->variable($v, 'ip');
+		$path = $this->variable($v, 'path');
+		$realm = $this->variable($v, 'realm');
+
+		$out = "# Verzeichnisschutz: Anmeldung nötig, wer nicht von einer freigegebenen Adresse\n"
+			. '# kommt und ' . ($v->protectPath === null ? 'die Seite' : $v->protectPath . ' oder darunter') . " aufruft.\n"
+			. "geo \$$ip {\n    default 0;\n";
+		foreach ($ips as $allowed) {
+			$out .= "    $allowed 1;\n";
+		}
+		$out .= "}\n";
+		$out .= "map \$uri \$$path {\n";
+		if ($v->protectPath === null) {
+			$out .= "    default 1;\n";
+		} else {
+			// Aus der Datenbank neu geprüft (Vhost::assertConsistent()), bevor der Wert
+			// hier als Ausdruck landet.
+			$out .= "    default 0;\n    " . ProtectPath::fromString($v->protectPath)?->pattern() . " 1;\n";
+		}
+		$out .= "}\n";
+		$out .= "map \$$ip\$$path \$$realm {\n    default off;\n    01 \"Geschützter Bereich\";\n}\n";
+		return $out;
+	}
+
+	/**
+	 * Name einer nginx-Variable dieses vHosts. Über die ID, nicht den Namen: Variablen
+	 * gelten für ganz nginx und dürfen nur Buchstaben, Ziffern und _ enthalten.
+	 */
+	private function variable(Vhost $v, string $purpose): string
+	{
+		if ($v->id === null) {
+			throw new \RuntimeException('Verzeichnisschutz braucht einen gespeicherten vHost (keine ID).');
+		}
+		return 'vhostadmin_' . $v->id . '_' . $purpose;
+	}
+
+	/**
+	 * Vollständige Server-Konfiguration des vHosts (Parameter $ips: freigegebene
+	 * Adressen für den Verzeichnisschutz, siehe accessMaps()).
 	 *
 	 * Aufbau nach dem Vorbild von ISPConfig (Nutzerwunsch vom 2026-09-20): Der
 	 * generierte Teil gibt möglichst viel vor, der eigene Bereich des Nutzers steht als
@@ -109,7 +172,23 @@ final class ConfigRenderer
 	 *                   überhaupt relevant); abschaltbar, weil die Kopfzeile im Browser
 	 *                   monatelang nachwirkt
 	 */
-	public function serverConfig(Vhost $v, bool $hsts = true): string
+	public function serverConfig(Vhost $v, bool $hsts = true, array $ips = []): string
+	{
+		// geo/map des Verzeichnisschutzes gehören auf die http-Ebene. Diese Datei wird
+		// dort eingebunden, also stehen sie hier vor dem ersten server-Block.
+		$servers = $this->servers($v, $hsts);
+		$maps = $this->accessMaps($v, $ips);
+		if ($maps === '') {
+			return $servers;
+		}
+		$body = str_starts_with($servers, self::HEADER) ? substr($servers, strlen(self::HEADER)) : $servers;
+		return self::HEADER . $maps . "\n" . $body;
+	}
+
+	/**
+	 * Die server-Blöcke des vHosts (ohne geo/map).
+	 */
+	private function servers(Vhost $v, bool $hsts): string
 	{
 		if ($v->isLocal()) {
 			$listen = "    listen 127.0.0.1:{$v->port};\n"

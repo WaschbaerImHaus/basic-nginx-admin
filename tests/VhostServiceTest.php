@@ -26,6 +26,7 @@ use VhostAdmin\Ssl\ReachabilityStatus;
 use VhostAdmin\Value\DomainName;
 use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
+use VhostAdmin\Value\ProtectPath;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
 use VhostAdmin\Ssl\ReachabilityChecker;
@@ -195,10 +196,10 @@ final class VhostServiceTest extends TestCase
 	{
 		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
 		$this->service->setProtection($v, false);
-		self::assertStringNotContainsString('deny all', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
+		self::assertStringNotContainsString('auth_basic', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
 		self::assertFalse($this->service->load('example.com')->protect);
 		$this->service->setProtection($this->service->load('example.com'), true);
-		self::assertStringContainsString('deny all', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
+		self::assertStringContainsString('auth_basic $vhostadmin_', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
 		self::assertSame(3, $this->reloader->calls);
 	}
 
@@ -212,11 +213,12 @@ final class VhostServiceTest extends TestCase
 		$hash = trim(substr($htpasswd, strlen('alice:')));
 		self::assertSame($hash, crypt('geheim-geheim', $hash));
 		self::assertNotSame($hash, crypt('falsch', $hash));
-		self::assertStringContainsString("allow 10.0.0.0/8;\n", (string)file_get_contents($this->dir . '/auth/example.com.conf'));
+		// Freigaben stehen seit 2026-09-25 im geo-Block am Kopf der Server-Konfiguration.
+		self::assertStringContainsString("    10.0.0.0/8 1;\n", (string)file_get_contents($this->dir . '/avail/example.com.conf'));
 		$this->service->removeUser($v, Username::fromString('alice'));
 		$this->service->removeIp($v, Cidr::fromString('10.0.0.0/8'));
 		self::assertSame('', file_get_contents($this->dir . '/auth/example.com.htpasswd'));
-		self::assertStringNotContainsString('allow ', (string)file_get_contents($this->dir . '/auth/example.com.conf'));
+		self::assertStringNotContainsString('10.0.0.0/8', (string)file_get_contents($this->dir . '/avail/example.com.conf'));
 	}
 
 	public function testEmptyPasswordIsRejected(): void
@@ -976,7 +978,8 @@ final class VhostServiceTest extends TestCase
 
 		// Der Verzeichnisschutz steht jetzt im Text statt als Verweis.
 		self::assertStringContainsString('auth_basic', $out);
-		self::assertStringContainsString('satisfy any;', $out);
+		self::assertStringContainsString('auth_basic $vhostadmin_', $out);
+		self::assertStringContainsString('geo $vhostadmin_', $out, 'die Freigaben stehen mit im Text');
 		// Die eigenen Direktiven ebenso.
 		self::assertStringContainsString('location = /health {', $out);
 		// Und es bleibt kein Verweis auf eine Datei dieses vHosts übrig.
@@ -1328,5 +1331,24 @@ final class VhostServiceTest extends TestCase
 		}
 		self::assertSame([], $this->certbot->calls, 'certbot darf nicht laufen');
 		self::assertSame(['.', '..'], scandir($this->dir . '/anderswo'), 'dort darf nichts entstehen');
+	}
+
+	/**
+	 * Nutzerwunsch vom 2026-09-25: Der Ordnerschutz bekommt einen optionalen Pfad.
+	 */
+	public function testProtectionCanBeLimitedToAPathAndBackToTheWholeSite(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
+		$this->service->setProtectPath($v, ProtectPath::fromString('/admin/'));
+
+		self::assertSame('/admin', $this->service->load('pfad.example')->protectPath);
+		$conf = (string)file_get_contents($this->dir . '/avail/pfad.example.conf');
+		self::assertStringContainsString('~^/admin(?:/|$) 1;', $conf);
+
+		$this->service->setProtectPath($this->service->load('pfad.example'), null);
+		self::assertNull($this->service->load('pfad.example')->protectPath);
+		$conf = (string)file_get_contents($this->dir . '/avail/pfad.example.conf');
+		self::assertStringNotContainsString('~^/admin', $conf);
+		self::assertStringContainsString("map \$uri \$vhostadmin_", $conf);
 	}
 }
