@@ -1,5 +1,5 @@
 [Unit]
-Description=vhost-admin: taegliche Auswertung der Honigtopf-Logs
+Description=vhost-admin: stuendliche Auswertung der Honigtopf-Logs
 Documentation=file:///opt/vhost-admin/docs/specs/2026-09-22-honeypot-dashboard.md
 
 [Service]

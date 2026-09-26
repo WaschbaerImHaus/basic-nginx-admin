@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Ablage der Tagesberichte: <verzeichnis>/<host>/<datum>.json
  *
- * Geschrieben wird von der täglichen Auswertung (als root), gelesen von der Ansicht
+ * Geschrieben wurde von der täglichen Auswertung (als root), gelesen von der Ansicht
  * (als Benutzer des php-fpm-Pools). Host und Datum kommen dort aus der Adresszeile und
  * werden hier streng geprüft: Die Ansicht läuft zwar mit open_basedir, aber darauf darf
  * sich diese Klasse nicht verlassen.

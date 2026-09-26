@@ -33,7 +33,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/public/honeypot/` – Vorlage der Honigtopf-Ansicht (`index.php`, Teilvorlagen `detail.php`/`calendar.php`/`days.php`, `bootstrap.php`, `style.css`); `honeypot/install-dashboard.sh` kopiert sie in den Docroot des Ansichtshosts und die Klassen nach `private/honeypot-lib/`
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (630 Tests, Stand 2026-09-25); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (648 Tests, Stand 2026-09-26); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -70,7 +70,8 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - PHP-Projekt: gepusht werden nur vollständige Builds (`build.sh`).
 
 ## Honigtopf (Ansicht unter einem eigenen vHost)
-- Die Ansicht **rechnet nichts selbst**. Die Logs gehören root und sollen für den Webserver unlesbar bleiben; die Auswertung läuft als root (`vhost-admin-honeypot.timer`, täglich 07:20) und legt die Auswertung je Kalendertag in `<ansichtshost>/private/honeypot/honeypot.sqlite` ab (root:<Pool-Gruppe> 0640). Die Ansicht öffnet die Datenbank **nur lesend** (`ReportDatabase::openReadOnly`). Diese Trennung nie aufweichen.
+- Die Ansicht **rechnet nichts selbst**. Die Logs gehören root und sollen für den Webserver unlesbar bleiben; die Auswertung läuft als root (`vhost-admin-honeypot.timer`, stündlich um :20 seit 2026-09-26) und legt die Auswertung je Kalendertag in `<ansichtshost>/private/honeypot/honeypot.sqlite` ab (root:<Pool-Gruppe> 0640). Die Ansicht öffnet die Datenbank **nur lesend** (`ReportDatabase::openReadOnly`). Diese Trennung nie aufweichen.
+- **Rotationsschutz:** `analyse.php` vergleicht `LogFiles::fingerprint()` (Name + Inode aller `access.log*`/`error.log*`) vor und nach dem Lesen und speichert bei einer Abweichung nichts. Ohne diesen Schutz könnte ein stündlicher Lauf, der in die Logrotation fällt (logrotate.timer hat eine zufällige Verzögerung), einen Vortag mit doppelt gelesener Fassung als abgeschlossen festschreiben – der würde nie wieder korrigiert. Nicht entfernen.
 - Datenbankregeln (`Analyzer`, seit 2026-09-25): Ein Tag ist `complete`, wenn er vor heute liegt und nicht der älteste Tag in einem womöglich schon abgeschnittenen Log ist. Abgeschlossene Tage mit `version >= Analyzer::VERSION` werden übersprungen; ein gespeicherter Tag mit mehr Anfragen als die vorhandenen Logs wird **nie** überschrieben (die Logs halten nur 14 Tage, die Datenbank alles). Ändert sich die Auswertungslogik, `Analyzer::VERSION` erhöhen – dann rechnet der nächste Lauf alle Tage neu, deren Logs noch da sind.
 - Ansicht: Zeitraum aus `tag` | `von`/`bis` | `zeitraum` (Schnellwahl, bleibt relativ); `monat` blättert nur den Kalender. `calendar.php`/`days.php`/`detail.php` sind Teilvorlagen und antworten direkt aufgerufen mit 404 (Smoke-Test). Neue Teilvorlagen in `install-dashboard.sh` **und** `smoke-test.sh` eintragen.
 - Die Ansicht kommt wegen `open_basedir` **nicht** an `/opt/vhost-admin`. Klassen und Berichte liegen deshalb als Kopie unter `private/` – `install.sh` frischt beides bei jedem Update auf, sofern `HONEYPOT_DASHBOARD` in `/etc/default/vhost-admin-honeypot` steht. Wer die Klassen ändert, muss den Installer laufen lassen, sonst arbeitet die Ansicht mit einer alten Kopie.

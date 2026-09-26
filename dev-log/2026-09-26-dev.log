@@ -1,0 +1,7 @@
+2026-09-26 21:47 Honigtopf-Auswertung stuendlich (Nutzerwunsch "ja" auf Vorschlag)
+Timer OnCalendar *:20 statt 07:20; install.sh startet den Timer neu (sonst gilt der alte
+Zeitplan weiter). Risiko dabei: logrotate.timer (daily, RandomizedDelaySec=1h) kann mitten
+in einen Lauf fallen -> Fassung doppelt/nicht gelesen, Vortag falsch als complete
+festgeschrieben. Abhilfe: Honeypot\LogFiles::fingerprint() (Name+Inode) vor/nach dem
+Lesen; bei Abweichung wird fuer den Host nichts gespeichert. 7 neue Tests, 648 gruen.
+Live: Timer naechster Lauf 22:20, Handlauf "ausgewertet 1, uebersprungen 7", 0,9 s.

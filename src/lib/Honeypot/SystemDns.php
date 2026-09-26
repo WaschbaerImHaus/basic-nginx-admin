@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Namensauflösung über den Auflöser des Systems.
  *
- * Läuft ausschliesslich in der täglichen Auswertung, nie in der Ansicht: Die Ansicht
+ * Läuft ausschliesslich in der stündlichen Auswertung, nie in der Ansicht: Die Ansicht
  * fragt nichts im Netz nach.
  *
  * @author Kurt Ingwer

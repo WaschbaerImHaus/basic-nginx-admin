@@ -216,7 +216,7 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 	<div class="tile">
 		<h2>Noch keine Berichte</h2>
 		<p class="note">Unter <span class="mono"><?= h($dataDir !== '' ? $dataDir : 'private/honeypot') ?></span>
-			liegt noch keine Auswertung. Sie läuft täglich als eigener Dienst
+			liegt noch keine Auswertung. Sie läuft stündlich als eigener Dienst
 			(<span class="mono">vhost-admin-honeypot.timer</span>); ein erster Lauf von Hand:</p>
 		<p class="mono">sudo php /opt/vhost-admin/honeypot/analyse.php --dashboard=&lt;dieser Host&gt; &lt;Honigtopf-Host&gt;</p>
 	</div>

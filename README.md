@@ -361,8 +361,10 @@ nach Beutegruppen, Kennungen (inklusive Erkennung durchgewechselter User-Agents)
 Anfragen die gar kein HTTP waren, das robots.txt-Signal, Anmeldeversuche, Tagesverlauf –
 und daraus abgeleitete Vorschläge, welche Werkzeuge in der Ansicht lohnen.
 
-Der systemd-Timer `vhost-admin-honeypot.timer` startet das täglich um 07:20, kurz nach
-der Logrotation. Welche Hosts ausgewertet werden, steht in
+Der systemd-Timer `vhost-admin-honeypot.timer` startet das stündlich (jeweils um :20).
+Fertige Tage werden übersprungen, ein Lauf rechnet nur den laufenden Tag nach und dauert
+unter einer Sekunde. Fällt ein Lauf in die Logrotation, erkennt er das und speichert
+nichts – der nächste holt es nach. Welche Hosts ausgewertet werden, steht in
 `/etc/default/vhost-admin-honeypot`:
 
 ```
@@ -401,7 +403,7 @@ sudo ./honeypot/install-dashboard.sh <ansichtshost> <honigtopf-host> [weitere ..
 
 Das Skript legt die Ansicht in den Docroot, die Auswertungsklassen nach
 `private/honeypot-lib/`, trägt die Hosts in `/etc/default/vhost-admin-honeypot` ein und
-wertet einmal aus. Danach läuft die Auswertung täglich um 07:20
+wertet einmal aus. Danach läuft die Auswertung stündlich
 (`vhost-admin-honeypot.timer`); ein Lauf von Hand:
 
 ```bash

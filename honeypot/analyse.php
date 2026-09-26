@@ -19,7 +19,7 @@ declare(strict_types=1);
  * Aufruf: php honeypot/analyse.php [--dashboard=<host>] <vhost-name> [weitere ...]
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 23:05
+ * @version Letzte Änderung: 2026-09-26 21:45
  */
 
 // Im Projektverzeichnis liegt der Autoloader unter src/, in der Installation
@@ -29,6 +29,7 @@ require is_file($bootstrap) ? $bootstrap : dirname(__DIR__) . '/bootstrap.php';
 
 use Honeypot\Analyzer;
 use Honeypot\DayReport;
+use Honeypot\LogFiles;
 use Honeypot\LogParser;
 use Honeypot\NetworkRegistry;
 use Honeypot\PeerResolver;
@@ -187,6 +188,7 @@ foreach ($names as $name) {
 	// Alle vorhandenen Fassungen lesen (readFile() nimmt auch .gz). Das Lesen kostet
 	// Millisekunden; teuer ist das Auswerten samt Nachschlagen, und das übernimmt der
 	// Analyzer nur für Tage, die es brauchen.
+	$fingerprint = LogFiles::fingerprint($logs);
 	$lines = $parser->readFile($logs . '/access.log');
 	$errorLines = $parser->readFile($logs . '/error.log');
 	for ($generation = 1; $generation <= LOG_GENERATIONS; $generation++) {
@@ -197,6 +199,13 @@ foreach ($names as $name) {
 	// gelöscht – und mit ihr vermutlich der Anfang des ältesten Tages.
 	$oldestMayBeCut = is_file($logs . '/access.log.' . LOG_GENERATIONS)
 		|| is_file($logs . '/access.log.' . LOG_GENERATIONS . '.gz');
+	// Während des Lesens rotiert? Dann ist eine Fassung doppelt oder gar nicht gelesen –
+	// nichts speichern, der nächste stündliche Lauf holt es nach.
+	if (LogFiles::fingerprint($logs) !== $fingerprint) {
+		echo "$name: Logs wurden während des Lesens rotiert - nichts gespeichert, nächster Lauf holt es nach.\n";
+		$markdown .= "\n## $name\n\nLogs wurden während des Lesens rotiert; dieser Lauf hat nichts gespeichert.\n";
+		continue;
+	}
 
 	// Eigene Namen und Adressen sind keine Gegenstelle. Der Portscanner MGLNDD etwa
 	// schreibt die Adresse des ZIELS in seine Anfrage – das wären wir selbst.

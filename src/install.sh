@@ -119,7 +119,7 @@ if [ -f "$SRC/../honeypot/analyse.php" ]; then
 	done
 	[ -d "$SRC/../honeypot/site" ] && cp -r "$SRC/../honeypot/site" "$APP/honeypot/"
 else
-	echo "Hinweis: honeypot/analyse.php fehlt im Paket - die taegliche Auswertung bleibt leer." >&2
+	echo "Hinweis: honeypot/analyse.php fehlt im Paket - die stuendliche Auswertung bleibt leer." >&2
 fi
 
 # Zeitgeber, der abgelaufene Loeschvormerkungen endgueltig entfernt. Ohne ihn bliebe
@@ -133,6 +133,8 @@ install -m 644 "$SRC/etc/vhost-admin-networks.timer" /etc/systemd/system/vhost-a
 systemctl daemon-reload
 systemctl enable --now vhost-admin-purge.timer >/dev/null
 systemctl enable --now vhost-admin-honeypot.timer >/dev/null
+# Ein geaenderter Zeitplan (OnCalendar) gilt erst nach einem Neustart des Timers.
+systemctl restart vhost-admin-honeypot.timer
 systemctl enable --now vhost-admin-networks.timer >/dev/null
 
 /usr/local/sbin/vhost migrate-layout

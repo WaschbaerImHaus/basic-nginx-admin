@@ -63,7 +63,7 @@ install -d -m 750 -o "$POWNER" "$BASE/private/honeypot"
 
 # 3. Dienst auf diese Hosts einstellen
 cat > /etc/default/vhost-admin-honeypot <<EOF
-# Hosts, deren Logs taeglich ausgewertet werden, und der vHost, der die Ansicht zeigt.
+# Hosts, deren Logs stuendlich ausgewertet werden, und der vHost, der die Ansicht zeigt.
 # Geschrieben von honeypot/install-dashboard.sh.
 HONEYPOT_HOSTS="${HOSTS[*]}"
 HONEYPOT_DASHBOARD="$VIEW"

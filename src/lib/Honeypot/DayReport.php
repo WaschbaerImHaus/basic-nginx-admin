@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Kennzahlen eines Kalendertages für einen Honigtopf-vHost.
  *
- * Der Bericht ist zugleich das Austauschformat: Die tägliche Auswertung läuft als root
+ * Der Bericht ist zugleich das Austauschformat: Die stündliche Auswertung läuft als root
  * (nur root darf die Logs lesen) und legt ihn als JSON ab; die Ansicht liest
  * ausschliesslich diese Fassung. Was hier nicht hineinkommt, ist dort für immer weg.
  *
