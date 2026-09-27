@@ -35,3 +35,4 @@ statt HTTP 500. CommandRunner: stream_select, Haenger vorher per Test nachgewies
 Honigtopf: Selbsttest-Zeilen zaehlen beim "behalten"-Vergleich mit, Tage 19.-23.09. werden
 neu gerechnet. Kleinkram: mkdir-Pruefung in Database, toter Import. 699 Tests gruen.
 2026-09-27 13:32 Nutzervorgabe: keine neuen Features am nginx-Admin. FEATURES.md Offen -> Zurueckgestellt, Scheduler auf Pflege umgestellt (Job 2322dcac).
+2026-09-27 13:33 Nutzervorgabe ergaenzt: Honigtopf soll wachsen. FEATURES/CLAUDE.md/Memory angepasst, Scheduler neu (Job b72f5b6c) mit Honigtopf-Ausbau als Auftrag.

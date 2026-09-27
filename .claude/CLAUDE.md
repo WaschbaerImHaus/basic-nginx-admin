@@ -37,7 +37,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
-- **Keine neuen Features ohne ausdrücklichen Wunsch** (Nutzervorgabe 2026-09-27: „der nginx admin ist an sich schon sehr komplett“). Scheduler- und Pflegerunden beheben nur Bugs, Sicherheitsrisiken und Honigtopf-Probleme; FEATURES.md „Zurückgestellt“ ist ein Merkzettel, keine Aufgabenliste.
+- **Verwaltung: keine neuen Features ohne ausdrücklichen Wunsch; Honigtopf: soll wachsen** (Nutzervorgabe 2026-09-27: „der nginx admin ist an sich schon sehr komplett … was aber wachsen soll ist der honeypot“). Am Verwaltungsteil nur Bugs und Sicherheit; FEATURES.md „Zurückgestellt“ ist ein Merkzettel. Am Honigtopf datengestützt erweitern (Köder, Auswertungen, Ansicht) – Richtschnur sind die Vorschläge der Seite (`Honeypot\Suggestions`) und die gesuchten Pfade.
 - Tests laufen ohne root: Pfade über `Config::fromArray`, Reload/certbot über Fakes.
 - nginx-Blöcke in `ConfigRenderer` sind mit 4 Leerzeichen eingerückt (nginx-Konvention); PHP-Code mit Tabs.
 - Schreibende Aktionen nur über das CLI; `www-data` darf per sudoers ausschließlich `/usr/local/sbin/vhost`.

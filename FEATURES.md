@@ -56,9 +56,13 @@
 
 ## Offen
 
-Keine. **Nutzervorgabe vom 2026-09-27:** „Der nginx admin ist an sich schon sehr komplett.
-Neue Features sind da erstmal nicht wirklich geplant.“ Gepflegt werden Bugs, Sicherheit und
-der Honigtopf; die Liste unten ist nur ein Merkzettel und wird nicht von selbst abgearbeitet.
+**Nutzervorgabe vom 2026-09-27:** „Der nginx admin ist an sich schon sehr komplett. Neue
+Features sind da erstmal nicht wirklich geplant. Was aber wachsen soll, ist der Honigtopf.“
+
+- **Verwaltung:** keine neuen Features, nur Pflege (Bugs, Sicherheit). Die Liste unter
+  „Zurückgestellt“ ist ein Merkzettel und wird nicht von selbst abgearbeitet.
+- **Honigtopf:** wächst weiter, datengestützt – was die Auswertung vorschlägt (Kachel „Was sich
+  als Nächstes lohnt“, Tagesberichte) und was die gesuchten Pfade hergeben.
 
 ## Zurückgestellt (nur auf ausdrücklichen Wunsch)
 
