@@ -100,10 +100,37 @@ function duration(int $seconds): string
 	};
 }
 
+/**
+ * Scanner-Familien, die im Zeitraum auftraten – gebildet aus den Sitzungen der 90 Tage
+ * bis zum Ende des Zeitraums, damit „wiederkehrend" auch Tage davor sieht.
+ *
+ * @return list<\Honeypot\ScanFamily>
+ */
+function families_in(\Honeypot\ReportDatabase $db, string $host, \Honeypot\Period $period): array
+{
+	$from = (new DateTimeImmutable($period->to))->modify('-89 days')->format('Y-m-d');
+	$window = \Honeypot\Period::between(min($from, $period->from), $period->to);
+	$families = \Honeypot\ScanFamilies::group($db->sessions($host, $window));
+	return array_values(array_filter(
+		$families,
+		static function (\Honeypot\ScanFamily $family) use ($period): bool {
+			foreach ($family->sessions as $session) {
+				if ($period->contains($session->date)) {
+					return true;
+				}
+			}
+			return false;
+		}
+	));
+}
+
 /** Anzeigename einer Köderart. */
 function decoy_name(string $kind): string
 {
-	return ['phpinfo' => 'phpinfo()', 'env' => '.env'][$kind] ?? $kind;
+	return [
+		'phpinfo' => 'phpinfo()', 'env' => '.env', 'wpconfig' => 'wp-config.php', 'config' => 'config.php',
+		'serverstatus' => 'server-status', 'serverinfo' => 'server-info', 'awscreds' => 'AWS-Zugangsdaten (Ausbruch)',
+	][$kind] ?? $kind;
 }
 
 /** Eine Balkenzeile. */
@@ -142,7 +169,7 @@ $period = $selection->period;
 $single = $period->isSingleDay();
 
 $view = param('ansicht');
-$views = ['pfade', 'verlauf', 'kennungen', 'dienste', 'anmeldungen', 'herkunft', 'ereignisse', 'koeder'];
+$views = ['pfade', 'verlauf', 'kennungen', 'dienste', 'anmeldungen', 'herkunft', 'ereignisse', 'koeder', 'wiederkehrer'];
 if (!in_array($view, $views, true)) {
 	$view = '';
 }
@@ -182,6 +209,7 @@ $titles = [
 	'anmeldungen' => 'Anmeldeversuche',
 	'ereignisse' => 'Ereignisse',
 	'koeder' => 'Köder',
+	'wiederkehrer' => 'Wiederkehrer',
 ];
 $title = $view === '' ? 'Honigtopf' : $titles[$view];
 // Kurze Wendung für Texte: „an diesem Tag" oder „in diesem Zeitraum".
@@ -342,9 +370,31 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 					<?php endforeach ?>
 				</table>
 			<?php endif ?>
-			<p class="hint">Wer <span class="mono">phpinfo.php</span> oder <span class="mono">.env</span> sucht,
-				bekommt eine erfundene Fassung mit einer Kennung nur für diesen Abruf. Taucht die Kennung wieder
+			<p class="hint">Wer <span class="mono">phpinfo.php</span>, <span class="mono">.env</span>,
+				<span class="mono">wp-config.php</span>, <span class="mono">config.php</span>, Apaches Statusseiten oder per
+				Verzeichnisausbruch AWS-Zugangsdaten sucht, bekommt eine erfundene Fassung mit einer Kennung nur für diesen Abruf. Taucht die Kennung wieder
 				auf – als Anmeldename oder in einer Adresse –, wurde der Fund ausgewertet und benutzt.</p>
+		</div>
+
+		<div class="tile">
+			<h2>Wiederkehrer <a href="<?= h(link_to(['ansicht' => 'wiederkehrer'])) ?>">alle Familien &rarr;</a></h2>
+			<?php $families = families_in($db, $host, $period); $recurring = array_filter($families, static fn($f): bool => $f->recurring()); ?>
+			<div class="figures">
+				<div class="figure"><div class="value"><?= count($families) ?></div><div class="label">Scanner-Familien</div></div>
+				<div class="figure"><div class="value <?= $recurring === [] ? '' : 'warn' ?>"><?= count($recurring) ?></div><div class="label">kamen an mehreren Tagen</div></div>
+			</div>
+			<?php if ($recurring !== []): ?>
+				<table class="compact">
+					<?php foreach (array_slice($recurring, 0, 4) as $family): $common = $family->commonPaths(); ?>
+						<tr><td class="num"><?= count($family->dates()) ?> Tage</td>
+							<td><?= h($family->timePattern()) ?>, <?= count($family->agents()) ?> Kennung<?= count($family->agents()) === 1 ? '' : 'en' ?> –
+								<span class="mono"><?= h(implode(' ', array_slice($common, 0, 3))) ?><?= count($common) > 3 ? ' …' : '' ?></span></td></tr>
+					<?php endforeach ?>
+				</table>
+			<?php endif ?>
+			<p class="hint">Ohne Absenderadresse wird ein Werkzeug an seiner <strong>Wortliste</strong> erkannt: Sitzungen,
+				deren gesuchte Pfade sich zu mindestens 60 % decken, gehören zu einer Familie – auch an anderen Tagen
+				und mit anderer Kennung.</p>
 		</div>
 
 		<div class="tile">

@@ -218,12 +218,42 @@ $classifier = new \Honeypot\LootClassifier();
 	</table>
 	<?php endif ?>
 	<p class="hint"><strong>So funktionieren die Köder.</strong> Anfragen nach <span class="mono">phpinfo.php</span>
-		(in allen gefragten Schreibweisen und Unterordnern) und nach <span class="mono">.env</span> beantwortet der
-		Honigtopf mit einer erfundenen, echt wirkenden Fassung. Darin stehen ein Benutzername
+		(in allen gefragten Schreibweisen und Unterordnern), <span class="mono">.env</span>,
+		<span class="mono">wp-config.php</span> samt Sicherungskopien, <span class="mono">config.php</span>,
+		<span class="mono">/server-status</span>, <span class="mono">/server-info</span> und Verzeichnisausbrüche nach
+		<span class="mono">.aws/credentials</span> beantwortet der Honigtopf mit einer erfundenen, echt wirkenden Fassung. Darin stehen ein Benutzername
 		<span class="mono">deploy-&lt;kennung&gt;</span> und zwei interne Adressen mit derselben Kennung; die Kennung
 		ist für jeden Abruf neu. Taucht sie später im Log auf, ist belegt, dass der Fund ausgewertet und benutzt
 		wurde – und von welchem Abruf er stammt. Alle Werte sind erfunden und gelten nirgends; mitgeschrieben wird
 		nichts, was ein Besucher eingibt.</p>
+
+<?php elseif ($view === 'wiederkehrer'): $families = families_in($db, $host, $period); ?>
+
+	<h2>Scanner-Familien</h2>
+	<p class="hint" style="margin-top:0"><?= count($families) ?> Familien mit Sitzungen <?= h($span) ?>; verglichen wird mit
+		den 90 Tagen bis zum Ende des Zeitraums. Eine Sitzung sind die Anfragen einer Kennung (oder einer Gruppe
+		durchgewechselter Kennungen) ohne Pause über 30 Minuten, mit mindestens drei Anfragen auf zwei Pfade.</p>
+	<?php if ($families === []): ?>
+		<p class="empty">Keine Sitzungen – noch zu wenig Verkehr oder nur Einzelanfragen.</p>
+	<?php else: ?>
+	<table>
+		<tr><th class="num">Tage</th><th>zuerst – zuletzt</th><th>Zeit</th><th class="num">Sitzungen</th><th class="num">Anfragen</th><th>Kennungen</th><th>Kern der Wortliste</th></tr>
+		<?php foreach ($families as $family): $dates = $family->dates(); $agents = $family->agents(); $common = $family->commonPaths(); ?>
+			<tr class="<?= $family->recurring() ? 'probe' : '' ?>">
+				<td class="num"><?= count($dates) ?></td>
+				<td class="mono"><?= h(\Honeypot\Period::day($dates[0])->label()) ?><?= count($dates) > 1 ? ' – ' . h(\Honeypot\Period::day(end($dates))->label()) : '' ?></td>
+				<td><?= h($family->timePattern()) ?></td>
+				<td class="num"><?= count($family->sessions) ?></td>
+				<td class="num"><?= $family->requests() ?></td>
+				<td class="mono"><?= count($agents) > 1 ? '<span class="tag warn">' . count($agents) . ' Kennungen</span><br>' : '' ?><?= h(substr((string)$agents[0], 0, 60)) ?><?= count($agents) > 1 ? ' …' : '' ?></td>
+				<td class="mono"><?= h(implode(' ', array_slice($common, 0, 12))) ?><?= count($common) > 12 ? ' … (' . count($common) . ')' : '' ?></td>
+			</tr>
+		<?php endforeach ?>
+	</table>
+	<?php endif ?>
+	<p class="hint"><strong>Warum Wortliste statt Kennung.</strong> Vor dem Honigtopf sitzt eine Adressumsetzung – jede
+		Anfrage kommt als 10.200.0.1. Kennungen wechseln Werkzeuge gern, die Liste der Pfade, die sie abklappern, dagegen
+		selten. Kommt eine Familie immer zur selben Uhrzeit, läuft sie nach Zeitplan.</p>
 
 <?php elseif ($view === 'herkunft'): ?>
 

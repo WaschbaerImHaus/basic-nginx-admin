@@ -33,7 +33,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/public/honeypot/` – Vorlage der Honigtopf-Ansicht (`index.php`, Teilvorlagen `detail.php`/`calendar.php`/`days.php`, `bootstrap.php`, `style.css`); `honeypot/install-dashboard.sh` kopiert sie in den Docroot des Ansichtshosts und die Klassen nach `private/honeypot-lib/`
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (699 Tests, Stand 2026-09-27); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (715 Tests, Stand 2026-09-27); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)

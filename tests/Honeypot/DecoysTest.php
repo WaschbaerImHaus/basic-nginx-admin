@@ -36,9 +36,42 @@ final class DecoysTest extends TestCase
 	/** Alles andere ist kein Köder – auch nichts, was nur ähnlich klingt. */
 	public function testIgnoresEverythingElse(): void
 	{
-		foreach (['/', '/index.html', '/phpinfo.html', '/a/b/phpinfo.php', '/.env/x', '/environment', '/server-info.php',
-			'/.envy', '/x.env', '/phpinfo.php/..', '/admin/'] as $path) {
+		foreach (['/', '/index.html', '/phpinfo.html', '/a/b/phpinfo.php', '/.env/x', '/environment', '/a/server-info',
+			'/.envy', '/x.env', '/phpinfo.php/..', '/admin/', '/wp-config.php/x', '/configuration.php', '/myconfig.php',
+			'/server-statusx', '/index.php?file=../etc/passwd', '/index.php?file=.aws/credentials', '/.aws/credentials'] as $path) {
 			self::assertNull(Decoys::kindOf($path), $path);
+		}
+	}
+
+	/**
+	 * Neue Köder vom 2026-09-27, nach den gefragten Pfaden: wp-config.php samt
+	 * Sicherungskopien, config.php-Varianten, Apaches Status- und Infoseite.
+	 */
+	public function testRecognisesTheNewDecoys(): void
+	{
+		$expected = [
+			'/wp-config.php' => 'wpconfig', '/wp-config.php.bak' => 'wpconfig', '/wp-config.php~' => 'wpconfig',
+			'/blog/wp-config.php.save' => 'wpconfig', '/wp-config.old' => 'wpconfig', '/.wp-config.php.swp' => 'wpconfig',
+			'/config.dev.php' => 'config', '/config.php' => 'config', '/app/config.local.php' => 'config',
+			'/config.inc.php.bak' => 'config',
+			'/server-status' => 'serverstatus', '/server-status/' => 'serverstatus', '/server-status.php' => 'serverstatus',
+			'/server-info' => 'serverinfo', '/server-info.php' => 'serverinfo', '/server-status?auto' => 'serverstatus',
+		];
+		foreach ($expected as $path => $kind) {
+			self::assertSame($kind, Decoys::kindOf($path), $path);
+		}
+	}
+
+	/**
+	 * Ein Ausbruch aus dem Verzeichnis über einen Parameter (gefragt: ?file=../…/.aws/credentials).
+	 * Verglichen wird die rohe Anfragezeile – nginx prüft dafür $request_uri, nicht den
+	 * dekodierten $uri; kodierte Schreibweisen sind deshalb im Muster selbst enthalten.
+	 */
+	public function testRecognisesPathTraversalToAwsCredentials(): void
+	{
+		foreach (['/index.php?file=../../../../../../../../root/.aws/credentials', '/?page=..%2F..%2F.aws%2Fcredentials',
+			'/view.php?id=1&template=%2e%2e/%2e%2e/home/ubuntu/.aws/credentials'] as $path) {
+			self::assertSame('awscreds', Decoys::kindOf($path), $path);
 		}
 	}
 
@@ -54,6 +87,10 @@ final class DecoysTest extends TestCase
 	{
 		$http = Decoys::httpConfig();
 		foreach (Decoys::PATTERNS as $kind => $pattern) {
+			self::assertStringContainsString('"~*' . $pattern . '" ' . Decoys::FILES[$kind] . ';', $http);
+		}
+		self::assertStringContainsString('map $request_uri $vhostadmin_decoy_query', $http);
+		foreach (Decoys::QUERY_PATTERNS as $kind => $pattern) {
 			self::assertStringContainsString('"~*' . $pattern . '" ' . Decoys::FILES[$kind] . ';', $http);
 		}
 		self::assertStringContainsString('log_format ' . Decoys::LOG_FORMAT . ' escape=json', $http);
@@ -120,6 +157,23 @@ final class DecoysTest extends TestCase
 			self::assertStringNotContainsString('pServiceWebserver', $text, $file);
 			self::assertStringNotContainsString('/var/www/mfsvr.de', $text, $file);
 			self::assertStringNotContainsString('vhost-admin', $text, $file);
+			// Nach dem Einsetzen muss die Auswertung die Kennung wiederfinden können.
+			self::assertContains('0123456789', Decoys::tokensIn(str_replace(Decoys::TOKEN_PLACEHOLDER, '0123456789', $text)), $file);
+			// Adressen nur aus den Dokumentationsbereichen (RFC 5737) oder privaten Netzen –
+			// keine echte Gegenstelle soll in einem Köder stehen.
+			preg_match_all('/\\b(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\b/', $text, $m);
+			foreach ($m[1] as $ip) {
+				self::assertMatchesRegularExpression('/^(192\\.0\\.2|198\\.51\\.100|203\\.0\\.113|127\\.|10\\.|172\\.(1[6-9]|2\\d|3[01])\\.|192\\.168\\.)/', $ip, "$file: $ip");
+			}
+		}
+	}
+
+	/** Die neuen Köder tragen den Servernamen als Platzhalter, nie einen festen Namen. */
+	public function testDecoysUseTheHostPlaceholder(): void
+	{
+		$dir = dirname(__DIR__, 2) . '/honeypot/site/koeder';
+		foreach (['wp-config.txt', 'config.txt', 'server-status.html', 'server-info.html', 'aws-credentials.txt'] as $file) {
+			self::assertStringContainsString(Decoys::HOST_PLACEHOLDER, (string)file_get_contents($dir . '/' . $file), $file);
 		}
 	}
 }

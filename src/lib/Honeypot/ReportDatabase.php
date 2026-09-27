@@ -123,6 +123,17 @@ CREATE TABLE IF NOT EXISTS decoy_uses (
 	agent TEXT NOT NULL,
 	PRIMARY KEY (host, token, date, time, detail)
 );
+CREATE TABLE IF NOT EXISTS scan_sessions (
+	host TEXT NOT NULL,
+	date TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	start TEXT NOT NULL,
+	finish TEXT NOT NULL,
+	requests INTEGER NOT NULL,
+	agents TEXT NOT NULL,
+	paths TEXT NOT NULL,
+	PRIMARY KEY (host, date, seq)
+);
 SQL;
 
 	private function __construct(private readonly \PDO $pdo, private readonly string $path)
@@ -473,6 +484,54 @@ SQL;
 				"SELECT item, SUM(value) AS total, MIN(date) AS first, MAX(date) AS last, COUNT(DISTINCT date) AS days"
 				. " FROM counts WHERE host = ? AND dimension = 'login' GROUP BY item ORDER BY total DESC, item LIMIT 1000",
 				[$host]
+			)
+		);
+	}
+
+	/**
+	 * Scanner-Sitzungen eines Tages ablegen; ersetzt, was für den Tag schon da war.
+	 * Kennungen und Pfade stehen als JSON – abgefragt wird immer die ganze Sitzung.
+	 *
+	 * @param list<ScanSession> $sessions
+	 */
+	public function saveSessions(string $host, string $date, array $sessions): void
+	{
+		$this->pdo->beginTransaction();
+		try {
+			$this->pdo->prepare('DELETE FROM scan_sessions WHERE host = ? AND date = ?')->execute([$host, $date]);
+			$insert = $this->pdo->prepare(
+				'INSERT INTO scan_sessions (host, date, seq, start, finish, requests, agents, paths) VALUES (?,?,?,?,?,?,?,?)'
+			);
+			foreach (array_values($sessions) as $seq => $session) {
+				$insert->execute([
+					$host, $date, $seq, $session->start, $session->end, $session->requests,
+					json_encode($session->agents, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+					json_encode($session->paths, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+				]);
+			}
+			$this->pdo->commit();
+		} catch (\Throwable $e) {
+			$this->pdo->rollBack();
+			throw $e;
+		}
+	}
+
+	/**
+	 * Scanner-Sitzungen eines Zeitraums, nach Tag und Beginn sortiert.
+	 *
+	 * @return list<ScanSession>
+	 */
+	public function sessions(string $host, Period $period): array
+	{
+		return array_map(
+			static fn(array $row): ScanSession => new ScanSession(
+				(string)$row['date'], (string)$row['start'], (string)$row['finish'], (int)$row['requests'],
+				array_values(array_map(strval(...), (array)json_decode((string)$row['agents'], true))),
+				array_values(array_map(strval(...), (array)json_decode((string)$row['paths'], true))),
+			),
+			$this->all(
+				'SELECT * FROM scan_sessions WHERE host = ? AND date BETWEEN ? AND ? ORDER BY date, start, seq',
+				[$host, $period->from, $period->to]
 			)
 		);
 	}

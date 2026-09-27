@@ -30,8 +30,7 @@ LIB="$ROOT/src/lib"; [ -d "$LIB/Honeypot" ] || LIB="$ROOT/lib"
 LOGS="$(vhost show "$NAME" | grep -m1 -oP '^    access_log \K\S+(?=/access\.log;)')"
 [ -n "$LOGS" ] || { echo "Logordner nicht gefunden" >&2; exit 1; }
 install -d -m 755 -o "$OWNER" -g "$GROUP" "$DOCROOT/.koeder"
-install -m 644 -o "$OWNER" -g "$GROUP" "$SRC/koeder/phpinfo.html" "$DOCROOT/.koeder/phpinfo.html"
-install -m 644 -o "$OWNER" -g "$GROUP" "$SRC/koeder/env.txt" "$DOCROOT/.koeder/env.txt"
+install -m 644 -o "$OWNER" -g "$GROUP" "$SRC"/koeder/* "$DOCROOT/.koeder/"
 decoys() { # decoys <methode> [argument] - ruft Honeypot\Decoys auf
 	php -r 'require $argv[1] . "/Honeypot/Decoys.php"; $m = $argv[2]; echo $m === "merge"
 		? Honeypot\Decoys::merge(stream_get_contents(STDIN), Honeypot\Decoys::serverSnippet($argv[3]))

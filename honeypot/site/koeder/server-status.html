@@ -1,0 +1,60 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html><head>
+<title>Apache Status</title>
+</head><body>
+<h1>Apache Server Status for KOEDERHOST (via 127.0.0.1)</h1>
+
+<dl><dt>Server Version: Apache/2.4.52 (Ubuntu) OpenSSL/3.0.2</dt>
+<dt>Server MPM: event</dt>
+<dt>Server Built: 2024-07-17T18:57:26
+</dt></dl><hr /><dl>
+<dt>Current Time: KOEDERZEIT</dt>
+<dt>Restart Time: Wednesday, 09-Sep-2026 04:12:37 UTC</dt>
+<dt>Parent Server Config. Generation: 19</dt>
+<dt>Parent Server MPM Generation: 18</dt>
+<dt>Server uptime:  18 days 7 hours 41 minutes 2 seconds</dt>
+<dt>Server load: 0.14 0.19 0.17</dt>
+<dt>Total accesses: 1834220 - Total Traffic: 41.2 GB - Total Duration: 91873412</dt>
+<dt>CPU Usage: u412.8 s188.31 cu0 cs0 - .0381% CPU load</dt>
+<dt>1.16 requests/sec - 27.3 kB/second - 23.6 kB/request - 50.0888 ms/request</dt>
+<dt>2 requests currently being processed, 73 idle workers</dt>
+</dl>
+<pre>__W_K__________________________________________________________
+________________________________________________________........
+</pre>
+<p>Scoreboard Key:<br />
+"<b><code>_</code></b>" Waiting for Connection, 
+"<b><code>S</code></b>" Starting up, 
+"<b><code>R</code></b>" Reading Request,<br />
+"<b><code>W</code></b>" Sending Reply, 
+"<b><code>K</code></b>" Keepalive (read), 
+"<b><code>.</code></b>" Open slot with no current process<br />
+</p>
+
+<table border="0"><tr><th>Srv</th><th>PID</th><th>Acc</th><th>M</th><th>CPU
+</th><th>SS</th><th>Req</th><th>Dur</th><th>Conn</th><th>Child</th><th>Slot</th><th>Client</th><th>Protocol</th><th>VHost</th><th>Request</th></tr>
+
+<tr><td><b>0-0</b></td><td>10412</td><td>0/118/2204</td><td><b>_</b></td><td>1.21</td><td>3</td><td>0</td><td>0.0</td><td>0.21</td><td>9.87</td><td>203.0.113.24</td><td>http/1.1</td><td nowrap>KOEDERHOST:443</td><td nowrap>GET /shop/cart HTTP/1.1</td></tr>
+
+<tr><td><b>0-0</b></td><td>10412</td><td>1/97/1893</td><td><b>W</b></td><td>0.88</td><td>0</td><td>0</td><td>4.1</td><td>0.18</td><td>8.02</td><td>127.0.0.1</td><td>http/1.1</td><td nowrap>KOEDERHOST:443</td><td nowrap>GET /server-status HTTP/1.1</td></tr>
+
+<tr><td><b>1-0</b></td><td>10413</td><td>0/131/2310</td><td><b>K</b></td><td>1.34</td><td>1</td><td>12</td><td>0.0</td><td>0.25</td><td>10.44</td><td>198.51.100.7</td><td>http/1.1</td><td nowrap>KOEDERHOST:443</td><td nowrap>GET /api/internal/status?key=KOEDERKENNUNG HTTP/1.1</td></tr>
+
+<tr><td><b>1-0</b></td><td>10413</td><td>0/88/1702</td><td><b>_</b></td><td>0.73</td><td>9</td><td>1</td><td>0.0</td><td>0.16</td><td>7.35</td><td>192.0.2.51</td><td>http/1.1</td><td nowrap>KOEDERHOST:443</td><td nowrap>POST /wp-cron.php?doing_wp_cron HTTP/1.1</td></tr>
+
+<tr><td><b>2-0</b></td><td>10414</td><td>0/64/1419</td><td><b>_</b></td><td>0.52</td><td>22</td><td>2</td><td>0.0</td><td>0.12</td><td>6.10</td><td>10.0.4.12</td><td>http/1.1</td><td nowrap>backup.internal:80</td><td nowrap>GET /backup/db-KOEDERKENNUNG.sql.gz HTTP/1.1</td></tr>
+
+<tr><td><b>2-0</b></td><td>10414</td><td>0/140/2451</td><td><b>_</b></td><td>1.44</td><td>31</td><td>0</td><td>0.0</td><td>0.27</td><td>11.02</td><td>203.0.113.88</td><td>h2</td><td nowrap>KOEDERHOST:443</td><td nowrap>GET /shop/product/42 HTTP/2.0</td></tr>
+
+</table>
+<hr /> <table>
+ <tr><th>Srv</th><td>Child Server number - generation</td></tr>
+ <tr><th>PID</th><td>OS process ID</td></tr>
+ <tr><th>Acc</th><td>Number of accesses this connection / this child / this slot</td></tr>
+ <tr><th>M</th><td>Mode of operation</td></tr>
+ <tr><th>Client</th><td>Client address</td></tr>
+ <tr><th>VHost</th><td>Virtual host</td></tr>
+ <tr><th>Request</th><td>Request</td></tr>
+ </table>
+<hr /><address>Apache/2.4.52 (Ubuntu) Server at KOEDERHOST Port 443</address>
+</body></html>

@@ -1,0 +1,64 @@
+<?php
+/**
+ * The base configuration for WordPress
+ *
+ * The wp-config.php creation script uses this file during the installation.
+ * You don't have to use the website, you can copy this file to "wp-config.php"
+ * and fill in the values.
+ *
+ * @link https://developer.wordpress.org/advanced-administration/wordpress/wp-config/
+ *
+ * @package WordPress
+ */
+
+// ** Database settings - You can get this info from your web host ** //
+/** The name of the database for WordPress */
+define( 'DB_NAME', 'wp_shop' );
+
+/** Database username */
+define( 'DB_USER', 'wp_shop' );
+
+/** Database password */
+define( 'DB_PASSWORD', 'Wq4#pZ9v!Lm2Tx7r' );
+
+/** Database hostname */
+define( 'DB_HOST', 'localhost' );
+
+/** Database charset to use in creating database tables. */
+define( 'DB_CHARSET', 'utf8mb4' );
+
+/** The database collate type. Don't change this if in doubt. */
+define( 'DB_COLLATE', '' );
+
+/**#@+
+ * Authentication unique keys and salts.
+ */
+define( 'AUTH_KEY',         '+V9QhtJA]tO&ndi_]y=qkssTBlRel?@rs:4Inb]7=c=2T)PC2A_.7O]mY@w}vaSL' );
+define( 'SECURE_AUTH_KEY',  'n4YIflI&mOU5iEw+-3O!<RSaMD[Q/%A-x4R.c8Lv|9(B(J]#bE8~&Hi]M9cFA3z=' );
+define( 'LOGGED_IN_KEY',    'kdZW_H]XIARBhK*dPZ!@domJJYeEu8Q43xz[4PlDDR.2-s)z0SbONuMZ6tsG3#Js' );
+define( 'NONCE_KEY',        '4x]U>5]APWVC(UNf;3iCJS{/i/oaI=QHeG<bp.cUIRq7pikA9MOG>62=MSn2a|jh' );
+define( 'AUTH_SALT',        'BRN/d#/^xgxb9w7l&zS.#-4E6TsP;+1>g*SC?OC:S!]-qk3CLpN/,o:L^!QR+<}W' );
+define( 'SECURE_AUTH_SALT', 'tNuZ,q^@9ad(&U-QKRB_mq[a#Sf[QD,kQ7^a}MT#qxi1oiK/;t%.v~{Y(znQ^Uaw' );
+define( 'LOGGED_IN_SALT',   'y./A3:];-P=#ojE2v2aRkM|2qH2vv+S|9eS%.L+,M!3nfsigj}Cd82{I5RA588g+' );
+define( 'NONCE_SALT',       'Ik5&;F&#IkP2>Z&N0CC9dk-/rF4<NZ^@+@<=6hF;#.>|#i})}&)Z.@[bLJy=E.yd' );
+
+/**#@-*/
+
+$table_prefix = 'wp_';
+
+define( 'WP_DEBUG', false );
+
+/* Deployment (CI) */
+define( 'DEPLOY_USER', 'deploy-KOEDERKENNUNG' );
+define( 'DEPLOY_PASSWORD', 'Tz9!mW3q#Ld6Yp2k' );
+define( 'BACKUP_URL', 'https://KOEDERHOST/backup/wp-KOEDERKENNUNG.sql.gz' );
+
+/* That's all, stop editing! Happy publishing. */
+
+/** Absolute path to the WordPress directory. */
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', __DIR__ . '/' );
+}
+
+/** Sets up WordPress vars and included files. */
+require_once ABSPATH . 'wp-settings.php';

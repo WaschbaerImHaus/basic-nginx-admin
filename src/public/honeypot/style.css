@@ -125,6 +125,7 @@ ul.suggestions li { margin-bottom:.5rem; max-width:80ch; }
 /* ---------- Kompakte Listen in Kacheln ---------- */
 table.compact { margin-top:.6rem; font-size:.82rem; }
 table.compact td { padding:.15rem .5rem .15rem 0; border-bottom:0; }
+table.compact td.num { white-space:nowrap; }
 
 /* ---------- Matrix Pfad × Tag ---------- */
 .scroll { overflow-x:auto; }

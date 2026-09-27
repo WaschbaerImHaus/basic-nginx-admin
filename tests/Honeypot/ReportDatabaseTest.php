@@ -16,6 +16,7 @@ use Honeypot\NetworkInfo;
 use Honeypot\Peer;
 use Honeypot\Period;
 use Honeypot\ReportDatabase;
+use Honeypot\ScanSession;
 use Honeypot\ReportStore;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\TempDir;
@@ -362,5 +363,19 @@ final class ReportDatabaseTest extends TestCase
 			['user' => 'admin', 'total' => 5, 'first' => '2026-09-20', 'last' => '2026-09-22', 'days' => 2],
 			['user' => 'mfsvr', 'total' => 1, 'first' => '2026-09-20', 'last' => '2026-09-20', 'days' => 1],
 		], $db->loginHistory('h'));
+	}
+
+	/** Scanner-Sitzungen je Tag: ein neuer Lauf ersetzt die des Tages, andere Tage bleiben. */
+	public function testStoresScanSessionsPerDay(): void
+	{
+		$db = ReportDatabase::open($this->dir . '/k.sqlite');
+		$a = new ScanSession('2026-09-20', '03:10:00', '03:11:00', 5, ['bot'], ['/a', '/b']);
+		$b = new ScanSession('2026-09-21', '03:12:00', '03:13:00', 4, ['bot', 'curl'], ['/a', '/b', '/c']);
+		$db->saveSessions('h', '2026-09-20', [$a]);
+		$db->saveSessions('h', '2026-09-21', [$b]);
+		$db->saveSessions('h', '2026-09-21', [$b]);
+		self::assertEquals([$a, $b], $db->sessions('h', Period::between('2026-09-19', '2026-09-22')));
+		self::assertEquals([$b], $db->sessions('h', Period::day('2026-09-21')));
+		self::assertSame([], $db->sessions('anders', Period::day('2026-09-21')));
 	}
 }

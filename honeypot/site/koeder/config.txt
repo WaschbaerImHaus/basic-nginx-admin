@@ -1,0 +1,18 @@
+<?php
+// Konfiguration – nicht einchecken!
+return [
+    'env' => 'dev',
+    'debug' => true,
+    'base_url' => 'https://KOEDERHOST',
+    'db' => [
+        'dsn' => 'mysql:host=127.0.0.1;dbname=app_dev;charset=utf8mb4',
+        'user' => 'app_dev',
+        'password' => 'dev-Jk8s!3Nq#Vw5z',
+    ],
+    'mail' => ['host' => '127.0.0.1', 'port' => 1025],
+    'admin' => [
+        'user' => 'deploy-KOEDERKENNUNG',
+        'password' => 'Tz9!mW3q#Ld6Yp2k',
+    ],
+    'status_url' => 'https://KOEDERHOST/api/internal/status?key=KOEDERKENNUNG',
+];

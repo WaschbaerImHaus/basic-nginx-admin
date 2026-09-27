@@ -1,0 +1,52 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en"><head>
+  <title>Server Information</title>
+</head>
+<body><h1 style="text-align: center">Apache Server Information</h1>
+<dl><dt><tt>Subpages:<br /><a href="?config">Configuration Files</a>, <a href="?server">Server Settings</a>, <a href="?list">Module List</a>, <a href="?hooks">Active Hooks</a>, <a href="?providers">Available Providers</a></tt></dt></dl><hr />
+<dl><dt><tt>Sections:<br /><a href="#modules">Loaded Modules</a>, <a href="#server">Server Settings</a>, <a href="#startup_hooks">Startup Hooks</a>, <a href="#request_hooks">Request Hooks</a>, <a href="#other_hooks">Other Hooks</a>, <a href="#providers">Providers</a></tt></dt></dl><hr />
+<h2><a name="modules">Loaded Modules</a></h2><dl><dt><tt><a href="#core.c">core.c</a>, <a href="#mod_so.c">mod_so.c</a>, <a href="#http_core.c">http_core.c</a>, <a href="#event.c">event.c</a>, <a href="#mod_access_compat.c">mod_access_compat.c</a>, <a href="#mod_alias.c">mod_alias.c</a>, <a href="#mod_auth_basic.c">mod_auth_basic.c</a>, <a href="#mod_authn_core.c">mod_authn_core.c</a>, <a href="#mod_authn_file.c">mod_authn_file.c</a>, <a href="#mod_authz_core.c">mod_authz_core.c</a>, <a href="#mod_authz_host.c">mod_authz_host.c</a>, <a href="#mod_authz_user.c">mod_authz_user.c</a>, <a href="#mod_autoindex.c">mod_autoindex.c</a>, <a href="#mod_deflate.c">mod_deflate.c</a>, <a href="#mod_dir.c">mod_dir.c</a>, <a href="#mod_env.c">mod_env.c</a>, <a href="#mod_filter.c">mod_filter.c</a>, <a href="#mod_headers.c">mod_headers.c</a>, <a href="#mod_info.c">mod_info.c</a>, <a href="#mod_mime.c">mod_mime.c</a>, <a href="#mod_negotiation.c">mod_negotiation.c</a>, <a href="#mod_proxy.c">mod_proxy.c</a>, <a href="#mod_proxy_fcgi.c">mod_proxy_fcgi.c</a>, <a href="#mod_reqtimeout.c">mod_reqtimeout.c</a>, <a href="#mod_rewrite.c">mod_rewrite.c</a>, <a href="#mod_setenvif.c">mod_setenvif.c</a>, <a href="#mod_socache_shmcb.c">mod_socache_shmcb.c</a>, <a href="#mod_ssl.c">mod_ssl.c</a>, <a href="#mod_status.c">mod_status.c</a></tt></dt></dl><hr />
+<h2><a name="server">Server Settings</a></h2><dl>
+<dt><strong>Server Version:</strong> <font size="+1"><tt>Apache/2.4.52 (Ubuntu) OpenSSL/3.0.2</tt></font></dt>
+<dt><strong>Server Built:</strong> <font size="+1"><tt>2024-07-17T18:57:26</tt></font></dt>
+<dt><strong>Server loaded APR Version:</strong> <tt>1.7.0</tt></dt>
+<dt><strong>Module Magic Number:</strong> <tt>20120211:121</tt></dt>
+<dt><strong>Hostname/port:</strong> <tt>KOEDERHOST:443</tt></dt>
+<dt><strong>Timeouts:</strong> <tt>connection: 300 &nbsp;&nbsp; keep-alive: 5</tt></dt>
+<dt><strong>MPM Name:</strong> <tt>event</tt></dt>
+<dt><strong>MPM Information:</strong> <tt>Max Daemons: 3 Threaded: yes Forked: yes</tt></dt>
+<dt><strong>Server Root:</strong> <tt>/etc/apache2</tt></dt>
+<dt><strong>Config File:</strong> <tt>/etc/apache2/apache2.conf</tt></dt>
+<dt><strong>Server Built With:</strong>
+<tt style="white-space: pre;">
+ -D APR_HAS_SENDFILE
+ -D APR_HAS_MMAP
+ -D APR_USE_PROC_PTHREAD_SERIALIZE
+ -D SINGLE_LISTEN_UNSERIALIZED_ACCEPT
+ -D APR_HAS_OTHER_CHILD
+ -D AP_HAVE_RELIABLE_PIPED_LOGS
+ -D HTTPD_ROOT="/etc/apache2"
+ -D SUEXEC_BIN="/usr/lib/apache2/suexec"
+ -D DEFAULT_PIDLOG="/var/run/apache2.pid"
+ -D SERVER_CONFIG_FILE="apache2.conf"
+</tt></dt>
+</dl><hr />
+<h2><a name="mod_alias.c">Module Name:</a> <font size="+1"><tt><a href="?mod_alias.c">mod_alias.c</a></tt></font></h2>
+<dl><dt><strong>Content handlers:</strong> <tt>none</tt></dt>
+<dt><strong>Current Configuration:</strong>
+</dt>
+<dd><tt>
+In file: /etc/apache2/sites-enabled/000-shop.conf<br />
+ 14: &nbsp;&nbsp;<a href="http://httpd.apache.org/docs/2.4/mod/mod_alias.html#alias">Alias</a> /backup-KOEDERKENNUNG /srv/backup<br />
+ 15: &nbsp;&nbsp;<a href="http://httpd.apache.org/docs/2.4/mod/mod_alias.html#alias">Alias</a> /internal/status /var/www/status/index.php<br />
+</tt></dd></dl><hr />
+<h2><a name="mod_status.c">Module Name:</a> <font size="+1"><tt><a href="?mod_status.c">mod_status.c</a></tt></font></h2>
+<dl><dt><strong>Content handlers:</strong> <tt>yes</tt></dt>
+<dt><strong>Current Configuration:</strong>
+</dt>
+<dd><tt>
+In file: /etc/apache2/mods-enabled/status.conf<br />
+ 12: &nbsp;&nbsp;<a href="http://httpd.apache.org/docs/2.4/mod/mod_status.html#extendedstatus">ExtendedStatus</a> On<br />
+</tt></dd></dl><hr />
+<address>Apache/2.4.52 (Ubuntu) Server at KOEDERHOST Port 443</address>
+</body></html>

@@ -19,25 +19,52 @@ declare(strict_types=1);
  * (httpConfig) und die Auswertung (kindOf) benutzen dieselben.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-27 10:00
+ * @version Letzte Änderung: 2026-09-27 16:00
  */
 
 namespace Honeypot;
 
 final class Decoys
 {
-	/** Pfadmuster je Köder (PCRE, ohne Begrenzer, gross/klein egal). */
+	/**
+	 * Pfadmuster je Köder (PCRE, ohne Begrenzer, gross/klein egal), geprüft gegen den
+	 * dekodierten Pfad ($uri). Seit 2026-09-27 auch wp-config.php samt Sicherungskopien,
+	 * config.php-Varianten und Apaches Status- und Infoseite – alle im Log gefragt.
+	 */
 	public const PATTERNS = [
 		'phpinfo' => '^/(?:[A-Za-z0-9_-]+/)?(?:phpinfo|php_info|php-info|pinfo|info|infos|old_phpinfo|_phpinfo|i|test)\.php$',
 		'env' => '^/(?:[A-Za-z0-9_-]+/)?\.env(?:\.[A-Za-z]+)?$',
+		'wpconfig' => '^/(?:[A-Za-z0-9_-]+/)?\.?wp-config(?:\.php)?(?:\.(?:bak|old|save|orig|txt|backup|swp|dist)|~)?$',
+		'config' => '^/(?:[A-Za-z0-9_-]+/)?config(?:[._-](?:dev|local|prod|production|staging|inc|test|sample))*\.php(?:\.(?:bak|old|save|orig|txt)|~)?$',
+		'serverstatus' => '^/server-status(?:\.php)?/?$',
+		'serverinfo' => '^/server-info(?:\.php)?/?$',
+	];
+
+	/**
+	 * Muster gegen die ROHE Anfrage ($request_uri, samt Abfrage, nicht dekodiert): ein
+	 * Ausbruch aus dem Verzeichnis über einen Parameter. Kodierte Schreibweisen
+	 * (%2e%2e, %2f) stehen deshalb im Muster selbst.
+	 */
+	public const QUERY_PATTERNS = [
+		'awscreds' => '[?&][A-Za-z0-9_-]+=[^&]*(?:\.\.|%2e%2e)(?:/|%2f)[^&]*\.aws(?:/|%2f)credentials',
 	];
 
 	/** Datei je Köder im Ordner /.koeder/ des Docroots. */
-	public const FILES = ['phpinfo' => 'phpinfo.html', 'env' => 'env.txt'];
+	public const FILES = [
+		'phpinfo' => 'phpinfo.html',
+		'env' => 'env.txt',
+		'wpconfig' => 'wp-config.txt',
+		'config' => 'config.txt',
+		'serverstatus' => 'server-status.html',
+		'serverinfo' => 'server-info.html',
+		'awscreds' => 'aws-credentials.txt',
+	];
 
 	/** Platzhalter in den Köderdateien; nginx ersetzt sie bei jeder Auslieferung. */
 	public const TOKEN_PLACEHOLDER = 'KOEDERKENNUNG';
 	public const HOST_PLACEHOLDER = 'KOEDERHOST';
+	/** Uhrzeit der Auslieferung (für die Statusseite, die sonst stehen bliebe). */
+	public const TIME_PLACEHOLDER = 'KOEDERZEIT';
 
 	/** Name des nginx-Logformats und der Logdatei mit den ausgegebenen Kennungen. */
 	public const LOG_FORMAT = 'vhostadmin_decoy';
@@ -53,9 +80,15 @@ final class Decoys
 	 */
 	public static function kindOf(string $path): ?string
 	{
+		// Zuerst die rohe Anfrage (Ausbruch über einen Parameter), dann der Pfad.
+		foreach (self::QUERY_PATTERNS as $kind => $pattern) {
+			if (preg_match('#' . $pattern . '#i', $path) === 1) {
+				return $kind;
+			}
+		}
 		$path = rawurldecode(explode('?', $path, 2)[0]);
 		foreach (self::PATTERNS as $kind => $pattern) {
-			if (preg_match('~' . $pattern . '~i', $path) === 1) {
+			if (preg_match('#' . $pattern . '#i', $path) === 1) {
 				return $kind;
 			}
 		}
@@ -89,6 +122,12 @@ final class Decoys
 		foreach (self::PATTERNS as $kind => $pattern) {
 			$out .= '    "~*' . $pattern . '" ' . self::FILES[$kind] . ";\n";
 		}
+		$out .= "}\n"
+			. "map \$request_uri \$vhostadmin_decoy_query {\n"
+			. "    default \"\";\n";
+		foreach (self::QUERY_PATTERNS as $kind => $pattern) {
+			$out .= '    "~*' . $pattern . '" ' . self::FILES[$kind] . ";\n";
+		}
 		return $out . "}\n"
 			. 'log_format ' . self::LOG_FORMAT . " escape=json '{\"time\":\"\$time_iso8601\",\"token\":\"\$vhostadmin_decoy_token\","
 			. "\"request\":\"\$request\",\"status\":\"\$status\",\"agent\":\"\$http_user_agent\",\"ip\":\"\$remote_addr\"}';\n";
@@ -104,6 +143,10 @@ final class Decoys
 	public static function serverSnippet(string $logsDir): string
 	{
 		return self::BEGIN . "\n"
+			// Der Ausbruch über einen Parameter zuerst; das "?" am Ende wirft die Abfrage ab.
+			. "if (\$vhostadmin_decoy_query != \"\") {\n"
+			. "    rewrite ^ /.koeder/\$vhostadmin_decoy_query? last;\n"
+			. "}\n"
 			. "if (\$vhostadmin_decoy_file != \"\") {\n"
 			. "    rewrite ^ /.koeder/\$vhostadmin_decoy_file last;\n"
 			. "}\n"
@@ -114,6 +157,7 @@ final class Decoys
 			. "    sub_filter_once off;\n"
 			. "    sub_filter '" . self::TOKEN_PLACEHOLDER . "' '\$vhostadmin_decoy_token';\n"
 			. "    sub_filter '" . self::HOST_PLACEHOLDER . "' '\$server_name';\n"
+			. "    sub_filter '" . self::TIME_PLACEHOLDER . "' '\$time_local';\n"
 			. "    access_log $logsDir/access.log;\n"
 			. "    access_log $logsDir/" . self::LOG_FILE . ' ' . self::LOG_FORMAT . ";\n"
 			. "}\n"

@@ -207,4 +207,19 @@ final class AnalyzerTest extends TestCase
 		self::assertSame(['2026-09-24'], $result['analysed']);
 		self::assertSame(3, $this->db->load('mfsvr.de', Period::day('2026-09-24'))->requests);
 	}
+
+	/** Ausgewertete Tage bekommen ihre Scanner-Sitzungen (Wiedererkennung über Tage). */
+	public function testStoresTheScanSessionsOfAnalysedDays(): void
+	{
+		$this->analyse([24 => 5, 25 => 4], '2026-09-26');
+		$sessions = $this->db->sessions('mfsvr.de', Period::between('2026-09-24', '2026-09-25'));
+		self::assertCount(2, $sessions);
+		self::assertSame(5, $sessions[0]->requests);
+		self::assertSame('2026-09-25', $sessions[1]->date);
+	}
+
+	public function testTheVersionCoversScanSessions(): void
+	{
+		self::assertGreaterThanOrEqual(4, Analyzer::VERSION);
+	}
 }

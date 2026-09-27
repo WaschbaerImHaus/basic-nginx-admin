@@ -26,9 +26,10 @@ final class Analyzer
 	/**
 	 * Fassung der Auswertung. Erhöhen, wenn sich ändert, was ein Tagesbericht enthält:
 	 * Tage einer älteren Fassung werden dann neu ausgewertet, solange ihre Logs da sind.
-	 * 1 = übernommene JSON-Berichte, 2 = seit der SQLite-Ablage, 3 = mit Köderabrufen.
+	 * 1 = übernommene JSON-Berichte, 2 = seit der SQLite-Ablage, 3 = mit Köderabrufen,
+	 * 4 = mit Scanner-Sitzungen (Wiedererkennung über Tage).
 	 */
-	public const VERSION = 3;
+	public const VERSION = 4;
 
 	public function __construct(
 		private readonly ReportDatabase $db,
@@ -87,6 +88,7 @@ final class Analyzer
 				$complete
 			)->withPeers($this->resolver->resolve($finder->find($entries)));
 			$this->db->save($host, $report, self::VERSION);
+			$this->db->saveSessions($host, $date, ScanSessions::fromEntries($entries));
 			$result['analysed'][] = $date;
 		}
 
