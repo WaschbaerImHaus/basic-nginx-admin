@@ -43,4 +43,13 @@ final class LoginAttemptsTest extends TestCase
 	{
 		self::assertSame([], (new LoginAttempts())->fromLines([self::LINES[3]]));
 	}
+
+	/** Anmeldeversuche vom Rechner selbst sind Prüfungen, kein Angriff – wie im access.log. */
+	public function testIgnoresAttemptsFromThisMachine(): void
+	{
+		$line = static fn(string $client): string => '2026/09/27 13:11:03 [error] 1#1: *4 user "deploy-0000000000" was not found in "/x", client: '
+			. $client . ', server: a, request: "GET /admin/ HTTP/1.1"';
+		self::assertSame([], (new LoginAttempts())->fromLines([$line('127.0.0.1'), $line('::1')]));
+		self::assertSame(['deploy-0000000000' => 1], (new LoginAttempts())->fromLines([$line('10.200.0.1')]));
+	}
 }

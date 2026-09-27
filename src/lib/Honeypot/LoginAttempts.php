@@ -8,7 +8,7 @@ declare(strict_types=1);
  * geraten, der Domainname ist gezielt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:20
+ * @version Letzte Änderung: 2026-09-27 13:20
  */
 
 namespace Honeypot;
@@ -23,6 +23,10 @@ final class LoginAttempts
 	{
 		$users = [];
 		foreach ($lines as $line) {
+			// Versuche vom Rechner selbst sind Prüfungen (siehe LogParser::isLocal()).
+			if (preg_match('/, client: ([^,]+),/', $line, $c) === 1 && LogParser::isLocal($c[1])) {
+				continue;
+			}
 			if (preg_match('/user "([^"]*)" (?:was not found|password mismatch)/', $line, $m) === 1) {
 				$users[$m[1]] = ($users[$m[1]] ?? 0) + 1;
 			}

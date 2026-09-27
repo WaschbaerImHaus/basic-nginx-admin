@@ -21,3 +21,8 @@ Bereich eine Datei, raeumt verwaiste ab, stellt bei Reload-Fehler alle wieder he
 CLI user-add --path, user-path; protect-path verweist darauf. Oberflaeche: Bereich je
 Benutzer. Smoke-Test: bob nicht in alices Bereich und umgekehrt, Umwege, PHP im Pfad.
 687 Tests gruen, Smoke-Test bestanden, bienchen weiter 401 ohne Login.
+2026-09-27 13:11 Honigtopf /admin mit Login (Nutzer hat Benutzer "test" mit Bereich /admin angelegt)
+Geprueft: / 200, /admin und /admin/ 401, /phpinfo.php und /.env Koeder 200, Koeder-Name als
+Anmeldung erscheint im error.log. LoginAttempts ignoriert jetzt Versuche von 127.0.0.1/::1
+(wie LogParser). Grenze dokumentiert: /admin/phpinfo.php (Koeder) und /admin/x.php (404)
+laufen in der Rewrite-Phase vor der Anmeldung.
