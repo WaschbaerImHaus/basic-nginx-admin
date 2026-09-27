@@ -34,3 +34,4 @@ ReloadConfirmation (neue Worker-Generation, 3 Versuche). Setter in Transaktion m
 statt HTTP 500. CommandRunner: stream_select, Haenger vorher per Test nachgewiesen.
 Honigtopf: Selbsttest-Zeilen zaehlen beim "behalten"-Vergleich mit, Tage 19.-23.09. werden
 neu gerechnet. Kleinkram: mkdir-Pruefung in Database, toter Import. 699 Tests gruen.
+2026-09-27 13:32 Nutzervorgabe: keine neuen Features am nginx-Admin. FEATURES.md Offen -> Zurueckgestellt, Scheduler auf Pflege umgestellt (Job 2322dcac).
