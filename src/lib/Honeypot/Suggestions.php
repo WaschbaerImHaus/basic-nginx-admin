@@ -9,11 +9,13 @@ declare(strict_types=1);
  *
  * Umgesetzte Vorschläge verschwinden von hier. Am 2026-09-25 waren das: eigene Kachel
  * für Anfragen ohne Webzugriff, Gruppierung der Kennungen nach gleicher Häufigkeit und
- * der Vergleich der Sondierungspfade über Tage. Eine Seite, die vorschlägt, was sie
- * schon zeigt, lässt die echten Vorschläge im Rauschen untergehen.
+ * der Vergleich der Sondierungspfade über Tage. Am 2026-09-27: Köder mit Kennung
+ * (phpinfo, .env), die Verteilung der Abstände robots.txt → /admin und die
+ * Benutzernamen über Wochen. Eine Seite, die vorschlägt, was sie schon zeigt, lässt die
+ * echten Vorschläge im Rauschen untergehen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 11:20
+ * @version Letzte Änderung: 2026-09-27 13:30
  */
 
 namespace Honeypot;
@@ -26,22 +28,26 @@ final class Suggestions
 	public function forReport(DayReport $report): array
 	{
 		$out = [];
-		if (($report->loot['Zugangsdaten'] ?? 0) >= 5) {
-			$out[] = '**Köderdateien mit Kennung.** Es wurde ' . $report->loot['Zugangsdaten']
-				. '-mal nach Zugangsdaten gesucht. Eine `/.env` mit einer je Abruf eindeutigen, sonst '
-				. 'nirgends gültigen Zeichenkette würde zeigen, ob und wo der Fund später benutzt wird. '
-				. 'Wichtig: nur erfundene Werte, nichts, was irgendwo gilt.';
+		// Gesuchte Zugangsdaten, für die es noch keinen Köder gibt (/.git/config,
+		// /.aws/credentials …). Dieselbe Technik – erfundener Inhalt mit Kennung je
+		// Abruf – liesse sich auf sie ausdehnen.
+		$uncovered = [];
+		$classifier = new LootClassifier();
+		foreach ($report->notFound as $path => $count) {
+			if ($classifier->classify((string)$path) === 'Zugangsdaten' && Decoys::kindOf((string)$path) === null) {
+				$uncovered[(string)$path] = (int)$count;
+			}
 		}
-		if ($report->robots > 0 && $report->robotsThenAdmin > 0) {
-			$out[] = '**Zeitabstand robots.txt → /admin/ auswerten.** ' . $report->robotsThenAdmin
-				. '-mal wurde nach dem Lesen der robots.txt der dort ausgeschlossene Pfad besucht, '
-				. 'kürzester Abstand ' . (int)$report->shortestGap() . ' s. Der Abstand trennt '
-				. '„liest und wertet aus" von „ruft beides blind ab".';
-		}
-		if ($report->logins !== []) {
-			$out[] = '**Versuchte Benutzernamen sammeln.** ' . count($report->logins)
-				. ' verschiedene Namen wurden probiert. Eine Liste über Wochen zeigt, ob generisch '
-				. 'geraten wird (admin, root) oder gezielt (Domainname, echte Namen).';
+		if (array_sum($uncovered) >= 5) {
+			arsort($uncovered);
+			$top = array_map(
+				static fn(string $path, int $count): string => '`' . $path . '` (' . $count . ')',
+				array_keys(array_slice($uncovered, 0, 3, true)),
+				array_slice($uncovered, 0, 3, true)
+			);
+			$out[] = '**Weitere Köder.** ' . array_sum($uncovered) . '-mal wurde nach Zugangsdaten gesucht, die noch '
+				. 'kein Köder abdeckt, vor allem ' . implode(', ', $top) . '. Ein erfundener Inhalt mit Kennung je '
+				. 'Abruf (wie bei phpinfo und .env) zeigte, ob der Fund später benutzt wird.';
 		}
 		if ($out === []) {
 			$out[] = 'Keine. Die Zahlen des Tages tragen keinen der vorgesehenen Vorschläge.';

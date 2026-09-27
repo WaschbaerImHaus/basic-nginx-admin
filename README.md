@@ -423,6 +423,15 @@ Fassung stammt. Hat ein Tag in der Datenbank mehr Anfragen als die noch vorhande
 Logs hergeben (etwa weil ein Teil schon rotiert ist), bleibt der gespeicherte Stand
 stehen. Frühere JSON-Tagesberichte übernimmt der erste Lauf automatisch.
 
+**Köder:** `sudo ./honeypot/install-site.sh <honigtopf-host>` richtet neben der Seite zwei
+Köder ein. Wer `phpinfo.php` (in allen gefragten Schreibweisen, auch in Unterordnern) oder
+`.env` sucht, bekommt eine erfundene, echt wirkende Fassung. Jede Auslieferung trägt eine
+eigene Kennung: einen Benutzernamen `deploy-<kennung>` und zwei interne Adressen. Taucht die
+Kennung später wieder auf – als Anmeldename oder in einer Anfrage –, zeigt die Kachel
+„Köder", dass der Fund ausgewertet und benutzt wurde, von welchem Abruf er stammt und wie
+viel Zeit dazwischen lag. Alle Werte sind erfunden. Die Köderdateien erzeugt
+`php honeypot/make-decoys.php honeypot/site/koeder`.
+
 **Tag und Zeitraum wählen:** Die Kachel „Kalender" zeigt einen Monat, eingefärbt nach
 Sondierungen; ein Klick auf einen Tag zeigt diesen Tag, ein Klick auf die Kalenderwoche
 die ganze Woche, „ganzer Monat" den Monat. Oben stehen „von"/„bis" für einen freien

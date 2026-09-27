@@ -165,4 +165,30 @@ final class AnalyzerTest extends TestCase
 		self::assertSame('scan24.example', $day?->peers[0]->host);
 		self::assertSame('192.0.2.4', $day?->peers[0]->address);
 	}
+
+	/**
+	 * Köderkennungen: Der Lauf übernimmt ausgegebene Kennungen und sucht ihre Benutzung
+	 * in allen gelesenen Zeilen – auch an Tagen, die er sonst überspringt.
+	 */
+	public function testTracksDecoyTokensAcrossDays(): void
+	{
+		$issued = json_encode(['time' => '2026-09-24T10:00:00+02:00', 'token' => '0123456789',
+			'request' => 'GET /.env HTTP/1.1', 'status' => '200', 'agent' => 'S']);
+		$later = '10.200.0.1 - - [25/Sep/2026:08:00:00 +0200] "GET /backup/db-0123456789.sql.gz HTTP/1.1" 404 5 "-" "C"';
+		$lines = array_merge($this->lines([24 => 1]), [$later]);
+		$this->analyzer->run('mfsvr.de', $lines, [], ['mfsvr.de'], '2026-09-26', false, [$issued]);
+		// Zweiter Lauf, alle Tage abgeschlossen: nichts doppelt.
+		$this->analyzer->run('mfsvr.de', $lines, [], ['mfsvr.de'], '2026-09-26', false, [$issued]);
+
+		$activity = $this->db->decoyActivity('mfsvr.de', Period::between('2026-09-24', '2026-09-25'));
+		self::assertSame(1, $activity['issued']);
+		self::assertCount(1, $activity['uses']);
+		self::assertSame('Anfrage', $activity['uses'][0]['source']);
+	}
+
+	/** Änderungen an der Auswertung heben die Fassung – sonst blieben alte Tage ohne Köderzählung. */
+	public function testTheVersionCoversDecoys(): void
+	{
+		self::assertGreaterThanOrEqual(3, Analyzer::VERSION);
+	}
 }

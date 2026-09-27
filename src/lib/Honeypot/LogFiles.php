@@ -15,7 +15,7 @@ declare(strict_types=1);
  * Komprimieren ändern dagegen Namen oder Inodes.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-26 21:45
+ * @version Letzte Änderung: 2026-09-27 11:40
  */
 
 namespace Honeypot;
@@ -24,7 +24,7 @@ final class LogFiles
 {
 	public static function fingerprint(string $directory): string
 	{
-		$files = glob($directory . '/{access,error}.log*', GLOB_BRACE) ?: [];
+		$files = glob($directory . '/{access,error,decoy}.log*', GLOB_BRACE) ?: [];
 		$parts = [];
 		foreach ($files as $file) {
 			// Ohne Cache: stat() merkt sich Ergebnisse innerhalb eines Laufs.

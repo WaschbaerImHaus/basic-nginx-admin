@@ -19,7 +19,7 @@ declare(strict_types=1);
  * Aufruf: php honeypot/analyse.php [--dashboard=<host>] <vhost-name> [weitere ...]
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-26 21:45
+ * @version Letzte Änderung: 2026-09-27 11:40
  */
 
 // Im Projektverzeichnis liegt der Autoloader unter src/, in der Installation
@@ -29,6 +29,7 @@ require is_file($bootstrap) ? $bootstrap : dirname(__DIR__) . '/bootstrap.php';
 
 use Honeypot\Analyzer;
 use Honeypot\DayReport;
+use Honeypot\Decoys;
 use Honeypot\LogFiles;
 use Honeypot\LogParser;
 use Honeypot\NetworkRegistry;
@@ -63,8 +64,14 @@ function section(DayReport $report, array $suggestions): string
 {
 	$out = "\n### {$report->date}" . ($report->complete ? '' : ' (laufender Tag)') . "\n\n";
 	$out .= "- Anfragen: {$report->requests}\n";
-	$out .= '- Sondierungen (404): ' . $report->probing() . "\n";
+	$out .= '- Sondierungen (404 und Köder): ' . $report->probing() . "\n";
 	$out .= "- kein Webzugriff: {$report->probeCount}\n";
+	if ($report->decoys !== []) {
+		$out .= '- Köder ausgeliefert: ' . implode(', ', array_map(
+			static fn(string $kind, int $count): string => "$kind $count",
+			array_keys($report->decoys), $report->decoys
+		)) . "\n";
+	}
 	$out .= "- robots.txt geholt: {$report->robots}, /admin besucht: {$report->admin}, "
 		. "davon nach der robots.txt: {$report->robotsThenAdmin}"
 		. ($report->shortestGap() !== null ? ' (kürzester Abstand ' . $report->shortestGap() . ' s)' : '')
@@ -191,9 +198,12 @@ foreach ($names as $name) {
 	$fingerprint = LogFiles::fingerprint($logs);
 	$lines = $parser->readFile($logs . '/access.log');
 	$errorLines = $parser->readFile($logs . '/error.log');
+	// Ausgegebene Köderkennungen (siehe Honeypot\Decoys) – fehlt die Datei, ist kein Köder eingerichtet.
+	$decoyLines = $parser->readFile($logs . '/' . Decoys::LOG_FILE);
 	for ($generation = 1; $generation <= LOG_GENERATIONS; $generation++) {
 		$lines = array_merge($lines, $parser->readFile($logs . '/access.log.' . $generation));
 		$errorLines = array_merge($errorLines, $parser->readFile($logs . '/error.log.' . $generation));
+		$decoyLines = array_merge($decoyLines, $parser->readFile($logs . '/' . Decoys::LOG_FILE . '.' . $generation));
 	}
 	// Existiert die letzte Fassung, die logrotate aufbewahrt, ist die davor schon
 	// gelöscht – und mit ihr vermutlich der Anfang des ältesten Tages.
@@ -217,7 +227,7 @@ foreach ($names as $name) {
 		}
 	}
 
-	$result = $analyzer->run($name, $lines, $errorLines, $ownNames, $today, $oldestMayBeCut);
+	$result = $analyzer->run($name, $lines, $errorLines, $ownNames, $today, $oldestMayBeCut, $decoyLines);
 	echo "$name: ausgewertet " . count($result['analysed']) . ', übersprungen ' . count($result['skipped'])
 		. ', behalten ' . count($result['kept']) . "\n";
 

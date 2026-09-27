@@ -9,7 +9,7 @@ declare(strict_types=1);
  * bezieht sich auf den gewählten Zeitraum – einen Tag oder einen Bereich.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 23:05
+ * @version Letzte Änderung: 2026-09-27 13:45
  */
 
 if (!function_exists('period_link')) {
@@ -122,6 +122,28 @@ $classifier = new \Honeypot\LootClassifier();
 		trägt. Passwörter stehen dort nicht und werden hier auch nicht gesammelt – wer Zugangsdaten
 		einsammelt, betreibt keinen Honigtopf mehr.</p>
 
+	<?php $history = $db->loginHistory($host); ?>
+	<?php if ($history !== []): ?>
+		<h2 style="margin-top:1.4rem">Alle Namen seit Beginn der Aufzeichnung</h2>
+		<table>
+			<tr><th class="num">Versuche</th><th>Benutzername</th><th>Einordnung</th><th>zuerst</th><th>zuletzt</th><th class="num">an Tagen</th></tr>
+			<?php foreach ($history as $row): $class = \Honeypot\LoginName::classify($row['user'], $host); ?>
+				<tr>
+					<td class="num"><?= $row['total'] ?></td>
+					<td class="mono"><?= $row['user'] === '' ? '<em>(leer)</em>' : h($row['user']) ?></td>
+					<td><span class="tag <?= $class === \Honeypot\LoginName::DECOY ? 'bad' : ($class === \Honeypot\LoginName::TARGETED ? 'warn' : '') ?>"><?= h($class) ?></span></td>
+					<td class="mono"><?= h(\Honeypot\Period::day($row['first'])->label()) ?></td>
+					<td class="mono"><?= h(\Honeypot\Period::day($row['last'])->label()) ?></td>
+					<td class="num"><?= $row['days'] ?></td>
+				</tr>
+			<?php endforeach ?>
+		</table>
+		<p class="hint"><em>Geraten</em>: Namen, die Werkzeuge überall probieren (admin, root, test).
+			<em>Gezielt</em>: Der Name stammt aus dieser Domain – jemand hat sich die Seite angesehen.
+			<em>Aus dem Köder</em>: Der Name steht nur in einem ausgelieferten Köder; der Fund wurde benutzt.
+			Ein Name, der über Wochen an vielen Tagen wiederkehrt, gehört zu einer festen Liste.</p>
+	<?php endif ?>
+
 <?php elseif ($view === 'verlauf'):
 	// Spalten: bei einem Tag er selbst und die 14 davor, bei einem Bereich dessen Tage
 	// (höchstens die letzten 31 – breiter wird die Tabelle unlesbar). Tage ohne einen
@@ -171,6 +193,37 @@ $classifier = new \Honeypot\LootClassifier();
 		<p class="hint">Häufigste Pfade über den ganzen Zeitraum oben. Ein roter Pfad mit Treffern nur ganz links
 			ist frisch; einer, der jeden Tag gleichmässig kommt, gehört zum Grundrauschen der Scanner.</p>
 	<?php endif ?>
+
+<?php elseif ($view === 'koeder'): $activity = $db->decoyActivity($host, $period); ?>
+
+	<h2>Köder und ihre Kennungen</h2>
+	<p class="hint" style="margin-top:0"><?= $activity['issued'] ?> Kennungen <?= h($span) ?> ausgegeben,
+		<?= count($activity['uses']) ?> Benutzungen <?= h($span) ?>.</p>
+	<?php if ($activity['uses'] === []): ?>
+		<p class="empty">Keine ausgegebene Kennung ist bisher wieder aufgetaucht.</p>
+	<?php else: ?>
+	<table>
+		<tr><th>benutzt</th><th>wie</th><th>womit</th><th>Kennung</th><th>ausgegeben</th><th>für</th><th class="num">Abstand</th></tr>
+		<?php foreach ($activity['uses'] as $use): ?>
+			<tr class="violation">
+				<td class="mono"><?= h(\Honeypot\Period::day((string)$use['date'])->label() . ' ' . $use['time']) ?></td>
+				<td><span class="tag bad"><?= h((string)$use['source']) ?></span></td>
+				<td class="mono"><?= h((string)$use['detail']) ?><?= $use['agent'] !== '' ? '<br><em>' . h(substr((string)$use['agent'], 0, 60)) . '</em>' : '' ?></td>
+				<td class="mono"><?= h((string)$use['token']) ?></td>
+				<td class="mono"><?= h((string)$use['issued_at']) ?></td>
+				<td class="mono"><?= h((string)$use['issued_request']) ?><br><em><?= h(substr((string)$use['issued_agent'], 0, 60)) ?></em></td>
+				<td class="num"><?= h(duration((int)$use['delay'])) ?></td>
+			</tr>
+		<?php endforeach ?>
+	</table>
+	<?php endif ?>
+	<p class="hint"><strong>So funktionieren die Köder.</strong> Anfragen nach <span class="mono">phpinfo.php</span>
+		(in allen gefragten Schreibweisen und Unterordnern) und nach <span class="mono">.env</span> beantwortet der
+		Honigtopf mit einer erfundenen, echt wirkenden Fassung. Darin stehen ein Benutzername
+		<span class="mono">deploy-&lt;kennung&gt;</span> und zwei interne Adressen mit derselben Kennung; die Kennung
+		ist für jeden Abruf neu. Taucht sie später im Log auf, ist belegt, dass der Fund ausgewertet und benutzt
+		wurde – und von welchem Abruf er stammt. Alle Werte sind erfunden und gelten nirgends; mitgeschrieben wird
+		nichts, was ein Besucher eingibt.</p>
 
 <?php elseif ($view === 'herkunft'): ?>
 

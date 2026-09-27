@@ -22,7 +22,7 @@ declare(strict_types=1);
  * Gruppe ihres Ordners.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 23:05
+ * @version Letzte Änderung: 2026-09-27 11:30
  */
 
 namespace Honeypot;
@@ -42,6 +42,7 @@ final class ReportDatabase
 		'probe_kind' => 'probeKinds',
 		'probe' => 'probes',
 		'login' => 'logins',
+		'decoy' => 'decoys',
 	];
 
 	private const SCHEMA = <<<'SQL'
@@ -102,6 +103,25 @@ CREATE TABLE IF NOT EXISTS peers (
 	registry TEXT,
 	reverse TEXT,
 	PRIMARY KEY (host, date, peer)
+);
+CREATE TABLE IF NOT EXISTS decoy_tokens (
+	host TEXT NOT NULL,
+	token TEXT NOT NULL,
+	date TEXT NOT NULL,
+	time TEXT NOT NULL,
+	request TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	PRIMARY KEY (host, token)
+);
+CREATE TABLE IF NOT EXISTS decoy_uses (
+	host TEXT NOT NULL,
+	token TEXT NOT NULL,
+	date TEXT NOT NULL,
+	time TEXT NOT NULL,
+	source TEXT NOT NULL,
+	detail TEXT NOT NULL,
+	agent TEXT NOT NULL,
+	PRIMARY KEY (host, token, date, time, detail)
 );
 SQL;
 
@@ -315,6 +335,7 @@ SQL;
 			(int)$totals['unreadable'],
 			$events,
 			$peers,
+			$counts['decoy'],
 		);
 	}
 
@@ -367,7 +388,10 @@ SQL;
 	{
 		$out = [];
 		foreach ($this->all(
-			"SELECT d.date, d.requests, d.probe_count, COALESCE(c.value, 0) AS probing FROM days d"
+			// Sondierungen wie DayReport::probing(): jedes 404 plus jeder ausgelieferte Köder.
+			"SELECT d.date, d.requests, d.probe_count, COALESCE(c.value, 0)"
+			. " + COALESCE((SELECT SUM(k.value) FROM counts k WHERE k.host = d.host AND k.date = d.date AND k.dimension = 'decoy'), 0)"
+			. " AS probing FROM days d"
 			. " LEFT JOIN counts c ON c.host = d.host AND c.date = d.date AND c.dimension = 'status' AND c.item = '404'"
 			. ' WHERE d.host = ? AND d.date BETWEEN ? AND ? ORDER BY d.date',
 			[$host, $period->from, $period->to]
@@ -430,6 +454,101 @@ SQL;
 			$params
 		);
 		return ['rows' => $rows, 'total' => $total];
+	}
+
+	/**
+	 * Versuchte Benutzernamen über alle gespeicherten Tage: Summe, erster und letzter
+	 * Tag, Zahl der Tage. Häufigste zuerst.
+	 *
+	 * @return list<array{user: string, total: int, first: string, last: string, days: int}>
+	 */
+	public function loginHistory(string $host): array
+	{
+		return array_map(
+			static fn(array $row): array => [
+				'user' => (string)$row['item'], 'total' => (int)$row['total'], 'first' => (string)$row['first'],
+				'last' => (string)$row['last'], 'days' => (int)$row['days'],
+			],
+			$this->all(
+				"SELECT item, SUM(value) AS total, MIN(date) AS first, MAX(date) AS last, COUNT(DISTINCT date) AS days"
+				. " FROM counts WHERE host = ? AND dimension = 'login' GROUP BY item ORDER BY total DESC, item LIMIT 1000",
+				[$host]
+			)
+		);
+	}
+
+	/**
+	 * Merkt sich ausgegebene Köderkennungen. Doppelte (ein Lauf liest dieselben Zeilen
+	 * stündlich neu) werden übergangen.
+	 *
+	 * @param list<array{token: string, date: string, time: string, request: string, agent: string}> $tokens
+	 */
+	public function saveTokens(string $host, array $tokens): void
+	{
+		$insert = $this->pdo->prepare(
+			'INSERT OR IGNORE INTO decoy_tokens (host, token, date, time, request, agent) VALUES (?,?,?,?,?,?)'
+		);
+		$this->pdo->beginTransaction();
+		foreach ($tokens as $t) {
+			$insert->execute([$host, $t['token'], $t['date'], $t['time'], $t['request'], $t['agent']]);
+		}
+		$this->pdo->commit();
+	}
+
+	/**
+	 * Merkt sich, wo eine Kennung wieder auftauchte; doppelte werden übergangen.
+	 *
+	 * @param list<array{token: string, date: string, time: string, source: string, detail: string, agent: string}> $uses
+	 */
+	public function saveUses(string $host, array $uses): void
+	{
+		$insert = $this->pdo->prepare(
+			'INSERT OR IGNORE INTO decoy_uses (host, token, date, time, source, detail, agent) VALUES (?,?,?,?,?,?,?)'
+		);
+		$this->pdo->beginTransaction();
+		foreach ($uses as $u) {
+			$insert->execute([$host, $u['token'], $u['date'], $u['time'], $u['source'], $u['detail'], $u['agent']]);
+		}
+		$this->pdo->commit();
+	}
+
+	/**
+	 * Alle je ausgegebenen Kennungen eines Hosts.
+	 *
+	 * @return array<string, true>
+	 */
+	public function knownTokens(string $host): array
+	{
+		$out = [];
+		foreach ($this->all('SELECT token FROM decoy_tokens WHERE host = ?', [$host]) as $row) {
+			$out[(string)$row['token']] = true;
+		}
+		return $out;
+	}
+
+	/**
+	 * Köder in einem Zeitraum: wie viele Kennungen ausgegeben wurden und jede Benutzung,
+	 * die in den Zeitraum fällt – mit dem Abruf, aus dem die Kennung stammt, und dem
+	 * Abstand in Sekunden. Neueste Benutzung zuerst.
+	 *
+	 * @return array{issued: int, uses: list<array<string, mixed>>}
+	 */
+	public function decoyActivity(string $host, Period $period): array
+	{
+		$range = [$host, $period->from, $period->to];
+		$issued = (int)($this->one('SELECT COUNT(*) AS n FROM decoy_tokens WHERE host = ? AND date BETWEEN ? AND ?', $range)['n'] ?? 0);
+		$uses = [];
+		foreach ($this->all(
+			"SELECT u.token, u.date, u.time, u.source, u.detail, u.agent, t.date || ' ' || t.time AS issued_at,"
+			. ' t.request AS issued_request, t.agent AS issued_agent FROM decoy_uses u'
+			. ' JOIN decoy_tokens t ON t.host = u.host AND t.token = u.token'
+			. ' WHERE u.host = ? AND u.date BETWEEN ? AND ? ORDER BY u.date DESC, u.time DESC LIMIT 500',
+			$range
+		) as $row) {
+			$row['delay'] = strtotime($row['date'] . ' ' . $row['time']) - strtotime((string)$row['issued_at']);
+			$uses[] = $row;
+		}
+		return ['issued' => $issued, 'uses' => $uses];
 	}
 
 	/**

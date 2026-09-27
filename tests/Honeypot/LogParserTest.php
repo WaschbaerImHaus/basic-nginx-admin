@@ -66,4 +66,29 @@ final class LogParserTest extends TestCase
 			array_map(static fn($entry): string => $entry->path, $parsed->days['2026-09-21'])
 		);
 	}
+
+	/**
+	 * Aufrufe vom Rechner selbst (Prüfungen per curl --resolve) sind kein Angriff und
+	 * zählen nicht. Von aussen kommt alles über den Tunnel (10.200.0.1) oder, mit
+	 * PROXY-Protokoll, mit der echten Adresse – nie als 127.0.0.1.
+	 */
+	public function testSkipsRequestsFromThisMachine(): void
+	{
+		$parsed = (new LogParser())->parse([
+			'127.0.0.1 - - [21/Sep/2026:10:00:00 +0200] "GET /.env HTTP/2.0" 200 5 "-" "selbsttest"',
+			'::1 - - [21/Sep/2026:10:00:01 +0200] "GET /.env HTTP/2.0" 200 5 "-" "selbsttest"',
+			'10.200.0.1 - - [21/Sep/2026:10:00:02 +0200] "GET /.env HTTP/1.1" 200 5 "-" "scanner"',
+		]);
+		self::assertCount(1, $parsed->days['2026-09-21']);
+		self::assertSame(0, $parsed->unreadable);
+	}
+
+	/** Ebenso ausgegebene Köderkennungen: Ein Selbsttest soll keine „Benutzung" vortäuschen. */
+	public function testSkipsDecoyTokensIssuedToThisMachine(): void
+	{
+		$line = static fn(string $ip): string => json_encode(['time' => '2026-09-27T10:00:00+02:00', 'token' => '0123456789',
+			'request' => 'GET /.env HTTP/1.1', 'status' => '200', 'agent' => 'x', 'ip' => $ip]);
+		self::assertSame([], \Honeypot\DecoyTracker::issued([$line('127.0.0.1'), $line('::1')]));
+		self::assertCount(1, \Honeypot\DecoyTracker::issued([$line('10.200.0.1')]));
+	}
 }

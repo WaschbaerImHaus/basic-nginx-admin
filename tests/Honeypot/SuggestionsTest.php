@@ -6,7 +6,7 @@ declare(strict_types=1);
  * nicht, weil er grundsätzlich denkbar wäre.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:00
+ * @version Letzte Änderung: 2026-09-27 13:30
  */
 
 namespace Tests\Honeypot;
@@ -39,18 +39,25 @@ final class SuggestionsTest extends TestCase
 		self::assertStringContainsString('Keine', $out[0]);
 	}
 
-	public function testSuggestsBaitFilesOnlyWhenCredentialsAreActuallySoughtOften(): void
+	/**
+	 * Weitere Köder: nur für gesuchte Zugangsdaten, die noch kein Köder abdeckt – und
+	 * nur, wenn oft genug danach gefragt wird.
+	 */
+	public function testSuggestsMoreDecoysOnlyForUncoveredCredentialFiles(): void
 	{
-		$few = (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $this->probing(2), 0, [], true));
-		$many = (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $this->probing(8), 0, [], true));
-		self::assertStringNotContainsString('Köderdatei', implode("\n", $few));
-		self::assertStringContainsString('Köderdatei', implode("\n", $many));
+		$few = (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $this->probing(2, '/.aws/credentials'), 0, [], true));
+		$many = (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $this->probing(8, '/.aws/credentials'), 0, [], true));
+		$covered = (new Suggestions())->forReport(DayReport::fromEntries('2026-09-21', $this->probing(30, '/.env'), 0, [], true));
+		self::assertStringNotContainsString('Weitere Köder', implode("\n", $few));
+		self::assertStringContainsString('Weitere Köder', implode("\n", $many));
+		self::assertStringContainsString('/.aws/credentials', implode("\n", $many));
+		self::assertStringNotContainsString('Weitere Köder', implode("\n", $covered), '.env hat schon einen Köder');
 	}
 
 	public function testMentionsTheNumbersItIsBasedOn(): void
 	{
 		$out = implode("\n", (new Suggestions())->forReport(
-			DayReport::fromEntries('2026-09-21', $this->probing(25), 0, ['admin' => 2], true)
+			DayReport::fromEntries('2026-09-21', $this->probing(25, '/.git/config'), 0, ['admin' => 2], true)
 		));
 		self::assertStringContainsString('25', $out, 'die Zahl der Sondierungen gehört in den Vorschlag');
 	}
@@ -76,5 +83,21 @@ final class SuggestionsTest extends TestCase
 		self::assertStringNotContainsString('Eigene Kachel', $out);
 		self::assertStringNotContainsString('nach Häufigkeit gruppieren', $out);
 		self::assertStringNotContainsString('über Tage vergleichen', $out);
+	}
+
+	/**
+	 * Umgesetzt am 2026-09-27: Köder mit Kennung (phpinfo, .env), Verteilung der
+	 * Abstände robots.txt → /admin, Benutzernamen über Wochen samt Einordnung.
+	 */
+	public function testDoesNotSuggestTheDecoyAndLoginToolsAnyMore(): void
+	{
+		$report = DayReport::fromArray([
+			'date' => '2026-09-21', 'robots' => 3, 'robotsThenAdmin' => 2, 'gaps' => [4, 9],
+			'logins' => ['admin' => 5], 'loot' => ['Zugangsdaten' => 40], 'notFound' => ['/.env' => 40],
+		]);
+		$out = implode("\n", (new Suggestions())->forReport($report));
+		self::assertStringNotContainsString('Köderdateien mit Kennung', $out);
+		self::assertStringNotContainsString('Zeitabstand', $out);
+		self::assertStringNotContainsString('Benutzernamen sammeln', $out);
 	}
 }

@@ -308,4 +308,59 @@ final class ReportDatabaseTest extends TestCase
 		self::assertSame('0640', sprintf('%04o', (fileperms($file) ?: 0) & 07777));
 		self::assertSame(filegroup($this->dir), filegroup($file));
 	}
+
+	/** Köderabrufe laufen als eigene Dimension durch und zählen bei den Sondierungen je Tag mit. */
+	public function testStoresDecoyHits(): void
+	{
+		$report = DayReport::fromArray(['date' => '2026-09-21', 'complete' => true, 'requests' => 3,
+			'status' => ['404' => 1, '200' => 2], 'decoys' => ['phpinfo' => 2]]);
+		$db = ReportDatabase::open($this->dir . '/k.sqlite');
+		$db->save('h', $report, 1);
+		self::assertSame(['phpinfo' => 2], $db->load('h', Period::day('2026-09-21'))->decoys);
+		self::assertSame(3, $db->dailyTotals('h', Period::day('2026-09-21'))['2026-09-21']['probing']);
+	}
+
+	/**
+	 * Kennungen und ihre Benutzung überleben jede Neuauswertung eines Tages und werden
+	 * nicht doppelt gespeichert, wenn ein Lauf dieselben Zeilen noch einmal liest.
+	 */
+	public function testStoresIssuedTokensAndTheirUse(): void
+	{
+		$db = ReportDatabase::open($this->dir . '/k.sqlite');
+		$token = ['token' => '0123456789', 'date' => '2026-09-21', 'time' => '10:00:00', 'request' => 'GET /.env HTTP/1.1', 'agent' => 'S'];
+		$use = ['token' => '0123456789', 'date' => '2026-09-23', 'time' => '08:00:00', 'source' => 'Anfrage', 'detail' => 'GET /?key=0123456789', 'agent' => 'C'];
+		for ($run = 0; $run < 2; $run++) {
+			$db->saveTokens('h', [$token, ['token' => 'abcdefabcd'] + $token]);
+			$db->saveUses('h', [$use]);
+		}
+		self::assertSame(['0123456789' => true, 'abcdefabcd' => true], $db->knownTokens('h'));
+		self::assertSame([], $db->knownTokens('anders'));
+
+		$activity = $db->decoyActivity('h', Period::between('2026-09-20', '2026-09-23'));
+		self::assertSame(2, $activity['issued']);
+		self::assertCount(1, $activity['uses']);
+		self::assertSame('GET /.env HTTP/1.1', $activity['uses'][0]['issued_request']);
+		self::assertSame('2026-09-21 10:00:00', $activity['uses'][0]['issued_at']);
+		self::assertSame(2 * 86400 - 7200, $activity['uses'][0]['delay']);
+		// Ein Zeitraum ohne Ausgabe, aber mit Benutzung: die Benutzung zählt, wann sie war.
+		$later = $db->decoyActivity('h', Period::day('2026-09-23'));
+		self::assertSame(0, $later['issued']);
+		self::assertCount(1, $later['uses']);
+	}
+
+	/**
+	 * Benutzernamen über alle Tage: wie oft, wann zuerst und zuletzt, an wie vielen Tagen.
+	 * Die Frage dahinter: geraten (admin, root) oder gezielt (Domainname)?
+	 */
+	public function testLoginHistoryOverAllDays(): void
+	{
+		$db = ReportDatabase::open($this->dir . '/k.sqlite');
+		$db->save('h', DayReport::fromArray(['date' => '2026-09-20', 'logins' => ['admin' => 3, 'mfsvr' => 1]]), 1);
+		$db->save('h', DayReport::fromArray(['date' => '2026-09-22', 'logins' => ['admin' => 2]]), 1);
+		$db->save('anders', DayReport::fromArray(['date' => '2026-09-22', 'logins' => ['root' => 9]]), 1);
+		self::assertSame([
+			['user' => 'admin', 'total' => 5, 'first' => '2026-09-20', 'last' => '2026-09-22', 'days' => 2],
+			['user' => 'mfsvr', 'total' => 1, 'first' => '2026-09-20', 'last' => '2026-09-20', 'days' => 1],
+		], $db->loginHistory('h'));
+	}
 }

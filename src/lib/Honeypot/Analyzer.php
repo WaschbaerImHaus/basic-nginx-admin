@@ -16,7 +16,7 @@ declare(strict_types=1);
  * Nachgeschlagen (DNS, Netztabelle) wird nur für Tage, die wirklich ausgewertet werden.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 23:05
+ * @version Letzte Änderung: 2026-09-27 11:30
  */
 
 namespace Honeypot;
@@ -26,9 +26,9 @@ final class Analyzer
 	/**
 	 * Fassung der Auswertung. Erhöhen, wenn sich ändert, was ein Tagesbericht enthält:
 	 * Tage einer älteren Fassung werden dann neu ausgewertet, solange ihre Logs da sind.
-	 * 1 = übernommene JSON-Berichte, 2 = seit der SQLite-Ablage.
+	 * 1 = übernommene JSON-Berichte, 2 = seit der SQLite-Ablage, 3 = mit Köderabrufen.
 	 */
-	public const VERSION = 2;
+	public const VERSION = 3;
 
 	public function __construct(
 		private readonly ReportDatabase $db,
@@ -44,6 +44,7 @@ final class Analyzer
 	 * @param list<string> $ownNames       eigene Namen und Adressen (keine Gegenstelle)
 	 * @param bool         $oldestMayBeCut die älteste Logdatei liegt an der Aufbewahrungs-
 	 *                                     grenze; vom ältesten Tag fehlt vermutlich der Anfang
+	 * @param list<string> $decoyLines     Zeilen aller vorhandenen decoy.log-Fassungen (ausgegebene Köderkennungen)
 	 * @return array{analysed: list<string>, skipped: list<string>, kept: list<string>}
 	 */
 	public function run(
@@ -52,7 +53,8 @@ final class Analyzer
 		array $errorLines,
 		array $ownNames,
 		string $today,
-		bool $oldestMayBeCut
+		bool $oldestMayBeCut,
+		array $decoyLines = []
 	): array {
 		$parsed = $this->parser->parse($accessLines);
 		$logins = $this->attempts->byDate($errorLines);
@@ -84,6 +86,13 @@ final class Analyzer
 			$this->db->save($host, $report, self::VERSION);
 			$result['analysed'][] = $date;
 		}
+
+		// Köderkennungen über alle gelesenen Zeilen, unabhängig davon, welche Tage oben
+		// übersprungen wurden: Eine Kennung von vorgestern kann heute benutzt werden.
+		// Doppeltes übergeht die Datenbank.
+		$this->db->saveTokens($host, DecoyTracker::issued($decoyLines));
+		$all = $parsed->days === [] ? [] : array_merge(...array_values($parsed->days));
+		$this->db->saveUses($host, DecoyTracker::uses($all, $errorLines, $this->db->knownTokens($host)));
 		return $result;
 	}
 }

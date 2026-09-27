@@ -9,7 +9,7 @@ declare(strict_types=1);
  * als „Vortag" zählt, schreibt dem falschen Tag bis zu sechs Stunden Verkehr zu.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:10
+ * @version Letzte Änderung: 2026-09-27 13:00
  */
 
 namespace Honeypot;
@@ -32,6 +32,10 @@ final class LogParser
 				$unreadable++;
 				continue;
 			}
+			// Aufrufe vom Rechner selbst sind Prüfungen, kein Angriff.
+			if (self::isLocal($entry->ip)) {
+				continue;
+			}
 			$days[$entry->date][] = $entry;
 		}
 		ksort($days);
@@ -44,6 +48,15 @@ final class LogParser
 			$days[$date] = $entries;
 		}
 		return new ParsedLog($days, $unreadable);
+	}
+
+	/**
+	 * Adresse dieses Rechners? Von aussen kommt nichts als 127.0.0.1 oder ::1 an – der
+	 * Tunnel setzt auf 10.200.0.1 um, PROXY-Protokoll lieferte die echte Adresse.
+	 */
+	public static function isLocal(string $ip): bool
+	{
+		return $ip === '127.0.0.1' || $ip === '::1';
 	}
 
 	/**

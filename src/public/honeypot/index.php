@@ -14,7 +14,7 @@ declare(strict_types=1);
  * wird nach Verhalten – Werkzeug, gesuchte Pfade, Zeitmuster, Protokolltreue.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-25 23:05
+ * @version Letzte Änderung: 2026-09-27 13:45
  */
 
 require __DIR__ . '/bootstrap.php';
@@ -89,6 +89,23 @@ function period_link(array $period, array $changes = []): string
 	return link_to(array_merge(['tag' => '', 'von' => '', 'bis' => '', 'zeitraum' => '', 'monat' => ''], $period, $changes));
 }
 
+/** Eine Dauer in Sekunden, grob und lesbar: „12 s", „5 min", „3 h", „2 Tage". */
+function duration(int $seconds): string
+{
+	return match (true) {
+		$seconds < 60 => $seconds . ' s',
+		$seconds < 3600 => intdiv($seconds, 60) . ' min',
+		$seconds < 172800 => intdiv($seconds, 3600) . ' h',
+		default => intdiv($seconds, 86400) . ' Tage',
+	};
+}
+
+/** Anzeigename einer Köderart. */
+function decoy_name(string $kind): string
+{
+	return ['phpinfo' => 'phpinfo()', 'env' => '.env'][$kind] ?? $kind;
+}
+
 /** Eine Balkenzeile. */
 function bars(array $values, int $max, string $tone = '', bool $mono = false): string
 {
@@ -125,7 +142,7 @@ $period = $selection->period;
 $single = $period->isSingleDay();
 
 $view = param('ansicht');
-$views = ['pfade', 'verlauf', 'kennungen', 'dienste', 'anmeldungen', 'herkunft', 'ereignisse'];
+$views = ['pfade', 'verlauf', 'kennungen', 'dienste', 'anmeldungen', 'herkunft', 'ereignisse', 'koeder'];
 if (!in_array($view, $views, true)) {
 	$view = '';
 }
@@ -164,6 +181,7 @@ $titles = [
 	'dienste' => 'Kein Webzugriff',
 	'anmeldungen' => 'Anmeldeversuche',
 	'ereignisse' => 'Ereignisse',
+	'koeder' => 'Köder',
 ];
 $title = $view === '' ? 'Honigtopf' : $titles[$view];
 // Kurze Wendung für Texte: „an diesem Tag" oder „in diesem Zeitraum".
@@ -247,7 +265,7 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 				</div>
 				<div class="figure">
 					<div class="value bad"><?= $report->probing() ?></div>
-					<div class="label">Sondierungen (404)</div>
+					<div class="label">Sondierungen (404 und Köder)</div>
 				</div>
 				<div class="figure">
 					<div class="value warn"><?= $report->probeCount ?></div>
@@ -264,8 +282,8 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 					<?= $previous->requests ?> Anfragen, <?= $previous->probing() ?> Sondierungen
 					(<?= sprintf('%+d %%', (int)round(($report->requests - $previous->requests) / $previous->requests * 100)) ?>).</p>
 			<?php endif ?>
-			<p class="hint">Die Zahl, auf die es ankommt, ist <strong>404</strong>: Sie misst die Sondierung
-				direkt. Gesucht wurde etwas, das es hier nie gab.</p>
+			<p class="hint">Die Zahl, auf die es ankommt, sind die <strong>Sondierungen</strong>: Gesucht wurde
+				etwas, das es hier nie gab – beantwortet mit 404 oder mit einem Köder.</p>
 		</div>
 
 		<?php require __DIR__ . '/days.php'; ?>
@@ -302,6 +320,31 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 			<?php endif ?>
 			<p class="hint">Die nützlichste Frühwarnung dieser Seite: Ein Pfad, der plötzlich auftaucht, ist
 				meist eine frisch bekannt gewordene Lücke, die gerade reihum ausprobiert wird.</p>
+		</div>
+
+		<div class="tile">
+			<h2>Köder <a href="<?= h(link_to(['ansicht' => 'koeder'])) ?>">Kennungen &rarr;</a></h2>
+			<?php $activity = $db->decoyActivity($host, $period); $delivered = array_sum($report->decoys); ?>
+			<div class="figures">
+				<div class="figure"><div class="value"><?= $delivered ?></div><div class="label">ausgeliefert</div></div>
+				<div class="figure"><div class="value"><?= $activity['issued'] ?></div><div class="label">Kennungen ausgegeben</div></div>
+				<div class="figure"><div class="value <?= $activity['uses'] === [] ? '' : 'bad' ?>"><?= count($activity['uses']) ?></div><div class="label">benutzt</div></div>
+			</div>
+			<?php if ($report->decoys !== []): $named = []; foreach ($report->decoys as $kind => $count) { $named[decoy_name((string)$kind)] = $count; } ?>
+				<?= bars($named, (int)max($named) ?: 1, 'warn') ?>
+			<?php endif ?>
+			<?php if ($activity['uses'] !== []): ?>
+				<table class="compact">
+					<?php foreach (array_slice($activity['uses'], 0, 4) as $use): ?>
+						<tr><td class="num"><?= h(duration((int)$use['delay'])) ?></td>
+							<td><span class="tag bad"><?= h((string)$use['source']) ?></span>
+								<span class="mono"><?= h(substr((string)$use['detail'], 0, 48)) ?></span></td></tr>
+					<?php endforeach ?>
+				</table>
+			<?php endif ?>
+			<p class="hint">Wer <span class="mono">phpinfo.php</span> oder <span class="mono">.env</span> sucht,
+				bekommt eine erfundene Fassung mit einer Kennung nur für diesen Abruf. Taucht die Kennung wieder
+				auf – als Anmeldename oder in einer Adresse –, wurde der Fund ausgewertet und benutzt.</p>
 		</div>
 
 		<div class="tile">
@@ -343,6 +386,11 @@ $span = $single ? 'an diesem Tag' : 'in diesem Zeitraum';
 				<?php endif ?>
 				Die <span class="mono">robots.txt</span> schliesst <span class="mono">/admin/</span> ausdrücklich
 				aus. Ein Besuch danach ist ein bewusster Verstoss; einer ohne ist blosses Raten.</p>
+			<?php if ($report->gaps !== []): $buckets = $report->gapBuckets(); ?>
+				<?= bars($buckets, (int)max($buckets) ?: 1, 'warn') ?>
+				<p class="hint">Abstand zwischen robots.txt und /admin: Unter einer Sekunde ruft ein Werkzeug beides
+					blind ab; Minuten dazwischen heissen „gelesen, ausgewertet, wiedergekommen“.</p>
+			<?php endif ?>
 		</div>
 
 		<div class="tile">

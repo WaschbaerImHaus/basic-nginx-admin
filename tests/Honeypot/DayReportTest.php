@@ -232,4 +232,63 @@ final class DayReportTest extends TestCase
 		self::assertSame([], $report->networks());
 		self::assertCount(1, $report->peers, 'die Gegenstelle selbst bleibt sichtbar');
 	}
+
+	/**
+	 * Köder (seit 2026-09-27): Die phpinfo- und .env-Pfade antworten mit 200. Sie bleiben
+	 * trotzdem Sondierungen – gesucht wurde, was es hier nie gab – und erscheinen dazu
+	 * je Köderart gezählt.
+	 */
+	public function testDecoyHitsAreProbesAndCountedByKind(): void
+	{
+		$report = DayReport::fromEntries('2026-09-21', $this->entries([
+			['07:00:00', '/phpinfo.php', '200', 'a'],
+			['07:00:01', '/admin/phpinfo.php', '200', 'a'],
+			['07:00:02', '/.env', '200', 'b'],
+			['07:00:03', '/x', '404', 'b'],
+			['07:00:04', '/', '200', 'c'],
+		]), 0, [], true);
+
+		self::assertSame(['phpinfo' => 2, 'env' => 1], $report->decoys);
+		self::assertSame(4, $report->probing(), '404 plus Köderabrufe');
+		self::assertArrayHasKey('/phpinfo.php', $report->notFound);
+		self::assertArrayHasKey('/.env', $report->notFound);
+		self::assertArrayNotHasKey('/', $report->notFound);
+		self::assertSame(1, $report->loot['Zugangsdaten']);
+		$paths = array_column($report->events, 'path');
+		self::assertContains('/.env', $paths, 'ein Köderabruf ist auffällig');
+		self::assertNotContains('/', $paths);
+	}
+
+	/** Ein 404 auf einen Köderpfad (vor dem Einrichten) ist kein Köderabruf. */
+	public function testANotFoundDecoyPathIsNoDecoyHit(): void
+	{
+		$report = DayReport::fromEntries('2026-09-21', $this->entries([
+			['07:00:00', '/phpinfo.php', '404', 'a'],
+		]), 0, [], true);
+		self::assertSame([], $report->decoys);
+		self::assertSame(1, $report->probing());
+	}
+
+	public function testDecoysSurviveTheRoundTrip(): void
+	{
+		$report = DayReport::fromEntries('2026-09-21', $this->entries([['07:00:00', '/.env', '200', 'a']]), 0, [], true);
+		$copy = DayReport::fromArray(json_decode(json_encode($report), true));
+		self::assertSame(['env' => 1], $copy->decoys);
+		self::assertSame(['env' => 1], $report->withPeers([])->decoys);
+	}
+
+	/**
+	 * Abstände robots.txt → /admin in Stufen: Unter einer Sekunde ruft ein Werkzeug
+	 * blind beides ab; Minuten dazwischen heissen „gelesen, ausgewertet, wiedergekommen".
+	 */
+	public function testGroupsTheGapsIntoBuckets(): void
+	{
+		$report = DayReport::fromArray(['date' => '2026-09-21', 'gaps' => [0, 0, 3, 45, 200, 7200]]);
+		self::assertSame([
+			'unter 1 s' => 2, '1–10 s' => 1, '10–60 s' => 1, '1–10 min' => 1, 'über 10 min' => 1,
+		], $report->gapBuckets());
+		self::assertSame([
+			'unter 1 s' => 0, '1–10 s' => 0, '10–60 s' => 0, '1–10 min' => 0, 'über 10 min' => 0,
+		], DayReport::fromArray(['date' => '2026-09-21'])->gapBuckets());
+	}
 }

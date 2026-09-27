@@ -12,7 +12,7 @@ declare(strict_types=1);
  * eine Adressumsetzung, jede Anfrage von aussen erscheint als 10.200.0.1.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:20
+ * @version Letzte Änderung: 2026-09-27 11:30
  */
 
 namespace Honeypot;
@@ -42,6 +42,7 @@ final class DayReport implements \JsonSerializable
 	 * @param array<string, int>     $logins    Benutzername => Fehlversuche
 	 * @param list<array<string, string>> $events auffällige Anfragen für die Detailansicht
 	 * @param list<Peer>             $peers     Gegenstellen, die in den Daten sichtbar wurden
+	 * @param array<string, int>     $decoys    Köderart (siehe Decoys) => ausgelieferte Abrufe
 	 */
 	public function __construct(
 		public readonly string $date,
@@ -65,6 +66,7 @@ final class DayReport implements \JsonSerializable
 		public readonly int $unreadable,
 		public readonly array $events,
 		public readonly array $peers = [],
+		public readonly array $decoys = [],
 	) {
 	}
 
@@ -84,7 +86,7 @@ final class DayReport implements \JsonSerializable
 		bool $complete
 	): self {
 		$classifier = new LootClassifier();
-		$status = $methods = $agents = $notFound = $probeKinds = $probes = [];
+		$status = $methods = $agents = $notFound = $probeKinds = $probes = $decoys = [];
 		$hours = array_fill_keys(array_map(static fn(int $h): string => sprintf('%02d', $h), range(0, 23)), 0);
 		$loot = array_fill_keys(array_keys(LootClassifier::GROUPS), 0);
 		$probeCount = $robots = $admin = $robotsThenAdmin = 0;
@@ -105,8 +107,16 @@ final class DayReport implements \JsonSerializable
 				$probes[$raw] = ($probes[$raw] ?? 0) + 1;
 			}
 
+			// Ein ausgelieferter Köder (200) ist genauso eine Sondierung wie ein 404:
+			// Gesucht wurde, was es hier nie gab. Er zählt deshalb bei den gesuchten
+			// Pfaden mit und zusätzlich je Köderart.
+			$decoy = $entry->status === '200' ? Decoys::kindOf($entry->path) : null;
+			if ($decoy !== null) {
+				$decoys[$decoy] = ($decoys[$decoy] ?? 0) + 1;
+			}
+
 			$group = null;
-			if ($entry->status === '404') {
+			if ($entry->status === '404' || $decoy !== null) {
 				$notFound[$entry->path] = ($notFound[$entry->path] ?? 0) + 1;
 				$group = $classifier->classify($entry->path);
 				if ($group !== null) {
@@ -129,7 +139,7 @@ final class DayReport implements \JsonSerializable
 				}
 			}
 
-			if ($entry->isNoteworthy() && count($events) < self::EVENT_LIMIT) {
+			if (($entry->isNoteworthy() || $decoy !== null) && count($events) < self::EVENT_LIMIT) {
 				$events[] = [
 					'time' => $entry->time,
 					'method' => $entry->method,
@@ -149,12 +159,13 @@ final class DayReport implements \JsonSerializable
 		arsort($probeKinds);
 		arsort($probes);
 		arsort($logins);
+		arsort($decoys);
 
 		return new self(
 			$date, $complete, count($entries), $status, $hours, $agents,
 			self::detectRotation($agents), $notFound, $loot, $methods,
 			$probeCount, $probeKinds, $probes,
-			$robots, $admin, $robotsThenAdmin, $gaps, $logins, $unreadable, $events
+			$robots, $admin, $robotsThenAdmin, $gaps, $logins, $unreadable, $events, [], $decoys
 		);
 	}
 
@@ -181,11 +192,12 @@ final class DayReport implements \JsonSerializable
 	}
 
 	/**
-	 * Sondierungen (404) dieses Tages – die Zahl, auf die es ankommt.
+	 * Sondierungen dieses Tages – die Zahl, auf die es ankommt: jedes 404 und jeder
+	 * ausgelieferte Köder (dort stand vorher ebenfalls ein 404).
 	 */
 	public function probing(): int
 	{
-		return $this->status['404'] ?? 0;
+		return ($this->status['404'] ?? 0) + array_sum($this->decoys);
 	}
 
 	/**
@@ -203,7 +215,7 @@ final class DayReport implements \JsonSerializable
 			$this->agents, $this->rotating, $this->notFound, $this->loot, $this->methods,
 			$this->probeCount, $this->probeKinds, $this->probes, $this->robots, $this->admin,
 			$this->robotsThenAdmin, $this->gaps, $this->logins, $this->unreadable,
-			$this->events, $peers
+			$this->events, $peers, $this->decoys
 		);
 	}
 
@@ -287,6 +299,29 @@ final class DayReport implements \JsonSerializable
 	}
 
 	/**
+	 * Abstände robots.txt → /admin in Stufen. Unter einer Sekunde ruft ein Werkzeug
+	 * beides blind nacheinander ab; Minuten dazwischen heissen „gelesen, ausgewertet,
+	 * wiedergekommen" – das ist der interessantere Besucher.
+	 *
+	 * @return array<string, int> Stufe => Anzahl, alle Stufen auch leer
+	 */
+	public function gapBuckets(): array
+	{
+		$buckets = ['unter 1 s' => 0, '1–10 s' => 0, '10–60 s' => 0, '1–10 min' => 0, 'über 10 min' => 0];
+		foreach ($this->gaps as $gap) {
+			$key = match (true) {
+				$gap < 1 => 'unter 1 s',
+				$gap < 10 => '1–10 s',
+				$gap < 60 => '10–60 s',
+				$gap < 600 => '1–10 min',
+				default => 'über 10 min',
+			};
+			$buckets[$key]++;
+		}
+		return $buckets;
+	}
+
+	/**
 	 * Kürzester gemessener Abstand robots.txt → /admin, null ohne Messung.
 	 */
 	public function shortestGap(): ?int
@@ -321,6 +356,7 @@ final class DayReport implements \JsonSerializable
 			'unreadable' => $this->unreadable,
 			'events' => $this->events,
 			'peers' => $this->peers,
+			'decoys' => $this->decoys,
 		];
 	}
 
@@ -362,6 +398,7 @@ final class DayReport implements \JsonSerializable
 				static fn(mixed $peer): Peer => Peer::fromArray(is_array($peer) ? $peer : []),
 				(array)($data['peers'] ?? [])
 			)),
+			array_map(intval(...), (array)($data['decoys'] ?? [])),
 		);
 	}
 }

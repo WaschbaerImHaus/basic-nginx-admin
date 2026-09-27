@@ -49,6 +49,6 @@ foreach ($series as $totals) {
 		<?php endforeach ?>
 	</div>
 	<div class="scale"><span><?= h(\Honeypot\Period::day($windowDays[0])->label()) ?></span><span><?= h(\Honeypot\Period::day($period->to)->label()) ?></span></div>
-	<p class="hint">Säule = Anfragen des Tages, rot = davon Sondierungen (404). Ein Klick zeigt den Tag.
+	<p class="hint">Säule = Anfragen des Tages, rot = davon Sondierungen (404 und Köder). Ein Klick zeigt den Tag.
 		<?php if ($period->length() > 62): ?>Gezeigt sind die letzten 62 Tage des Zeitraums.<?php endif ?></p>
 </div>

@@ -1,0 +1,12 @@
+2026-09-27 12:54 Honigtopf: Vorschlaege umgesetzt, Koeder (phpinfo, .env) mit Kennung
+Offene Vorschlaege aus Suggestions: Koederdateien mit Kennung, Abstand robots->admin,
+Benutzernamen ueber Wochen - alle drei umgesetzt und aus Suggestions entfernt; neue Regel
+"Weitere Koeder". Koeder statisch ueber nginx: map $request_id -> 10 Hexziffern,
+sub_filter setzt sie ein, decoy.log (JSON) haelt die Ausgabe fest. Server-Ebene
+if+rewrite, weil Snippet-locations gegen die Regex-Bloecke des Wrappers verloeren.
+Fund: Punktdateien wurden auf dem Honigtopf nie protokolliert (access_log off in der
+allgemeinen Regel) - location ^~ /. { return 404; } im Koederabschnitt.
+Selbsttests (127.0.0.1) zaehlen nicht mehr. Analyzer::VERSION 3. Live geprueft: phpinfo
+200 text/html, .env 200 text/plain mit Kennung, /.koeder/ 404, /.git/config geloggt.
+Hinweis: Tage 19.-23.09. blieben "behalten" (gespeichert mehr Anfragen als ohne
+Selbsttests) - enthalten also noch die alten Selbsttests.
