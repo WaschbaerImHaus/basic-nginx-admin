@@ -320,8 +320,8 @@ sudo vhost remove <name> --now                               # sofort entfernen 
 sudo vhost remove <name> --purge                             # sofort entfernen, auch /var/www/<name>
 sudo vhost purge-due                                         # abgelaufene Vormerkungen aufräumen
 sudo vhost protect <name> on|off
-printf 'passwort\n' | sudo vhost user-add <name> <user>
-sudo vhost protect-path <name> [pfad]                         # Schutz nur für diesen Pfad (leer = ganze Seite)
+printf 'passwort\n' | sudo vhost user-add [--path PFAD] <name> <user>   # ohne Pfad: ganze Seite
+sudo vhost user-path <name> <user> [pfad]                     # Bereich des Benutzers (leer = ganze Seite)
 sudo vhost user-del <name> <user>
 sudo vhost ip-add <name> <ip|cidr>
 sudo vhost ip-del <name> <ip|cidr>
@@ -505,21 +505,29 @@ den Tunnel zurück statt über den Heimrouter, was auf der Heimseite Policy-Rout
 Die Honigtopf-Auswertung muss für beide Wege nicht angepasst werden: Sobald im Log eine
 öffentliche Adresse steht, wird sie als Gegenstelle mit Netz und Land ausgewertet.
 
-## Verzeichnisschutz für einen Pfad
+## Verzeichnisschutz: Bereich je Benutzer
 
-Ohne Angabe schützt der Verzeichnisschutz die ganze Seite. Mit einem Pfad nur ihn und
-alles darunter:
+Jeder Benutzer hat seinen eigenen Bereich: einen Pfad samt allem darunter, oder – ohne
+Pfad – die ganze Seite. Geschützt ist jeder Pfad, den ein Benutzer hat; hat ein
+Benutzer die ganze Seite (oder gibt es noch gar keinen Benutzer), ist die ganze Seite
+geschützt.
 
 ```bash
-sudo vhost protect-path example.com /admin    # /admin, /admin/, /admin/x.php – nicht /administrator
-sudo vhost protect-path example.com           # wieder die ganze Seite
+printf 'passwort-mit-12-zeichen\n' | sudo vhost user-add --path /admin example.com redaktion
+sudo vhost user-path example.com redaktion /shop   # Bereich ändern
+sudo vhost user-path example.com redaktion         # ganze Seite
 ```
 
-IP-Freigaben und Benutzer gelten wie bisher: Wer von einer freigegebenen Adresse kommt,
-braucht keine Anmeldung. Der Pfad darf nur Buchstaben (ohne Umlaute), Ziffern und
-`. _ ~ -` enthalten – er landet als regulärer Ausdruck in der nginx-Konfiguration.
+Wer in einen Bereich darf: jeder, dessen Pfad ihn abdeckt. Ein Benutzer für die ganze
+Seite darf überall hin, ein Benutzer für `/admin` auch nach `/admin/intern`, aber nicht
+nach `/administrator` oder `/shop`. IP-Freigaben gelten für alle Bereiche: Wer von einer
+freigegebenen Adresse kommt, braucht keine Anmeldung. Der Pfad darf nur Buchstaben
+(ohne Umlaute), Ziffern und `. _ ~ -` enthalten – er landet als regulärer Ausdruck in
+der nginx-Konfiguration. Bis 2026-09-27 galt ein Pfad für die ganze Domain; das Update
+überträgt ihn auf alle Benutzer der Domain.
 
-Technisch hängt die Anmeldung an einer Variablen statt an einem `location`-Block; so
+Technisch hängen Anmeldung und Benutzerliste an Variablen statt an einem `location`-Block
+(je Bereich eine eigene htpasswd-Datei); so
 ist PHP unterhalb des Pfads mitgeschützt, und Umwege wie `//admin` oder
 `/x/../admin` führen nicht vorbei. Eine Grenze bleibt: Eigene `rewrite`- oder
 `return`-Direktiven wirken in nginx vor der Anmeldung und können einen Pfad umlenken,

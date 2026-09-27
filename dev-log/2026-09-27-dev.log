@@ -10,3 +10,14 @@ Selbsttests (127.0.0.1) zaehlen nicht mehr. Analyzer::VERSION 3. Live geprueft: 
 200 text/html, .env 200 text/plain mit Kennung, /.koeder/ 404, /.git/config geloggt.
 Hinweis: Tage 19.-23.09. blieben "behalten" (gespeichert mehr Anfragen als ohne
 Selbsttests) - enthalten also noch die alten Selbsttests.
+2026-09-27 13:02 Verzeichnisschutz: Pfad je Benutzer statt je Domain (Nutzerwunsch)
+Auslegung: jeder Benutzer hat einen Bereich (Pfad oder ganze Seite); geschuetzt ist jeder
+Pfad eines Benutzers, ganze Seite sobald ein Benutzer ohne Pfad existiert oder keiner.
+Zugang: wessen Pfad den Bereich abdeckt. nginx: auth_basic_user_file mit Variable (an
+Wegwerf-Instanz geprueft), map $uri -> htpasswd je Bereich, realm-map "$ip:$file".
+Neu: Auth\AccessAreas/AccessArea, auth_users.path (Migration uebertraegt protect_path auf
+alle Benutzer der Domain), Repository prueft Pfade aus der DB neu, Service schreibt je
+Bereich eine Datei, raeumt verwaiste ab, stellt bei Reload-Fehler alle wieder her.
+CLI user-add --path, user-path; protect-path verweist darauf. Oberflaeche: Bereich je
+Benutzer. Smoke-Test: bob nicht in alices Bereich und umgekehrt, Umwege, PHP im Pfad.
+687 Tests gruen, Smoke-Test bestanden, bienchen weiter 401 ohne Login.

@@ -90,16 +90,32 @@ final class VhostRepositoryTest extends TestCase
 	{
 		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
 		self::assertSame([], $this->repo->users($v->id));
-		$this->repo->upsertUser($v->id, 'alice', 'hash1');
+		$this->repo->upsertUser($v->id, 'alice', 'hash1', '/admin');
+		// Neues Passwort: Der Bereich bleibt, auch wenn keiner mitgegeben wird.
 		$this->repo->upsertUser($v->id, 'alice', 'hash2');
 		$this->repo->upsertUser($v->id, 'bob', 'hash3');
 		self::assertSame(
-			[['username' => 'alice', 'hash' => 'hash2'], ['username' => 'bob', 'hash' => 'hash3']],
+			[['username' => 'alice', 'hash' => 'hash2', 'path' => '/admin'], ['username' => 'bob', 'hash' => 'hash3', 'path' => null]],
 			$this->repo->users($v->id)
 		);
+		self::assertTrue($this->repo->setUserPath($v->id, 'bob', '/shop'));
+		self::assertFalse($this->repo->setUserPath($v->id, 'carl', '/shop'));
+		self::assertSame('/shop', $this->repo->users($v->id)[1]['path']);
 		self::assertTrue($this->repo->deleteUser($v->id, 'alice'));
 		self::assertFalse($this->repo->deleteUser($v->id, 'alice'));
-		self::assertSame([['username' => 'bob', 'hash' => 'hash3']], $this->repo->users($v->id));
+		self::assertSame([['username' => 'bob', 'hash' => 'hash3', 'path' => '/shop']], $this->repo->users($v->id));
+	}
+
+	/**
+	 * Der Pfad landet als Ausdruck in der nginx-Konfiguration: Ein manipulierter Wert in
+	 * der Datenbank wird beim Lesen abgelehnt, nicht gerendert.
+	 */
+	public function testRejectsAManipulatedPathFromTheDatabase(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->repo->upsertUser($v->id, 'alice', 'h', '/admin;} server { listen 1');
+		$this->expectException(\RuntimeException::class);
+		$this->repo->users($v->id);
 	}
 
 	public function testIpsIgnoreDuplicates(): void

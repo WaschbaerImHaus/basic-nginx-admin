@@ -168,12 +168,18 @@ final class AdminPage
 				'stdin' => null,
 			],
 			'protect' => ['args' => $line('protect', [$name, $field('state')]), 'stdin' => null],
-			// Leeres Feld = ganze Seite; das CLI erwartet dann kein Argument.
-			'protect_path' => [
-				'args' => $line('protect-path', array_merge([$name], $field('path') !== '' ? [$field('path')] : [])),
+			// Pfad je Benutzer (seit 2026-09-27). Leeres Feld = ganze Seite; das CLI
+			// erwartet dann kein Argument.
+			'user_path' => [
+				'args' => $line('user-path', array_merge([$name, $field('username')], $field('path') !== '' ? [$field('path')] : [])),
 				'stdin' => null,
 			],
-			'user_add' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],
+			// Der Pfad als "--path=<wert>" in EINEM Argument: So kann ein Formularwert nie
+			// zu einer eigenen Option werden.
+			'user_add' => [
+				'args' => $line('user-add', [$name, $field('username')], $field('path') !== '' ? ['--path=' . $field('path')] : []),
+				'stdin' => (string)($post['password'] ?? '') . "\n",
+			],
 			// Passwort neu setzen: derselbe Befehl, das Passwort erzeugt handlePost().
 			'user_reset' => ['args' => $line('user-add', [$name, $field('username')]), 'stdin' => (string)($post['password'] ?? '') . "\n"],
 			'user_del' => ['args' => $line('user-del', [$name, $field('username')]), 'stdin' => null],
@@ -290,9 +296,9 @@ final class AdminPage
 	}
 
 	/**
-	 * Schutz-Benutzer eines vHosts.
+	 * Schutz-Benutzer eines vHosts mit ihrem Pfad (null = ganze Seite).
 	 *
-	 * @return list<array{username: string, hash: string}>
+	 * @return list<array{username: string, hash: string, path: ?string}>
 	 */
 	public function users(Vhost $vhost): array
 	{

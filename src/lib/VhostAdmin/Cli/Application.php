@@ -41,8 +41,8 @@ vhost – nginx-vHosts verwalten
   vhost restore <name>                  (ein angestossenes Entfernen zurücknehmen)
   vhost purge-due                       (abgelaufene Vormerkungen endgültig entfernen)
   vhost protect <name> on|off
-  vhost protect-path <name> [pfad]      (Schutz nur für diesen Pfad; leer = ganze Seite)
-  vhost user-add <name> <user>        (Passwort per stdin)
+  vhost user-add <name> <user> [--path PFAD]   (Passwort per stdin; ohne Pfad: ganze Seite)
+  vhost user-path <name> <user> [pfad]  (Bereich des Benutzers; leer = ganze Seite)
   vhost user-del <name> <user>
   vhost ip-add <name> <ip|cidr>
   vhost ip-del <name> <ip|cidr>
@@ -64,7 +64,7 @@ vhost – nginx-vHosts verwalten
 
 TXT;
 
-	private const VALUE_OPTIONS = ['subdir'];
+	private const VALUE_OPTIONS = ['subdir', 'path'];
 
 	/**
 	 * Übernimmt Service, Repository, Konfiguration, Layout, Migrator und die Ein-/Ausgabe-Streams.
@@ -179,9 +179,7 @@ TXT;
 						$vhost->name,
 						$vhost->kind->value,
 						$this->layout->docroot($vhost),
-						// Mit Pfad steht der Pfad selbst da – so ist auf einen Blick klar,
-						// was geschützt ist.
-						$vhost->protect ? ($vhost->protectPath ?? 'an') : 'aus',
+						$vhost->protect ? 'an' : 'aus',
 						$vhost->ssl ? 'an' : 'aus',
 						$vhost->isPendingDeletion()
 							? 'GESPERRT, wird entfernt am '
@@ -253,18 +251,24 @@ TXT;
 				return 0;
 
 			case 'protect-path':
-				$vhost = $this->service->load($arg(0, 'Name'));
-				$path = ProtectPath::fromString((string)($positional[1] ?? ''));
-				$this->service->setProtectPath($vhost, $path);
-				$this->out('Verzeichnisschutz gilt für ' . ($path === null ? 'die ganze Seite' : $path->value) . ".\n");
-				return 0;
+				// Bis 2026-09-27 galt der Pfad für die ganze Domain.
+				throw new \RuntimeException('Der Schutzpfad gilt jetzt je Benutzer: vhost user-path <name> <benutzer> [pfad]');
 
 			case 'user-add':
 				$vhost = $this->service->load($arg(0, 'Name'));
 				$user = Username::fromString($arg(1, 'Benutzer'));
+				$path = ProtectPath::fromString(is_string($options['path'] ?? null) ? $options['path'] : '');
 				$password = rtrim((string)stream_get_contents($this->stdin), "\r\n");
-				$this->service->addUser($vhost, $user, $password);
+				$this->service->addUser($vhost, $user, $password, $path);
 				$this->out("Benutzer {$user->value} gespeichert.\n");
+				return 0;
+
+			case 'user-path':
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$user = Username::fromString($arg(1, 'Benutzer'));
+				$path = ProtectPath::fromString((string)($positional[2] ?? ''));
+				$this->service->setUserPath($vhost, $user, $path);
+				$this->out("{$user->value} darf in " . ($path === null ? 'die ganze Seite' : $path->value . ' und alles darunter') . ".\n");
 				return 0;
 
 			case 'user-del':

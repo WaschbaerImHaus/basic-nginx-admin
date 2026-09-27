@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Tests\Nginx;
 
 use PHPUnit\Framework\TestCase;
+use VhostAdmin\Auth\AccessAreas;
 use VhostAdmin\Config;
 use VhostAdmin\Nginx\ConfigRenderer;
 use VhostAdmin\Vhost;
@@ -51,49 +52,70 @@ final class ConfigRendererTest extends TestCase
 	 * Variablen statt an satisfy/allow/deny. Ergibt sie "off", entfällt die Anmeldung –
 	 * für jede Anfrage, auch PHP, ohne location-Blöcke und deren Vorrangfallen.
 	 */
-	public function testAuthSnippetUsesTheRealmVariable(): void
+	public function testAuthSnippetUsesTheRealmAndFileVariables(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
 		$expected = "# generiert von vhost – nicht manuell bearbeiten\n"
-			. "# Anmeldung nur, wo \$vhostadmin_1_realm nicht \"off\" ist (Kopf der Server-Konfiguration).\n"
+			. "# Anmeldung nur, wo \$vhostadmin_1_realm nicht \"off\" ist; die Benutzerliste hängt am Pfad\n"
+			. "# (beides am Kopf der Server-Konfiguration).\n"
 			. "auth_basic \$vhostadmin_1_realm;\n"
-			. "auth_basic_user_file /etc/nginx/auth/example.com.htpasswd;\n";
+			. "auth_basic_user_file \$vhostadmin_1_file;\n";
 		self::assertSame($expected, $this->renderer()->authSnippet($v));
 	}
 
+	private static function user(string $name, ?string $path): array
+	{
+		return ['username' => $name, 'hash' => 'h', 'path' => $path];
+	}
+
 	/**
-	 * Ganze Seite: Wer nicht von einer freigegebenen Adresse kommt, muss sich anmelden.
+	 * Ganze Seite: Wer nicht von einer freigegebenen Adresse kommt, muss sich anmelden,
+	 * gegen die htpasswd-Datei der ganzen Seite.
 	 */
 	public function testAccessMapsForTheWholeSite(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
-		$out = $this->renderer()->accessMaps($v, ['10.0.0.0/8', '2001:db8::/32']);
+		$out = $this->renderer()->accessMaps($v, ['10.0.0.0/8', '2001:db8::/32'], AccessAreas::fromUsers([self::user('a', null)]));
 
 		self::assertStringContainsString("geo \$vhostadmin_1_ip {\n    default 0;\n    10.0.0.0/8 1;\n    2001:db8::/32 1;\n}\n", $out);
-		self::assertStringContainsString("map \$uri \$vhostadmin_1_path {\n    default 1;\n}\n", $out);
+		self::assertStringContainsString("map \$uri \$vhostadmin_1_file {\n    default /etc/nginx/auth/example.com.htpasswd;\n}\n", $out);
 		self::assertStringContainsString(
-			"map \$vhostadmin_1_ip\$vhostadmin_1_path \$vhostadmin_1_realm {\n    default off;\n    01 \"Geschützter Bereich\";\n}\n",
+			"map \$vhostadmin_1_ip:\$vhostadmin_1_file \$vhostadmin_1_realm {\n    default \"Geschützter Bereich\";\n    \"~^1:\" off;\n    \"0:-\" off;\n}\n",
 			$out
 		);
 	}
 
 	/**
-	 * Mit Pfad: nur er und alles darunter. Die Zuordnung läuft über $uri, den nginx
-	 * vorher dekodiert und normalisiert – "//admin" oder "/x/../admin" landen beim
-	 * selben Pfad.
+	 * Pfade je Benutzer (seit 2026-09-27): je Bereich eine Datei, genauere Pfade zuerst,
+	 * ohne Benutzer für die ganze Seite ist der Rest frei ("-"). Die Zuordnung läuft
+	 * über $uri, den nginx vorher dekodiert und normalisiert.
 	 */
-	public function testAccessMapsForAPath(): void
+	public function testAccessMapsForPathsPerUser(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, protectPath: '/admin');
-		$out = $this->renderer()->accessMaps($v, []);
-		self::assertStringContainsString("map \$uri \$vhostadmin_1_path {\n    default 0;\n    ~^/admin(?:/|\$) 1;\n}\n", $out);
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$areas = AccessAreas::fromUsers([self::user('a', '/admin'), self::user('b', '/admin/intern')]);
+		$out = $this->renderer()->accessMaps($v, [], $areas);
+		$admin = '/etc/nginx/auth/example.com' . $areas->areas()[1]->fileSuffix() . '.htpasswd';
+		$intern = '/etc/nginx/auth/example.com' . $areas->areas()[0]->fileSuffix() . '.htpasswd';
+		self::assertStringContainsString(
+			"map \$uri \$vhostadmin_1_file {\n    ~^/admin/intern(?:/|\$) $intern;\n    ~^/admin(?:/|\$) $admin;\n    default -;\n}\n",
+			$out
+		);
 		self::assertStringContainsString("geo \$vhostadmin_1_ip {\n    default 0;\n}\n", $out, 'ohne Freigaben');
+	}
+
+	/** Ein Benutzer ohne Pfad neben einem mit Pfad: Der Rest der Seite bleibt geschützt. */
+	public function testAccessMapsMixWholeSiteAndPaths(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->accessMaps($v, [], AccessAreas::fromUsers([self::user('a', '/admin'), self::user('b', null)]));
+		self::assertStringContainsString("    default /etc/nginx/auth/example.com.htpasswd;\n", $out);
 	}
 
 	public function testNoAccessMapsWithoutProtection(): void
 	{
 		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, false, false);
-		self::assertSame('', $this->renderer()->accessMaps($v, ['10.0.0.0/8']));
+		self::assertSame('', $this->renderer()->accessMaps($v, ['10.0.0.0/8'], AccessAreas::fromUsers([])));
 	}
 
 	/**
@@ -102,12 +124,13 @@ final class ConfigRendererTest extends TestCase
 	 */
 	public function testServerConfigCarriesTheMapsBeforeTheFirstServerBlock(): void
 	{
-		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false, protectPath: '/admin');
-		$out = $this->renderer()->serverConfig($v, true, ['203.0.113.5']);
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v, true, ['203.0.113.5'], [self::user('a', '/admin')]);
 		$maps = strpos($out, 'geo $vhostadmin_1_ip');
 		self::assertNotFalse($maps);
 		self::assertLessThan(strpos($out, 'server {'), $maps);
 		self::assertStringContainsString('    203.0.113.5 1;', $out);
+		self::assertStringContainsString('~^/admin(?:/|$)', $out);
 	}
 
 	public function testAuthSnippetDisabled(): void

@@ -9,11 +9,13 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 22:30
+ * @version Letzte Änderung: 2026-09-27 15:00
  */
 
 namespace VhostAdmin\Nginx;
 
+use VhostAdmin\Auth\AccessArea;
+use VhostAdmin\Auth\AccessAreas;
 use VhostAdmin\Value\ProtectPath;
 
 use VhostAdmin\Config;
@@ -39,11 +41,29 @@ final class ConfigRenderer
 	}
 
 	/**
-	 * Pfad der htpasswd-Datei des vHosts.
+	 * Pfad einer htpasswd-Datei des vHosts: je Schutzbereich eine (siehe
+	 * Auth\AccessAreas); ohne Bereich die der ganzen Seite.
 	 */
-	public function htpasswdPath(Vhost $v): string
+	public function htpasswdPath(Vhost $v, ?AccessArea $area = null): string
 	{
-		return $this->config->authDir . '/' . $v->slug() . '.htpasswd';
+		return $this->config->authDir . '/' . $v->slug() . ($area?->fileSuffix() ?? '') . '.htpasswd';
+	}
+
+	/**
+	 * Alle htpasswd-Dateien, die zu einem vHost gehören können (auch verwaiste aus
+	 * einem früheren Stand) – zum Aufräumen und für die Rücknahme beim Rendern.
+	 *
+	 * @return list<string>
+	 */
+	public function htpasswdFiles(Vhost $v): array
+	{
+		$base = $this->config->authDir . '/' . $v->slug();
+		$files = glob($base . '.p-*.htpasswd') ?: [];
+		if (is_file($base . '.htpasswd')) {
+			$files[] = $base . '.htpasswd';
+		}
+		sort($files);
+		return $files;
 	}
 
 	/**
@@ -93,18 +113,26 @@ final class ConfigRenderer
 			return self::HEADER . "# Verzeichnisschutz deaktiviert\n";
 		}
 		$realm = $this->variable($v, 'realm');
+		$file = $this->variable($v, 'file');
 		return self::HEADER
-			. "# Anmeldung nur, wo \$$realm nicht \"off\" ist (Kopf der Server-Konfiguration).\n"
+			. "# Anmeldung nur, wo \$$realm nicht \"off\" ist; die Benutzerliste hängt am Pfad\n"
+			. "# (beides am Kopf der Server-Konfiguration).\n"
 			. "auth_basic \$$realm;\n"
-			. 'auth_basic_user_file ' . $this->htpasswdPath($v) . ";\n";
+			. "auth_basic_user_file \$$file;\n";
 	}
 
 	/**
 	 * geo und map für den Verzeichnisschutz (http-Ebene; leer ohne Schutz).
 	 *
 	 *   ip    1 = Anfrage von einer freigegebenen Adresse (geo auf $remote_addr)
-	 *   path  1 = Anfrage im geschützten Bereich (map auf $uri)
-	 *   realm Anmeldung nötig genau bei ip=0 und path=1, sonst "off"
+	 *   file  htpasswd-Datei des Schutzbereichs, in dem die Anfrage liegt (map auf $uri);
+	 *         "-" = kein Schutzbereich
+	 *   realm Anmeldung nötig genau bei ip=0 in einem Schutzbereich, sonst "off"
+	 *
+	 * Seit 2026-09-27 hat jeder Benutzer seinen eigenen Pfad (Auth\AccessAreas): Je
+	 * Bereich gibt es eine eigene htpasswd-Datei mit genau den Benutzern, die dort
+	 * hinein dürfen. Genauere Pfade stehen in der map zuerst – nginx nimmt den ersten
+	 * passenden Ausdruck.
 	 *
 	 * $uri ist von nginx dekodiert und normalisiert: "//admin", "/x/../admin" und
 	 * "/%61dmin" landen beim selben Pfad (am 2026-09-25 gegen eine Wegwerf-Instanz
@@ -113,32 +141,39 @@ final class ConfigRenderer
 	 *
 	 * @param list<string> $ips freigegebene Adressen und Netze
 	 */
-	public function accessMaps(Vhost $v, array $ips): string
+	public function accessMaps(Vhost $v, array $ips, AccessAreas $areas): string
 	{
 		if (!$v->protect) {
 			return '';
 		}
 		$ip = $this->variable($v, 'ip');
-		$path = $this->variable($v, 'path');
+		$file = $this->variable($v, 'file');
 		$realm = $this->variable($v, 'realm');
 
+		$described = array_map(
+			static fn(AccessArea $area): string => $area->path ?? 'die ganze Seite',
+			$areas->areas()
+		);
 		$out = "# Verzeichnisschutz: Anmeldung nötig, wer nicht von einer freigegebenen Adresse\n"
-			. '# kommt und ' . ($v->protectPath === null ? 'die Seite' : $v->protectPath . ' oder darunter') . " aufruft.\n"
+			. '# kommt und ' . implode(', ', $described) . " aufruft.\n"
 			. "geo \$$ip {\n    default 0;\n";
 		foreach ($ips as $allowed) {
 			$out .= "    $allowed 1;\n";
 		}
 		$out .= "}\n";
-		$out .= "map \$uri \$$path {\n";
-		if ($v->protectPath === null) {
-			$out .= "    default 1;\n";
-		} else {
-			// Aus der Datenbank neu geprüft (Vhost::assertConsistent()), bevor der Wert
+		$out .= "map \$uri \$$file {\n";
+		$default = '-';
+		foreach ($areas->areas() as $area) {
+			if ($area->path === null) {
+				$default = $this->htpasswdPath($v, $area);
+				continue;
+			}
+			// Aus der Datenbank neu geprüft (VhostRepository::users()), bevor der Wert
 			// hier als Ausdruck landet.
-			$out .= "    default 0;\n    " . ProtectPath::fromString($v->protectPath)?->pattern() . " 1;\n";
+			$out .= '    ' . ProtectPath::fromString($area->path)?->pattern() . ' ' . $this->htpasswdPath($v, $area) . ";\n";
 		}
-		$out .= "}\n";
-		$out .= "map \$$ip\$$path \$$realm {\n    default off;\n    01 \"Geschützter Bereich\";\n}\n";
+		$out .= "    default $default;\n}\n";
+		$out .= "map \$$ip:\$$file \$$realm {\n    default \"Geschützter Bereich\";\n    \"~^1:\" off;\n    \"0:-\" off;\n}\n";
 		return $out;
 	}
 
@@ -171,13 +206,15 @@ final class ConfigRenderer
 	 * @param bool $hsts ob Strict-Transport-Security gesendet werden darf (nur bei SSL
 	 *                   überhaupt relevant); abschaltbar, weil die Kopfzeile im Browser
 	 *                   monatelang nachwirkt
+	 * @param list<array{username: string, hash: string, path: ?string}> $users Benutzer
+	 *                   des Verzeichnisschutzes – ihre Pfade ergeben die Schutzbereiche
 	 */
-	public function serverConfig(Vhost $v, bool $hsts = true, array $ips = []): string
+	public function serverConfig(Vhost $v, bool $hsts = true, array $ips = [], array $users = []): string
 	{
 		// geo/map des Verzeichnisschutzes gehören auf die http-Ebene. Diese Datei wird
 		// dort eingebunden, also stehen sie hier vor dem ersten server-Block.
 		$servers = $this->servers($v, $hsts);
-		$maps = $this->accessMaps($v, $ips);
+		$maps = $this->accessMaps($v, $ips, AccessAreas::fromUsers($users));
 		if ($maps === '') {
 			return $servers;
 		}

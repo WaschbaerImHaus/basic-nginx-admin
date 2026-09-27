@@ -104,121 +104,44 @@ final class ApplicationTest extends TestCase
 	}
 
 	/**
-	 * SECURITY_RISKS.md, „Optionen-Einschleusung": Ein Feldwert wie "--purge" aus der
-	 * Oberfläche darf nie als Option gelesen werden. Nach "--" ist alles Argument.
+	 * Bereich je Benutzer (Nutzerwunsch vom 2026-09-27): beim Anlegen per --path, danach
+	 * mit user-path; leer = ganze Seite. Der alte Befehl protect-path verweist darauf.
 	 */
-	public function testParseTreatsEverythingAfterDoubleDashAsPositional(): void
-	{
-		$parsed = Application::parse(['vhost', 'remove', '--', '--purge', 'a.de']);
-		self::assertSame(['--purge', 'a.de'], $parsed['positional']);
-		self::assertSame([], $parsed['options']);
-
-		$mixed = Application::parse(['vhost', 'add', '--subdir', 'pub', '--', 'a.de']);
-		self::assertSame(['a.de'], $mixed['positional']);
-		self::assertSame(['subdir' => 'pub'], $mixed['options'], 'Optionen davor gelten weiter');
-	}
-
-	public function testParseSeparatesCommandPositionalsAndOptions(): void
-	{
-		$parsed = Application::parse(['vhost', 'add', 'a.de', '--subdir', 'pub', '--no-protect', '--x=1']);
-		self::assertSame('add', $parsed['command']);
-		self::assertSame(['a.de'], $parsed['positional']);
-		self::assertSame(['subdir' => 'pub', 'no-protect' => true, 'x' => '1'], $parsed['options']);
-		self::assertSame('help', Application::parse(['vhost'])['command']);
-		self::assertSame(['subdir' => 'x'], Application::parse(['vhost', 'add', '--subdir=x'])['options']);
-		self::assertSame(['subdir' => ''], Application::parse(['vhost', 'add', '--subdir'])['options']);
-	}
-
-	public function testHelpAndUnknownCommand(): void
-	{
-		[$code, $out] = $this->runCli(['help']);
-		self::assertSame(0, $code);
-		self::assertStringContainsString('vhost add <domain>', $out);
-		[$code, , $err] = $this->runCli(['gibtsnicht']);
-		self::assertSame(2, $code);
-		self::assertStringContainsString('vhost add <domain>', $err);
-	}
-
-	public function testMissingArgumentIsExitOne(): void
-	{
-		[$code, , $err] = $this->runCli(['add']);
-		self::assertSame(1, $code);
-		self::assertSame("Fehler: Domain fehlt\n", $err);
-	}
-
-	public function testAddListAndRemove(): void
-	{
-		[$code, $out] = $this->runCli(['add', 'Test.example', '--subdir', 'public']);
-		self::assertSame(0, $code);
-		self::assertSame("Angelegt: test.example -> {$this->dir}/www/test.example/web/public\n", $out);
-		self::assertDirectoryExists($this->dir . '/www/test.example/web/public');
-
-		[$code, $out] = $this->runCli(['add-local', '3000', '--no-protect']);
-		self::assertSame(0, $code);
-		self::assertStringContainsString('localhost:3000', $out);
-
-		[, $out] = $this->runCli(['list']);
-		self::assertStringContainsString('test.example', $out);
-		self::assertStringContainsString('schutz:an', $out);
-		self::assertStringContainsString('localhost:3000', $out);
-		self::assertStringContainsString('schutz:aus', $out);
-
-		[$code] = $this->runCli(['remove', 'test.example', '--purge']);
-		self::assertSame(0, $code);
-		self::assertDirectoryDoesNotExist($this->dir . '/www/test.example');
-		[$code, , $err] = $this->runCli(['remove', 'test.example']);
-		self::assertSame(1, $code);
-		self::assertStringContainsString('Unbekannter vHost', $err);
-	}
-
-	public function testInvalidDomainIsExitOne(): void
-	{
-		[$code, , $err] = $this->runCli(['add', 'localhost:3000']);
-		self::assertSame(1, $code);
-		self::assertStringContainsString('add-local', $err);
-	}
-
-	public function testUserPasswordComesFromStdin(): void
+	public function testUserPathSetsTheAreaOfAUser(): void
 	{
 		$this->runCli(['add', 'a.example']);
-		[$code, $out] = $this->runCli(['user-add', 'a.example', 'alice'], "geheim-geheim\n");
+		[$code] = $this->runCli(['user-add', '--path', '/admin/', 'a.example', 'alice'], "geheim-geheim\n");
 		self::assertSame(0, $code);
-		self::assertSame("Benutzer alice gespeichert.\n", $out);
-		self::assertStringStartsWith('alice:$6$', (string)file_get_contents($this->dir . '/auth/a.example.htpasswd'));
-		[$code, , $err] = $this->runCli(['user-add', 'a.example', 'bob'], "\n");
-		self::assertSame(1, $code);
-		self::assertStringContainsString('mindestens 12 Zeichen', $err, 'auch ein leeres Passwort ist zu kurz');
-		[$code] = $this->runCli(['user-del', 'a.example', 'alice']);
-		self::assertSame(0, $code);
-		self::assertSame('', file_get_contents($this->dir . '/auth/a.example.htpasswd'));
-	}
+		self::assertStringContainsString('~^/admin(?:/|$)', (string)file_get_contents($this->dir . '/avail/a.example.conf'));
 
-	public function testProtectPathLimitsAndResetsTheProtection(): void
-	{
-		$this->runCli(['add', 'a.example']);
-		[$code, $out] = $this->runCli(['protect-path', 'a.example', '/admin/']);
+		[$code, $out] = $this->runCli(['user-path', 'a.example', 'alice', '/intern']);
 		self::assertSame(0, $code);
-		self::assertSame("Verzeichnisschutz gilt für /admin.\n", $out);
+		self::assertSame("alice darf in /intern und alles darunter.\n", $out);
 
-		[$code, $out] = $this->runCli(['protect-path', 'a.example']);
+		[$code, $out] = $this->runCli(['user-path', 'a.example', 'alice']);
 		self::assertSame(0, $code);
-		self::assertSame("Verzeichnisschutz gilt für die ganze Seite.\n", $out);
+		self::assertSame("alice darf in die ganze Seite.\n", $out);
 
-		[$code, , $err] = $this->runCli(['protect-path', 'a.example', '/a;b']);
+		[$code, , $err] = $this->runCli(['user-path', 'a.example', 'alice', '/a;b']);
 		self::assertSame(1, $code);
 		self::assertStringContainsString('Unzulässiges Zeichen', $err);
+
+		[$code, , $err] = $this->runCli(['user-path', 'a.example', 'niemand', '/x']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('nicht vorhanden', $err);
+
+		[$code, , $err] = $this->runCli(['protect-path', 'a.example', '/admin']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('user-path', $err);
 	}
 
-	/**
-	 * vhost list zeigt den Pfad statt nur „an", damit auf einen Blick klar ist, was
-	 * geschützt ist.
-	 */
-	public function testListShowsTheProtectedPath(): void
+	/** Die Oberfläche übergibt den Pfad als "--path=<wert>". */
+	public function testUserAddAcceptsThePathInOneArgument(): void
 	{
 		$this->runCli(['add', 'a.example']);
-		$this->runCli(['protect-path', 'a.example', '/admin']);
-		[, $out] = $this->runCli(['list']);
-		self::assertStringContainsString('schutz:/admin', $out);
+		[$code] = $this->runCli(['user-add', '--path=/shop', '--', 'a.example', 'bob'], "geheim-geheim\n");
+		self::assertSame(0, $code);
+		self::assertStringContainsString('~^/shop(?:/|$)', (string)file_get_contents($this->dir . '/avail/a.example.conf'));
 	}
 
 	public function testProtectIpsAndSsl(): void

@@ -8,7 +8,7 @@ declare(strict_types=1);
  * aktiv, damit Benutzer und IPs beim Löschen eines vHosts mitgelöscht werden.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 20:20
+ * @version Letzte Änderung: 2026-09-27 15:00
  */
 
 namespace VhostAdmin;
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	port       INTEGER,
 	subdir     TEXT,
 	protect    INTEGER NOT NULL DEFAULT 1,
-	protect_path TEXT,
+	protect_path TEXT, -- seit 2026-09-27 ungenutzt: Pfad je Benutzer (auth_users.path)
 	ssl        INTEGER NOT NULL DEFAULT 0,
 	php        INTEGER NOT NULL DEFAULT 0,
 	health_token TEXT,
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS auth_users (
 	vhost_id INTEGER NOT NULL REFERENCES vhosts(id) ON DELETE CASCADE,
 	username TEXT NOT NULL,
 	hash     TEXT NOT NULL,
+	path     TEXT,
 	UNIQUE (vhost_id, username)
 );
 CREATE TABLE IF NOT EXISTS auth_ips (
@@ -114,6 +115,22 @@ SQL);
 		if (!in_array('protect_path', $columns, true)) {
 			// Ohne Standardwert: NULL heisst ganze Seite, wie bisher.
 			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN protect_path TEXT');
+		}
+		// Seit 2026-09-27 gilt der Schutzpfad je Benutzer (Nutzerwunsch). Ein bisher für
+		// die Domain gesetzter Pfad geht auf alle ihre Benutzer über, danach ist die
+		// Domain-Spalte leer. Ein Host mit Pfad, aber ohne Benutzer, ist danach ganz
+		// gesperrt – die sichere Richtung, und so startet ohnehin jeder neue Host.
+		$userTable = $this->pdo()->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_users'")->fetchAll();
+		if ($userTable !== []) {
+			$userColumns = array_column($this->pdo()->query('PRAGMA table_info(auth_users)')->fetchAll(), 'name');
+			if (!in_array('path', $userColumns, true)) {
+				$this->pdo()->exec('ALTER TABLE auth_users ADD COLUMN path TEXT');
+			}
+			$this->pdo()->exec(
+				'UPDATE auth_users SET path = (SELECT protect_path FROM vhosts WHERE vhosts.id = auth_users.vhost_id)'
+				. ' WHERE path IS NULL AND (SELECT protect_path FROM vhosts WHERE vhosts.id = auth_users.vhost_id) IS NOT NULL'
+			);
+			$this->pdo()->exec('UPDATE vhosts SET protect_path = NULL WHERE protect_path IS NOT NULL');
 		}
 		if (!in_array('health_token', $columns, true)) {
 			// Ohne Standardwert: der Wert wird je vHost beim ersten Schreiben der

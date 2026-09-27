@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 15:25
+ * @version Letzte Änderung: 2026-09-27 15:10
  */
 
 namespace VhostAdmin;
@@ -20,6 +20,7 @@ use VhostAdmin\Ssl\CertbotInterface;
 use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Ssl\ReachabilityResult;
 use VhostAdmin\Ssl\ReachabilityStatus;
+use VhostAdmin\Auth\AccessAreas;
 use VhostAdmin\Value\ProtectPath;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
@@ -113,7 +114,8 @@ final class VhostService
 			$this->config->sitesEnabled . '/' . $vhost->slug() . '.conf',
 			$this->renderer->serverConfigPath($vhost),
 			$this->renderer->authSnippetPath($vhost),
-			$this->renderer->htpasswdPath($vhost),
+			// Je Schutzbereich eine htpasswd-Datei.
+			...$this->renderer->htpasswdFiles($vhost),
 		];
 		foreach ($files as $file) {
 			if (is_link($file) || file_exists($file)) {
@@ -182,9 +184,12 @@ final class VhostService
 	/**
 	 * Benutzer anlegen oder Passwort setzen (SHA-512-crypt, von nginx lesbar).
 	 *
-	 * @throws \RuntimeException bei leerem Passwort
+	 * $path gilt nur für einen neuen Benutzer (null = ganze Seite); ein neues Passwort
+	 * lässt den Pfad eines bestehenden stehen. Ändern: setUserPath().
+	 *
+	 * @throws \RuntimeException bei zu kurzem Passwort
 	 */
-	public function addUser(Vhost $vhost, Username $user, string $password): void
+	public function addUser(Vhost $vhost, Username $user, string $password, ?ProtectPath $path = null): void
 	{
 		// Mindestlänge statt mehr Hash-Runden: nginx prüft Basic-Auth bei JEDER Anfrage
 		// neu, ohne Zwischenspeicher. 100 000 Runden kosteten je Anfrage spürbar
@@ -193,20 +198,23 @@ final class VhostService
 		if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
 			throw new \RuntimeException('Passwort zu kurz: mindestens ' . self::MIN_PASSWORD_LENGTH . ' Zeichen.');
 		}
-		$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password));
+		$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password), $path?->value);
 		$this->render($vhost);
 	}
 
 	/**
-	 * Beschränkt den Verzeichnisschutz auf einen Pfad; null = ganze Seite.
+	 * Pfad eines Benutzers setzen; null = ganze Seite (seit 2026-09-27 je Benutzer statt
+	 * je Domain). Der Benutzer darf dann in diesen Pfad und alles darunter; geschützt
+	 * ist jeder Pfad, den ein Benutzer hat (siehe Auth\AccessAreas).
 	 *
-	 * Der Schutz selbst wird dabei nicht ein- oder ausgeschaltet – ein Pfad bei
-	 * abgeschaltetem Schutz ist gespeichert und gilt, sobald der Schutz wieder an ist.
+	 * @throws \RuntimeException wenn der Benutzer nicht existiert
 	 */
-	public function setProtectPath(Vhost $vhost, ?ProtectPath $path): void
+	public function setUserPath(Vhost $vhost, Username $user, ?ProtectPath $path): void
 	{
-		$this->repository->setProtectPath((int)$vhost->id, $path?->value);
-		$this->render($this->load($vhost->name));
+		if (!$this->repository->setUserPath((int)$vhost->id, $user->value, $path?->value)) {
+			throw new \RuntimeException("Benutzer nicht vorhanden: {$user->value}");
+		}
+		$this->render($vhost);
 	}
 
 	/**
@@ -469,18 +477,34 @@ final class VhostService
 			mkdir($this->config->authDir, 0750, true);
 			$this->group($this->config->authDir);
 		}
-		$htpasswd = $this->renderer->htpasswdPath($vhost);
 		$authSnippet = $this->renderer->authSnippetPath($vhost);
 		$available = $this->renderer->serverConfigPath($vhost);
 		$enabled = $this->config->sitesEnabled . '/' . $vhost->slug() . '.conf';
 
-		$previousHtpasswd = $this->readIfExists($htpasswd);
+		// Alle bisherigen htpasswd-Dateien (je Schutzbereich eine) für die Rücknahme.
+		$previousHtpasswd = [];
+		foreach ($this->renderer->htpasswdFiles($vhost) as $file) {
+			$previousHtpasswd[$file] = (string)file_get_contents($file);
+		}
 		$previousAuthSnippet = $this->readIfExists($authSnippet);
 		$previousAvailable = $this->readIfExists($available);
 		$symlinkExistedBefore = is_link($enabled);
 		$enabledExistedBefore = $symlinkExistedBefore || file_exists($enabled);
 
-		$this->writeProtected($htpasswd, $this->renderer->htpasswd($this->repository->users($vhost->id)));
+		// Je Schutzbereich eine Datei mit genau den Benutzern, die dort hinein dürfen;
+		// Dateien nicht mehr bestehender Bereiche verschwinden.
+		$users = $this->repository->users($vhost->id);
+		$written = [];
+		foreach (AccessAreas::fromUsers($users)->areas() as $area) {
+			$file = $this->renderer->htpasswdPath($vhost, $area);
+			$this->writeProtected($file, $this->renderer->htpasswd($area->users));
+			$written[$file] = true;
+		}
+		foreach (array_keys($previousHtpasswd) as $file) {
+			if (!isset($written[$file])) {
+				@unlink($file);
+			}
+		}
 
 		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost));
 
@@ -488,7 +512,8 @@ final class VhostService
 		file_put_contents($available, $this->renderer->serverConfig(
 			$vhost,
 			$this->hstsEnabled(),
-			$this->repository->ips((int)$vhost->id)
+			$this->repository->ips((int)$vhost->id),
+			$users
 		));
 		// Ein zum Entfernen vorgemerkter vHost darf durch ein Neuschreiben (z.B. aus
 		// install.sh oder renderAll()) nicht wieder aktiv werden.
@@ -504,7 +529,14 @@ final class VhostService
 		try {
 			$this->reloader->reload();
 		} catch (\Throwable $e) {
-			$this->restoreFile($htpasswd, $previousHtpasswd);
+			foreach (array_keys($written) as $file) {
+				if (!isset($previousHtpasswd[$file])) {
+					@unlink($file);
+				}
+			}
+			foreach ($previousHtpasswd as $file => $content) {
+				$this->writeProtected($file, $content);
+			}
 			$this->restoreFile($authSnippet, $previousAuthSnippet);
 			$this->restoreFile($available, $previousAvailable);
 			if (!$enabledExistedBefore) {

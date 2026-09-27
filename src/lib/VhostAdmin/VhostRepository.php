@@ -12,6 +12,8 @@ declare(strict_types=1);
 
 namespace VhostAdmin;
 
+use VhostAdmin\Value\ProtectPath;
+
 final class VhostRepository
 {
 	/**
@@ -113,14 +115,6 @@ final class VhostRepository
 	}
 
 	/**
-	 * Pfad des Verzeichnisschutzes setzen (null = ganze Seite).
-	 */
-	public function setProtectPath(int $id, ?string $path): void
-	{
-		$this->db->pdo()->prepare('UPDATE vhosts SET protect_path = ? WHERE id = ?')->execute([$path, $id]);
-	}
-
-	/**
 	 * Docroot-Unterordner setzen (null = Docroot ist web/ selbst).
 	 */
 	public function setSubdir(int $id, ?string $subdir): void
@@ -158,26 +152,57 @@ final class VhostRepository
 	}
 
 	/**
-	 * Schutz-Benutzer eines vHosts, alphabetisch.
+	 * Schutz-Benutzer eines vHosts mit ihrem Pfad (null = ganze Seite), alphabetisch.
 	 *
-	 * @return list<array{username: string, hash: string}>
+	 * Der Pfad landet als Ausdruck in der nginx-Konfiguration. Auch ein Wert aus der
+	 * Datenbank muss deshalb dieselbe Prüfung bestehen wie eine Eingabe – wer die
+	 * Datenbank verändern kann, soll darüber keine Direktiven einschleusen.
+	 *
+	 * @return list<array{username: string, hash: string, path: ?string}>
+	 * @throws \RuntimeException bei einem ungültigen Pfad in der Datenbank
 	 */
 	public function users(int $vhostId): array
 	{
-		$st = $this->db->pdo()->prepare('SELECT username, hash FROM auth_users WHERE vhost_id = ? ORDER BY username');
+		$st = $this->db->pdo()->prepare('SELECT username, hash, path FROM auth_users WHERE vhost_id = ? ORDER BY username');
 		$st->execute([$vhostId]);
-		return $st->fetchAll();
+		$users = [];
+		foreach ($st->fetchAll() as $row) {
+			$path = $row['path'] === null || $row['path'] === '' ? null : (string)$row['path'];
+			if ($path !== null) {
+				try {
+					$checked = ProtectPath::fromString($path);
+				} catch (\InvalidArgumentException $e) {
+					throw new \RuntimeException('Ungültiger Datensatz in der Datenbank: ' . $e->getMessage());
+				}
+				if ($checked === null || $checked->value !== $path) {
+					throw new \RuntimeException("Ungültiger Datensatz in der Datenbank: Schutzpfad \"$path\"");
+				}
+			}
+			$users[] = ['username' => (string)$row['username'], 'hash' => (string)$row['hash'], 'path' => $path];
+		}
+		return $users;
 	}
 
 	/**
-	 * Benutzer anlegen oder dessen Passwort-Hash ersetzen.
+	 * Benutzer anlegen oder dessen Passwort-Hash ersetzen. Der Pfad gilt nur beim
+	 * Anlegen; ein neues Passwort lässt den Pfad eines bestehenden Benutzers stehen.
 	 */
-	public function upsertUser(int $vhostId, string $username, string $hash): void
+	public function upsertUser(int $vhostId, string $username, string $hash, ?string $path = null): void
 	{
 		$this->db->pdo()->prepare(
-			'INSERT INTO auth_users (vhost_id, username, hash) VALUES (?, ?, ?)
+			'INSERT INTO auth_users (vhost_id, username, hash, path) VALUES (?, ?, ?, ?)
 			ON CONFLICT (vhost_id, username) DO UPDATE SET hash = excluded.hash'
-		)->execute([$vhostId, $username, $hash]);
+		)->execute([$vhostId, $username, $hash, $path]);
+	}
+
+	/**
+	 * Pfad eines Benutzers setzen (null = ganze Seite); false, wenn es ihn nicht gibt.
+	 */
+	public function setUserPath(int $vhostId, string $username, ?string $path): bool
+	{
+		$st = $this->db->pdo()->prepare('UPDATE auth_users SET path = ? WHERE vhost_id = ? AND username = ?');
+		$st->execute([$path, $vhostId, $username]);
+		return $st->rowCount() > 0;
 	}
 
 	/**

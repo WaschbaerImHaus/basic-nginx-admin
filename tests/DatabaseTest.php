@@ -99,4 +99,31 @@ final class DatabaseTest extends TestCase
 		$row = $db->pdo()->query("SELECT protect_path FROM vhosts WHERE name = 'alt.de'")->fetch();
 		self::assertNull($row['protect_path'], 'bestehende Hosts bleiben ganz geschützt');
 	}
+
+	/**
+	 * Seit 2026-09-27 gilt der Schutzpfad je Benutzer (Nutzerwunsch). Ein bisher für die
+	 * Domain gesetzter Pfad geht auf alle ihre Benutzer über; die Domain-Spalte bleibt
+	 * danach leer, ein zweiter Lauf ändert nichts mehr.
+	 */
+	public function testMovesTheDomainPathToItsUsers(): void
+	{
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/alt.sqlite']));
+		$db->pdo()->exec(
+			'CREATE TABLE vhosts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, '
+			. "kind TEXT NOT NULL CHECK (kind IN ('domain', 'localhost')), port INTEGER, "
+			. 'subdir TEXT, protect INTEGER NOT NULL DEFAULT 1, protect_path TEXT, ssl INTEGER NOT NULL DEFAULT 0, '
+			. "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+		);
+		$db->pdo()->exec('CREATE TABLE auth_users (id INTEGER PRIMARY KEY, vhost_id INTEGER NOT NULL, username TEXT NOT NULL, '
+			. 'hash TEXT NOT NULL, UNIQUE (vhost_id, username))');
+		$db->pdo()->exec("INSERT INTO vhosts (id, name, kind, protect_path) VALUES (1, 'a.de', 'domain', '/admin'), (2, 'b.de', 'domain', NULL)");
+		$db->pdo()->exec("INSERT INTO auth_users (vhost_id, username, hash) VALUES (1, 'x', 'h'), (1, 'y', 'h'), (2, 'z', 'h')");
+
+		$db->initSchema();
+		$db->initSchema();
+
+		$paths = $db->pdo()->query('SELECT username, path FROM auth_users ORDER BY username')->fetchAll(\PDO::FETCH_KEY_PAIR);
+		self::assertSame(['x' => '/admin', 'y' => '/admin', 'z' => null], $paths);
+		self::assertSame([null, null], array_column($db->pdo()->query('SELECT protect_path FROM vhosts ORDER BY id')->fetchAll(), 'protect_path'));
+	}
 }

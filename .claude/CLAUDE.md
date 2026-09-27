@@ -16,7 +16,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Honigtopf-Ansicht einrichten: `sudo ./honeypot/install-dashboard.sh <ansichtshost> <honigtopf-host> [weitere ...]`; Auswertung von Hand: `sudo php honeypot/analyse.php --dashboard=<ansichtshost> <host>`
 - Fertige Konfiguration ansehen: `sudo vhost show <name>` (setzt Auth-Snippet und eigene Direktiven in den server-Block ein)
 - PHP pro vHost: `sudo vhost php <name> on|off`" (eigener FPM-Pool als `web<id>`)
-- Verzeichnisschutz nur für einen Pfad: `sudo vhost protect-path <name> [pfad]` (leer = ganze Seite)
+- Schutzbereich je Benutzer (seit 2026-09-27): `printf 'pw\n' | sudo vhost user-add --path /admin <name> <user>`, ändern mit `sudo vhost user-path <name> <user> [pfad]` (leer = ganze Seite). `protect-path` gibt es nicht mehr.
 
 ## Struktur
 - `src/lib/VhostAdmin/` – Klassen (Namespace `VhostAdmin`, Autoloader `src/bootstrap.php`)
@@ -33,7 +33,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/public/honeypot/` – Vorlage der Honigtopf-Ansicht (`index.php`, Teilvorlagen `detail.php`/`calendar.php`/`days.php`, `bootstrap.php`, `style.css`); `honeypot/install-dashboard.sh` kopiert sie in den Docroot des Ansichtshosts und die Klassen nach `private/honeypot-lib/`
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (648 Tests, Stand 2026-09-26); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
+- `tests/` – PHPUnit (687 Tests, Stand 2026-09-27); `tests/Support/` – TempDir, FakeReloader, FakeCertbot
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
@@ -41,8 +41,8 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - nginx-Blöcke in `ConfigRenderer` sind mit 4 Leerzeichen eingerückt (nginx-Konvention); PHP-Code mit Tabs.
 - Schreibende Aktionen nur über das CLI; `www-data` darf per sudoers ausschließlich `/usr/local/sbin/vhost`.
 - Jeder neue Host startet gesperrt (Schutz ohne Benutzer/IP). Freigabe: IP **oder** Login.
-- **Verzeichnisschutz läuft seit 2026-09-25 über eine Realm-Variable, nicht über `satisfy`/`allow`/`deny` und nie über einen `location`-Block für den Pfad.** `auth_basic $vhostadmin_<id>_realm;` auf Server-Ebene; am Kopf der Server-Konfiguration (http-Ebene) entscheiden `geo` (IP-Freigaben) und `map $uri` (Pfad, `ProtectPath::pattern()`), ob der Wert `off` ist. Warum kein `location`: Als Präfix verliert er `/admin/x.php` an den PHP-Regex-Block (PHP ungeschützt), mit `^~` greift der PHP-Block nicht mehr (Quelltext wird ausgeliefert). `$uri` ist normalisiert – `//admin`, `/x/../admin`, `/%61dmin` sind abgedeckt (Smoke-Test). Grenze: eigene `rewrite`/`return` wirken vor der Zugriffsprüfung.
-- `ProtectPath` erlaubt nur `[A-Za-z0-9._~-]`-Segmente: Der Wert landet als regulärer Ausdruck in der Konfiguration. `Vhost::assertConsistent()` prüft auch Werte aus der Datenbank neu.
+- **Verzeichnisschutz läuft seit 2026-09-25 über eine Realm-Variable, nicht über `satisfy`/`allow`/`deny` und nie über einen `location`-Block für den Pfad.** `auth_basic $vhostadmin_<id>_realm;` und `auth_basic_user_file $vhostadmin_<id>_file;` auf Server-Ebene; am Kopf der Server-Konfiguration (http-Ebene) wählt `map $uri` die htpasswd-Datei des Schutzbereichs (`-` = frei), `geo` die IP-Freigaben, und `map $ip:$file` ergibt `off` oder den Realm. Seit 2026-09-27 kommen die Bereiche aus den Pfaden der Benutzer (`Auth\AccessAreas`, genauere Pfade zuerst, ganze Seite = `<slug>.htpasswd`, Pfade = `<slug>.p-<sha1>.htpasswd`; verwaiste Dateien räumt `render()` ab, bei Reload-Fehler kommt der alte Stand zurück). Warum kein `location`: Als Präfix verliert er `/admin/x.php` an den PHP-Regex-Block (PHP ungeschützt), mit `^~` greift der PHP-Block nicht mehr (Quelltext wird ausgeliefert). `$uri` ist normalisiert – `//admin`, `/x/../admin`, `/%61dmin` sind abgedeckt (Smoke-Test). Grenze: eigene `rewrite`/`return` wirken vor der Zugriffsprüfung.
+- `ProtectPath` erlaubt nur `[A-Za-z0-9._~-]`-Segmente: Der Wert landet als regulärer Ausdruck in der Konfiguration. `VhostRepository::users()` prüft auch Pfade aus der Datenbank neu (Spalte `auth_users.path`; `vhosts.protect_path` ist seit 2026-09-27 ungenutzt).
 - Testhilfsmethoden für CLI-Läufe heißen `runCli()`, nicht `run()` – `PHPUnit\Framework\TestCase::run()` ist seit PHPUnit 13 `final` und würde kollidieren.
 - Pfade kommen ausschließlich aus `VhostLayout`, nie aus `Vhost` selbst oder frei zusammengesetzt. `www-data` darf ausschließlich in `web/` schreiben; `conf/`, `cert/`, `logs/` gehören root (Rechte-Tabelle in der Spec vom 2026-09-18).
 - **PHP läuft je vHost unter eigener Kennung `web<id>`, nie als `www-data`.** `www-data` darf per sudoers das CLI als root aufrufen; Website-PHP in diesem Pool wäre root auf dem Rechner. Diese Trennung nie aufweichen – der Smoke-Test prüft sie.

@@ -80,8 +80,12 @@ final class AdminPageTest extends TestCase
 		self::assertSame(['args' => ['ssl', '--', 'a.de', 'on'], 'stdin' => null], AdminPage::commandFor('ssl', ['name' => 'a.de', 'state' => 'on']));
 		self::assertSame(['args' => ['remove', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('remove', ['name' => 'a.de']));
 		self::assertSame(['args' => ['set', '--', 'le_email', 'x@y.de'], 'stdin' => null], AdminPage::commandFor('email', ['le_email' => 'x@y.de']));
-		self::assertSame(['args' => ['protect-path', '--', 'a.de', '/admin'], 'stdin' => null], AdminPage::commandFor('protect_path', ['name' => 'a.de', 'path' => ' /admin ']));
-		self::assertSame(['args' => ['protect-path', '--', 'a.de'], 'stdin' => null], AdminPage::commandFor('protect_path', ['name' => 'a.de', 'path' => '']), 'leer = ganze Seite');
+		// Bereich je Benutzer (seit 2026-09-27).
+		self::assertSame(['args' => ['user-path', '--', 'a.de', 'alice', '/admin'], 'stdin' => null], AdminPage::commandFor('user_path', ['name' => 'a.de', 'username' => 'alice', 'path' => ' /admin ']));
+		self::assertSame(['args' => ['user-path', '--', 'a.de', 'alice'], 'stdin' => null], AdminPage::commandFor('user_path', ['name' => 'a.de', 'username' => 'alice', 'path' => '']), 'leer = ganze Seite');
+		// Der Pfad beim Anlegen als EIN Argument vor "--": Ein Formularwert wird nie eine eigene Option.
+		self::assertSame(['args' => ['user-add', '--path=/admin', '--', 'a.de', 'alice'], 'stdin' => "p w\n"], AdminPage::commandFor('user_add', ['name' => 'a.de', 'username' => 'alice', 'password' => 'p w', 'path' => '/admin']));
+		self::assertNull(AdminPage::commandFor('protect_path', ['name' => 'a.de', 'path' => '/admin']), 'der Domain-Pfad ist entfallen');
 		self::assertNull(AdminPage::commandFor('hack', []));
 		self::assertNull(AdminPage::commandFor('', []));
 	}
@@ -205,7 +209,7 @@ final class AdminPageTest extends TestCase
 		self::assertSame('a.de', $this->page->vhosts()[0]->name);
 		self::assertSame($v->id, $this->page->vhost('a.de')?->id);
 		self::assertNull($this->page->vhost('nix'));
-		self::assertSame([['username' => 'alice', 'hash' => 'h']], $this->page->users($v));
+		self::assertSame([['username' => 'alice', 'hash' => 'h', 'path' => null]], $this->page->users($v));
 		self::assertSame(['127.0.0.1'], $this->page->ips($v));
 		self::assertSame('x@y.de', $this->page->letsEncryptEmail());
 	}

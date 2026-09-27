@@ -1334,21 +1334,81 @@ final class VhostServiceTest extends TestCase
 	}
 
 	/**
-	 * Nutzerwunsch vom 2026-09-25: Der Ordnerschutz bekommt einen optionalen Pfad.
+	 * Nutzerwunsch vom 2026-09-27: Der Pfad des Ordnerschutzes gilt je Benutzer, nicht
+	 * je Domain. Jeder Bereich bekommt eine htpasswd-Datei mit genau den Benutzern, die
+	 * hinein dürfen; wer die ganze Seite hat, steht in allen.
 	 */
-	public function testProtectionCanBeLimitedToAPathAndBackToTheWholeSite(): void
+	public function testEachUserHasTheirOwnArea(): void
 	{
 		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
-		$this->service->setProtectPath($v, ProtectPath::fromString('/admin/'));
+		$this->service->addUser($v, Username::fromString('chef'), 'geheim-geheim');
+		$this->service->addUser($v, Username::fromString('redaktion'), 'geheim-geheim', ProtectPath::fromString('/admin/'));
 
-		self::assertSame('/admin', $this->service->load('pfad.example')->protectPath);
+		$users = array_column($this->repo->users((int)$v->id), 'path', 'username');
+		self::assertSame(['chef' => null, 'redaktion' => '/admin'], $users);
 		$conf = (string)file_get_contents($this->dir . '/avail/pfad.example.conf');
-		self::assertStringContainsString('~^/admin(?:/|$) 1;', $conf);
+		self::assertStringContainsString('~^/admin(?:/|$) ' . $this->dir . '/auth/pfad.example.p-', $conf);
+		self::assertStringContainsString('default ' . $this->dir . '/auth/pfad.example.htpasswd;', $conf);
 
-		$this->service->setProtectPath($this->service->load('pfad.example'), null);
-		self::assertNull($this->service->load('pfad.example')->protectPath);
+		$files = glob($this->dir . '/auth/pfad.example*.htpasswd');
+		self::assertCount(2, $files);
+		$area = (string)file_get_contents((string)current(array_filter($files, static fn(string $f): bool => str_contains($f, '.p-'))));
+		$site = (string)file_get_contents($this->dir . '/auth/pfad.example.htpasswd');
+		self::assertStringStartsWith('chef:', $site);
+		self::assertStringNotContainsString('redaktion:', $site, 'nur /admin, nicht die ganze Seite');
+		self::assertStringContainsString('chef:', $area, 'die ganze Seite umfasst /admin');
+		self::assertStringContainsString('redaktion:', $area);
+	}
+
+	/** Bereich ändern: alte Datei verschwindet, ein neues Passwort lässt den Bereich stehen. */
+	public function testChangingTheAreaCleansUpAndAPasswordKeepsIt(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
+		$this->service->addUser($v, Username::fromString('a'), 'geheim-geheim', ProtectPath::fromString('/alt'));
+		$this->service->setUserPath($v, Username::fromString('a'), ProtectPath::fromString('/neu'));
+		$this->service->addUser($v, Username::fromString('a'), 'anders-geheim');
+
+		self::assertSame('/neu', $this->repo->users((int)$v->id)[0]['path']);
 		$conf = (string)file_get_contents($this->dir . '/avail/pfad.example.conf');
-		self::assertStringNotContainsString('~^/admin', $conf);
-		self::assertStringContainsString("map \$uri \$vhostadmin_", $conf);
+		self::assertStringContainsString('~^/neu(?:/|$)', $conf);
+		self::assertStringNotContainsString('/alt', $conf);
+		self::assertCount(1, glob($this->dir . '/auth/pfad.example*.htpasswd'), 'nur noch der Bereich /neu');
+		self::assertStringContainsString('default -;', $conf, 'ohne Benutzer für die ganze Seite ist der Rest frei');
+
+		$this->service->setUserPath($v, Username::fromString('a'), null);
+		self::assertSame([$this->dir . '/auth/pfad.example.htpasswd'], glob($this->dir . '/auth/pfad.example*.htpasswd'));
+	}
+
+	public function testSettingTheAreaOfAnUnknownUserFails(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
+		$this->expectException(\RuntimeException::class);
+		$this->service->setUserPath($v, Username::fromString('niemand'), ProtectPath::fromString('/x'));
+	}
+
+	/** Scheitert der Reload, sind auch die Bereichsdateien wieder im alten Stand. */
+	public function testAFailedReloadRestoresTheAreaFiles(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
+		$this->service->addUser($v, Username::fromString('a'), 'geheim-geheim', ProtectPath::fromString('/alt'));
+		$before = glob($this->dir . '/auth/pfad.example*.htpasswd');
+		$this->reloader->failWith = 'nginx -t schlägt fehl';
+		try {
+			$this->service->setUserPath($v, Username::fromString('a'), ProtectPath::fromString('/neu'));
+			self::fail('Reload hätte scheitern müssen');
+		} catch (\RuntimeException) {
+		}
+		self::assertSame($before, glob($this->dir . '/auth/pfad.example*.htpasswd'));
+		self::assertStringContainsString('a:', (string)file_get_contents($before[0]));
+	}
+
+	/** Entfernen räumt alle Bereichsdateien mit ab. */
+	public function testRemovingDeletesAllAreaFiles(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('pfad.example'), null);
+		$this->service->addUser($v, Username::fromString('a'), 'geheim-geheim', ProtectPath::fromString('/x'));
+		$this->service->addUser($v, Username::fromString('b'), 'geheim-geheim');
+		$this->service->remove($this->service->load('pfad.example'));
+		self::assertSame([], glob($this->dir . '/auth/pfad.example*'));
 	}
 }

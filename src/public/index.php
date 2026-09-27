@@ -513,33 +513,35 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 
 	<div>
 		<div class="panel">
+			<?php $areas = \VhostAdmin\Auth\AccessAreas::fromUsers($users); ?>
 			<h2>Verzeichnisschutz <?= badge($view->protect, 'aktiv', 'aus') ?>
-				<?php if ($view->protect): ?><span class="mono hint"><?= h($view->protectPath ?? 'ganze Seite') ?></span><?php endif ?></h2>
+				<?php if ($view->protect): ?><span class="mono hint"><?= h(implode(', ', array_map(
+					static fn($area): string => $area->path ?? 'ganze Seite', $areas->areas()))) ?></span><?php endif ?></h2>
 			<?php if ($view->protect): ?>
-				<p class="hint">Zugriff nur mit freigegebener IP <em>oder</em> Benutzer und Passwort<?= $view->protectPath === null
-					? '. Ohne Einträge ist der Docroot komplett gesperrt.'
-					: ' – aber nur für <span class="mono">' . h($view->protectPath) . '</span> und alles darunter, auch PHP. Der Rest der Seite ist frei erreichbar.' ?></p>
+				<p class="hint">Zugriff nur mit freigegebener IP <em>oder</em> Benutzer und Passwort. Jeder Benutzer hat
+					seinen eigenen Bereich: einen Pfad samt allem darunter (auch PHP) oder die ganze Seite.
+					<?= $areas->coversWholeSite()
+						? ($users === [] ? 'Ohne Benutzer und IP ist der Docroot komplett gesperrt.' : '')
+						: 'Keiner der Benutzer hat die ganze Seite – alles außerhalb der Pfade ist frei erreichbar.' ?></p>
 				<?= form('protect', ['name' => $view->name, 'state' => 'off'], 'Schutz abschalten', 'danger', 'Verzeichnisschutz wirklich abschalten? Der Docroot ist dann frei erreichbar.') ?>
 			<?php else: ?>
 				<p class="hint">Der Docroot ist ohne Anmeldung erreichbar.</p>
 				<?= form('protect', ['name' => $view->name, 'state' => 'on'], 'Schutz einschalten', 'primary') ?>
 			<?php endif ?>
-			<form method="post" class="row" style="margin-top:.7rem">
-				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="protect_path"><input type="hidden" name="name" value="<?= h($view->name) ?>">
-				<label for="protect-path" class="hint">Nur für Pfad</label>
-				<input id="protect-path" type="text" name="path" class="mono" value="<?= h($view->protectPath ?? '') ?>"
-					placeholder="leer = ganze Seite, z. B. /admin" pattern="[\/A-Za-z0-9._~\-]*" maxlength="200">
-				<button><?= $view->protectPath === null ? 'Übernehmen' : 'Ändern' ?></button>
-			</form>
-			<p class="hint">Gilt für den Pfad und alles darunter: <span class="mono">/admin</span> schützt
-				<span class="mono">/admin/</span> und <span class="mono">/admin/x.php</span>, nicht aber
-				<span class="mono">/administrator</span>. Eigene <span class="mono">rewrite</span>- oder
-				<span class="mono">return</span>-Direktiven wirken vor der Anmeldung und können den Pfad umgehen.</p>
 
 			<h2 style="margin-top:1.2rem">Benutzer</h2>
 			<?php if ($users): ?>
 				<table><?php foreach ($users as $u): ?>
 					<tr><td class="mono"><?= h($u['username']) ?></td>
+						<td>
+							<form method="post" class="row">
+								<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="user_path">
+								<input type="hidden" name="name" value="<?= h($view->name) ?>"><input type="hidden" name="username" value="<?= h($u['username']) ?>">
+								<input type="text" name="path" class="mono" value="<?= h($u['path'] ?? '') ?>" aria-label="Bereich von <?= h($u['username']) ?>"
+									placeholder="ganze Seite" pattern="[\/A-Za-z0-9._~\-]*" maxlength="200" size="14">
+								<button class="small">Bereich setzen</button>
+							</form>
+						</td>
 						<td style="text-align:right">
 							<?= form('user_reset', ['name' => $view->name, 'username' => $u['username']], 'Passwort neu', 'small', 'Neues Passwort für ' . $u['username'] . ' erzeugen?' . "\n\n" . 'Das bisherige gilt danach nicht mehr. Das neue wird einmal angezeigt.') ?>
 							<?= form('user_del', ['name' => $view->name, 'username' => $u['username']], 'entfernen', 'small danger', 'Benutzer ' . $u['username'] . ' entfernen?') ?>
@@ -550,10 +552,18 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 				<input type="hidden" name="csrf" value="<?= h($csrf) ?>"><input type="hidden" name="action" value="user_add"><input type="hidden" name="name" value="<?= h($view->name) ?>">
 				<div class="row">
 					<input type="text" name="username" placeholder="Benutzername" required autocomplete="off">
+					<input type="text" name="path" class="mono" placeholder="Bereich, leer = ganze Seite" aria-label="Bereich des neuen Benutzers"
+						pattern="[\/A-Za-z0-9._~\-]*" maxlength="200" size="16">
 					<input type="text" name="password" class="mono pw" value="<?= h($page->suggestedPassword()) ?>" readonly
 						aria-label="Erzeugtes Passwort" onclick="this.select()" title="Anklicken markiert das Passwort">
 					<button class="primary">Anlegen</button>
 				</div>
+				<p class="hint">Der Bereich gilt für den Pfad und alles darunter: <span class="mono">/admin</span> umfasst
+					<span class="mono">/admin/</span> und <span class="mono">/admin/x.php</span>, nicht aber
+					<span class="mono">/administrator</span>. Wer die ganze Seite hat, darf auch in jeden Bereich; wer
+					<span class="mono">/admin</span> hat, auch in <span class="mono">/admin/intern</span>. Eigene
+					<span class="mono">rewrite</span>- oder <span class="mono">return</span>-Direktiven wirken vor der
+					Anmeldung und können einen Pfad umgehen.</p>
 				<p class="hint">Das Passwort wird erzeugt, nicht eingegeben: 20 Zeichen aus Gross- und Kleinbuchstaben,
 					Ziffern und <span class="mono">@=#+.,_-:;</span>. Es steht nirgends im Klartext – in der htpasswd-Datei
 					liegt nur der Hash. Notieren Sie es, solange es angezeigt wird; sonst hilft nur „Passwort neu“.</p>
