@@ -47,3 +47,15 @@ ScanFamilies (Union-Find, Jaccard >= 0,6), Zeitmuster per Kreismittel. Tabelle
 scan_sessions, Analyzer::VERSION 4. Echte Daten: 19 Familien im 30-Tage-Fenster, 2 an
 mehreren Tagen (u. a. ein Werkzeug mit 4 Kennungen und 92 Pfaden am 21./22.09.).
 715 Tests gruen.
+2026-09-27 13:51 Honigtopf-Ausbau 1-4 (Nutzer: "mache 1-4")
+Koeder wpconfig/config/serverstatus/serverinfo (Muster auf $uri) und awscreds (Muster auf
+roher $request_uri, zweite map + if/rewrite mit "?" gegen die Abfrage). make-decoys.php
+erzeugt fuenf neue Dateien (fester Zufall). Live geprueft: alle 200 mit Kennung, /index.php
+und /wp-login.php weiter 404, /admin/ 401. Regex-Begrenzer "~" kollidierte mit "~" im
+wp-config-Muster -> "#".
+Wiedererkennung: ScanSessions (Kennung bzw. Rotationsgruppe, 30-min-Pause, >=3/>=2),
+ScanFamilies (Union-Find, Jaccard >= 0,6), Zeitmuster per Kreismittel. Tabelle
+scan_sessions, Analyzer::VERSION 4. Echte Daten: 19 Familien im 30-Tage-Fenster, 2 an
+mehreren Tagen (u. a. ein Werkzeug mit 4 Kennungen und 92 Pfaden am 21./22.09.).
+Panne: FEATURES.md war seit Build 25 verdoppelt (Schnitt Offen->Implementiert bei
+umgekehrter Reihenfolge); aus Build 24 wiederhergestellt. 715 Tests gruen, Smoke-Test ok.

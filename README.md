@@ -423,14 +423,25 @@ Fassung stammt. Hat ein Tag in der Datenbank mehr Anfragen als die noch vorhande
 Logs hergeben (etwa weil ein Teil schon rotiert ist), bleibt der gespeicherte Stand
 stehen. Frühere JSON-Tagesberichte übernimmt der erste Lauf automatisch.
 
-**Köder:** `sudo ./honeypot/install-site.sh <honigtopf-host>` richtet neben der Seite zwei
-Köder ein. Wer `phpinfo.php` (in allen gefragten Schreibweisen, auch in Unterordnern) oder
-`.env` sucht, bekommt eine erfundene, echt wirkende Fassung. Jede Auslieferung trägt eine
-eigene Kennung: einen Benutzernamen `deploy-<kennung>` und zwei interne Adressen. Taucht die
-Kennung später wieder auf – als Anmeldename oder in einer Anfrage –, zeigt die Kachel
-„Köder", dass der Fund ausgewertet und benutzt wurde, von welchem Abruf er stammt und wie
-viel Zeit dazwischen lag. Alle Werte sind erfunden. Die Köderdateien erzeugt
-`php honeypot/make-decoys.php honeypot/site/koeder`.
+**Köder:** `sudo ./honeypot/install-site.sh <honigtopf-host>` richtet neben der Seite
+Köder ein. Wer danach sucht, bekommt eine erfundene, echt wirkende Fassung:
+
+- `phpinfo.php` (alle gefragten Schreibweisen, auch in Unterordnern)
+- `.env`, `wp-config.php` samt Sicherungskopien, `config.php`-Varianten (als Quelltext)
+- `/server-status` und `/server-info` im Stil von Apache
+- ein Verzeichnisausbruch nach `.aws/credentials` (etwa `?file=../../root/.aws/credentials`)
+
+Jede Auslieferung trägt eine eigene Kennung: einen Benutzernamen `deploy-<kennung>` und
+interne Adressen. Taucht die Kennung später wieder auf – als Anmeldename oder in einer
+Anfrage –, zeigt die Kachel „Köder", dass der Fund ausgewertet und benutzt wurde, von
+welchem Abruf er stammt und wie viel Zeit dazwischen lag. Alle Werte sind erfunden. Die
+Köderdateien erzeugt `php honeypot/make-decoys.php honeypot/site/koeder`.
+
+**Wiederkehrer:** Ohne Absenderadresse erkennt die Ansicht Werkzeuge an ihrer
+Wortliste. Anfragen einer Kennung ohne längere Pause bilden eine Sitzung; Sitzungen,
+deren Pfade sich zu mindestens 60 % decken, sind eine Familie – auch an anderen Tagen und
+mit anderer Kennung. Die Kachel „Wiederkehrer" zeigt, welche Familien an mehreren Tagen
+kamen und ob sie einem Zeitplan folgen.
 
 **Tag und Zeitraum wählen:** Die Kachel „Kalender" zeigt einen Monat, eingefärbt nach
 Sondierungen; ein Klick auf einen Tag zeigt diesen Tag, ein Klick auf die Kalenderwoche
