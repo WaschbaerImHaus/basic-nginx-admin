@@ -191,4 +191,20 @@ final class AnalyzerTest extends TestCase
 	{
 		self::assertGreaterThanOrEqual(3, Analyzer::VERSION);
 	}
+
+	/**
+	 * Seit Selbsttests (127.0.0.1) nicht mehr zählen, hat ein Tag mit Selbsttests weniger
+	 * Anfragen als gespeichert. Das ist keine Rotation: Der Tag wird neu gerechnet, statt
+	 * mit den alten Selbsttests „behalten" zu werden.
+	 */
+	public function testLocalRequestsDoNotCountAsMissingLines(): void
+	{
+		$lines = $this->lines([24 => 3]);
+		$lines[] = '127.0.0.1 - - [24/Sep/2026:11:00:00 +0200] "GET /.env HTTP/2.0" 200 5 "-" "selbsttest"';
+		// Früherer Stand: 4 Anfragen samt Selbsttest, ältere Fassung.
+		$this->db->save('mfsvr.de', DayReport::fromArray(['date' => '2026-09-24', 'complete' => true, 'requests' => 4]), 2);
+		$result = $this->analyzer->run('mfsvr.de', $lines, [], ['mfsvr.de'], '2026-09-26', false);
+		self::assertSame(['2026-09-24'], $result['analysed']);
+		self::assertSame(3, $this->db->load('mfsvr.de', Period::day('2026-09-24'))->requests);
+	}
 }

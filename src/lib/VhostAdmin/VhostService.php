@@ -21,6 +21,7 @@ use VhostAdmin\Ssl\ReachabilityChecker;
 use VhostAdmin\Ssl\ReachabilityResult;
 use VhostAdmin\Ssl\ReachabilityStatus;
 use VhostAdmin\Auth\AccessAreas;
+use VhostAdmin\Nginx\ReloadNotConfirmedException;
 use VhostAdmin\Value\ProtectPath;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Value\DomainName;
@@ -177,8 +178,10 @@ final class VhostService
 	 */
 	public function setProtection(Vhost $vhost, bool $on): void
 	{
-		$this->repository->setProtect($vhost->id, $on);
-		$this->render($this->load($vhost->name));
+		$this->repository->transaction(function () use ($vhost, $on): void {
+			$this->repository->setProtect($vhost->id, $on);
+			$this->render($this->load($vhost->name));
+		});
 	}
 
 	/**
@@ -198,8 +201,10 @@ final class VhostService
 		if (mb_strlen($password) < self::MIN_PASSWORD_LENGTH) {
 			throw new \RuntimeException('Passwort zu kurz: mindestens ' . self::MIN_PASSWORD_LENGTH . ' Zeichen.');
 		}
-		$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password), $path?->value);
-		$this->render($vhost);
+		$this->repository->transaction(function () use ($vhost, $user, $password, $path): void {
+			$this->repository->upsertUser($vhost->id, $user->value, $this->hashPassword($password), $path?->value);
+			$this->render($vhost);
+		});
 	}
 
 	/**
@@ -211,10 +216,12 @@ final class VhostService
 	 */
 	public function setUserPath(Vhost $vhost, Username $user, ?ProtectPath $path): void
 	{
-		if (!$this->repository->setUserPath((int)$vhost->id, $user->value, $path?->value)) {
-			throw new \RuntimeException("Benutzer nicht vorhanden: {$user->value}");
-		}
-		$this->render($vhost);
+		$this->repository->transaction(function () use ($vhost, $user, $path): void {
+			if (!$this->repository->setUserPath((int)$vhost->id, $user->value, $path?->value)) {
+				throw new \RuntimeException("Benutzer nicht vorhanden: {$user->value}");
+			}
+			$this->render($vhost);
+		});
 	}
 
 	/**
@@ -224,10 +231,12 @@ final class VhostService
 	 */
 	public function removeUser(Vhost $vhost, Username $user): void
 	{
-		if (!$this->repository->deleteUser($vhost->id, $user->value)) {
-			throw new \RuntimeException("Benutzer nicht vorhanden: {$user->value}");
-		}
-		$this->render($vhost);
+		$this->repository->transaction(function () use ($vhost, $user): void {
+			if (!$this->repository->deleteUser($vhost->id, $user->value)) {
+				throw new \RuntimeException("Benutzer nicht vorhanden: {$user->value}");
+			}
+			$this->render($vhost);
+		});
 	}
 
 	/**
@@ -235,8 +244,10 @@ final class VhostService
 	 */
 	public function addIp(Vhost $vhost, Cidr $cidr): void
 	{
-		$this->repository->addIp($vhost->id, $cidr->value);
-		$this->render($vhost);
+		$this->repository->transaction(function () use ($vhost, $cidr): void {
+			$this->repository->addIp($vhost->id, $cidr->value);
+			$this->render($vhost);
+		});
 	}
 
 	/**
@@ -246,10 +257,12 @@ final class VhostService
 	 */
 	public function removeIp(Vhost $vhost, Cidr $cidr): void
 	{
-		if (!$this->repository->deleteIp($vhost->id, $cidr->value)) {
-			throw new \RuntimeException("IP nicht vorhanden: {$cidr->value}");
-		}
-		$this->render($vhost);
+		$this->repository->transaction(function () use ($vhost, $cidr): void {
+			if (!$this->repository->deleteIp($vhost->id, $cidr->value)) {
+				throw new \RuntimeException("IP nicht vorhanden: {$cidr->value}");
+			}
+			$this->render($vhost);
+		});
 	}
 
 	/**
@@ -537,6 +550,15 @@ final class VhostService
 			foreach ($previousHtpasswd as $file => $content) {
 				$this->writeProtected($file, $content);
 			}
+			// Nicht bestätigt heisst: Ob nginx die neue Konfiguration doch noch liest, ist
+			// offen. Ein weiterer Reload bringt es auf den gerade wiederhergestellten Stand.
+			if ($e instanceof ReloadNotConfirmedException) {
+				try {
+					$this->reloader->reload();
+				} catch (\Throwable) {
+					// Die ursprüngliche Meldung ist die wichtigere.
+				}
+			}
 			$this->restoreFile($authSnippet, $previousAuthSnippet);
 			$this->restoreFile($available, $previousAvailable);
 			if (!$enabledExistedBefore) {
@@ -647,8 +669,10 @@ final class VhostService
 		if ($mode === $vhost->wwwMode) {
 			return;
 		}
-		$this->repository->setWwwMode((int)$vhost->id, $mode);
-		$this->render($this->repository->byId((int)$vhost->id));
+		$this->repository->transaction(function () use ($vhost, $mode): void {
+			$this->repository->setWwwMode((int)$vhost->id, $mode);
+			$this->render($this->repository->byId((int)$vhost->id));
+		});
 	}
 
 	/**

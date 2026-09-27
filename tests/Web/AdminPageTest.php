@@ -64,6 +64,22 @@ final class AdminPageTest extends TestCase
 	}
 
 	/**
+	 * Viel Ausgabe auf beiden Kanälen: Liest der Runner erst stdout bis zum Ende und dann
+	 * stderr, füllt das CLI den stderr-Puffer und wartet – und der Runner auf stdout.
+	 * Beide Kanäle werden deshalb gleichzeitig gelesen (SECURITY_RISKS.md, behoben
+	 * 2026-09-27). Das Ergebnis bleibt stdout vor stderr.
+	 */
+	public function testCommandRunnerSurvivesLargeOutputOnBothChannels(): void
+	{
+		$runner = new CommandRunner(Config::fromArray(['vhostBinary' => dirname(__DIR__) . '/Support/echo-command.php']), ['php']);
+		$started = microtime(true);
+		[$code, $out] = $runner->run(['flood'], str_repeat('s', 200000));
+		self::assertSame(0, $code);
+		self::assertSame(str_repeat('o', 300000) . str_repeat('e', 300000), $out);
+		self::assertLessThan(10, microtime(true) - $started);
+	}
+
+	/**
 	 * Jeder Wert aus dem Formular steht hinter "--": Das CLI liest ihn dann nie als
 	 * Option, auch wenn er mit "--" beginnt (SECURITY_RISKS.md, Optionen-Einschleusung).
 	 * Beabsichtigte Optionen wie --subdir stehen davor.
@@ -355,5 +371,33 @@ final class AdminPageTest extends TestCase
 		self::assertMatchesRegularExpression("~'httponly'\s*=>\s*true~", $source);
 		self::assertMatchesRegularExpression("~'samesite'\s*=>\s*'Strict'~", $source);
 		self::assertStringContainsString("ini_set('session.use_strict_mode', '1')", $source);
+	}
+
+	/**
+	 * Eine defekte Zeile (hier: Domain mit Port – so legt das CLI nie an) darf nicht die
+	 * ganze Übersicht mit HTTP 500 lahmlegen. Die übrigen Hosts erscheinen, der defekte
+	 * wird als Problem gemeldet (SECURITY_RISKS.md, behoben 2026-09-27).
+	 */
+	public function testABrokenRowDoesNotTakeDownTheOverview(): void
+	{
+		$this->repo->insert('gut.de', VhostKind::Domain, null, null, true);
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/db.sqlite']));
+		$db->pdo()->exec("INSERT INTO vhosts (name, kind, port, protect) VALUES ('kaputt.de', 'domain', 81, 1)");
+
+		self::assertSame(['gut.de'], array_map(static fn($v): string => $v->name, $this->page->vhosts()));
+		self::assertNull($this->page->vhost('kaputt.de'));
+		self::assertNotEmpty($this->page->problems());
+		foreach ($this->page->problems() as $problem) {
+			self::assertStringContainsString('kaputt.de', $problem);
+		}
+	}
+
+	/** Ein manipulierter Benutzerpfad: keine 500, sondern eine Meldung; nginx bekommt ihn ohnehin nie. */
+	public function testAManipulatedUserPathIsReportedNotRendered(): void
+	{
+		$v = $this->repo->insert('a.de', VhostKind::Domain, null, null, true);
+		$this->repo->upsertUser($v->id, 'alice', 'h', '/x;}');
+		self::assertSame([], $this->page->users($v));
+		self::assertStringContainsString('Pfad', implode("\n", $this->page->problems()));
 	}
 }

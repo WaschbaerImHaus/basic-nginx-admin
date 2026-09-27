@@ -35,6 +35,27 @@ final class VhostRepository
 	}
 
 	/**
+	 * Wie all(), aber eine einzelne ungültige Zeile hält den Rest nicht auf: Sie steht
+	 * mit ihrem Fehler in "broken". Für die Oberfläche – eine manipulierte Zeile soll
+	 * nicht die ganze Übersicht mit HTTP 500 lahmlegen. Das CLI bleibt bei all() und
+	 * bricht ab, bevor es mit einem ungültigen Datensatz rendert.
+	 *
+	 * @return array{vhosts: list<Vhost>, broken: list<string>}
+	 */
+	public function allReadable(): array
+	{
+		$vhosts = $broken = [];
+		foreach ($this->db->pdo()->query('SELECT * FROM vhosts ORDER BY kind, name')->fetchAll() as $row) {
+			try {
+				$vhosts[] = Vhost::fromRow($row);
+			} catch (\RuntimeException $e) {
+				$broken[] = (string)($row['name'] ?? '?') . ': ' . $e->getMessage();
+			}
+		}
+		return ['vhosts' => $vhosts, 'broken' => $broken];
+	}
+
+	/**
 	 * vHost nach Name ("example.com" oder "localhost:3000").
 	 */
 	public function byName(string $name): ?Vhost
@@ -149,6 +170,31 @@ final class VhostRepository
 	public function setHealthToken(int $id, string $token): void
 	{
 		$this->db->pdo()->prepare('UPDATE vhosts SET health_token = ? WHERE id = ?')->execute([$token, $id]);
+	}
+
+	/**
+	 * Führt $work in einer Transaktion aus: Wirft sie, wird alles zurückgenommen.
+	 * Verschachtelt aufgerufen läuft $work in der äusseren Transaktion mit.
+	 *
+	 * @template T
+	 * @param callable(): T $work
+	 * @return T
+	 */
+	public function transaction(callable $work): mixed
+	{
+		$pdo = $this->db->pdo();
+		if ($pdo->inTransaction()) {
+			return $work();
+		}
+		$pdo->beginTransaction();
+		try {
+			$result = $work();
+			$pdo->commit();
+			return $result;
+		} catch (\Throwable $e) {
+			$pdo->rollBack();
+			throw $e;
+		}
 	}
 
 	/**

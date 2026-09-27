@@ -22,7 +22,6 @@ use VhostAdmin\Value\NginxSnippet;
 use VhostAdmin\Value\Port;
 use VhostAdmin\Value\SubDirectory;
 use VhostAdmin\Value\Username;
-use VhostAdmin\Vhost;
 use VhostAdmin\VhostLayout;
 use VhostAdmin\VhostRepository;
 use VhostAdmin\VhostService;

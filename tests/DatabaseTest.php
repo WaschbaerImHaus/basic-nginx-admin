@@ -126,4 +126,14 @@ final class DatabaseTest extends TestCase
 		self::assertSame(['x' => '/admin', 'y' => '/admin', 'z' => null], $paths);
 		self::assertSame([null, null], array_column($db->pdo()->query('SELECT protect_path FROM vhosts ORDER BY id')->fetchAll(), 'protect_path'));
 	}
+
+	/** Ein nicht anlegbares Verzeichnis nennt den Grund, statt erst in PDO zu scheitern. */
+	public function testReportsAnUncreatableDirectory(): void
+	{
+		file_put_contents($this->dir . '/datei', 'x');
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/datei/unter/db.sqlite']));
+		$this->expectException(\RuntimeException::class);
+		$this->expectExceptionMessage('Datenbankverzeichnis');
+		$db->pdo();
+	}
 }

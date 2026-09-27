@@ -398,6 +398,15 @@ if ($flash && $flash[0] === 'err' && preg_match('/Zeile (\d+)/', $flash[1], $m))
 <?php if ($flash): ?>
 	<div class="flash <?= h($flash[0]) ?>"><?= h($flash[1]) ?></div>
 <?php endif ?>
+<?php
+// Ungültige Datenbankeinträge melden statt mit HTTP 500 abzubrechen. Die Benutzer des
+// gewählten Hosts werden dafür schon hier gelesen (AdminPage::users() meldet dort).
+if ($view) {
+	$page->users($view);
+}
+foreach ($page->problems() as $problem): ?>
+	<div class="flash err">Ungültiger Datenbankeintrag – bitte per CLI prüfen: <?= h($problem) ?></div>
+<?php endforeach ?>
 
 <?php if (isset($_GET['v']) && !$view): ?>
 	<div class="panel">

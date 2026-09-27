@@ -8,10 +8,7 @@
 
 ## Kleinbefunde aus den Reviews
 
-- `Database::pdo()` legt das Datenbankverzeichnis mit `mkdir($dir, 0770, true)` an, prüft den Rückgabewert aber nicht; schlägt `mkdir` fehl (z. B. Rechte), scheitert erst die nachfolgende `PDO`-Verbindung mit einer weniger aussagekräftigen Fehlermeldung.
 - `VhostRepository::insert()` prüft Namenskollisionen per vorherigem `SELECT` (`byName()`) statt den `UNIQUE`-Constraint-Fehler der Datenbank abzufangen – ein theoretisches Race zwischen Prüfung und `INSERT` bleibt offen (in der Praxis unkritisch, da nur das root-CLI schreibt und nicht parallel läuft).
-- `Cli/Application.php` importiert `use VhostAdmin\Vhost;`, verwendet die Klasse im Datei-Inhalt aber nicht – toter Import.
-- `Web\CommandRunner::run()` schreibt zuerst das komplette `stdin` (`fwrite($pipes[0], $stdin)`) und liest erst danach `stdout`/`stderr` – bei sehr großer CLI-Ausgabe könnte der Kindprozess blockieren, weil sein Ausgabepuffer voll läuft, während der Elternprozess noch mit dem Schreiben von `stdin` beschäftigt ist (theoretischer Deadlock; bei den kurzen `vhost`-Ausgaben in der Praxis nicht relevant).
 - `VhostService::own()` und `applySpec()` tun fachlich dasselbe für Dateien bzw. Verzeichnisse – zusammenführen.
 - Die `SUDO_USER`-Verzweigung in `SystemdReloader::reload()` hat keine Testabdeckung (die Klasse ist laut Projektkonvention nicht unit-testbar); eine kleine Extraktion (`isUiCall()`) würde sie testbar machen.
 - `/var/www/localhost-8080/logs/` bleibt leer, weil `src/etc/nginx-admin.conf` weiter nach `/var/log/nginx/vhost-admin.access.log`/`.error.log` schreibt – entweder auf `logs/access.log`/`error.log` umstellen oder als bewusst unbenutzt dokumentieren.

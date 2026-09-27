@@ -1411,4 +1411,45 @@ final class VhostServiceTest extends TestCase
 		$this->service->remove($this->service->load('pfad.example'));
 		self::assertSame([], glob($this->dir . '/auth/pfad.example*'));
 	}
+
+	/**
+	 * Scheitert der Reload, nimmt render() die Dateien zurück – und seit 2026-09-27
+	 * auch die Datenbankänderung. Vorher blieb z. B. ein entfernter Benutzer in der
+	 * Datenbank entfernt, stand aber weiter in der htpasswd-Datei: Oberfläche und nginx
+	 * zeigten verschiedene Stände (SECURITY_RISKS.md).
+	 */
+	public function testAFailedReloadLeavesTheDatabaseUnchanged(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('tx.example'), null);
+		$this->service->addUser($v, Username::fromString('alice'), 'geheim-geheim', ProtectPath::fromString('/a'));
+		$this->service->addIp($v, Cidr::fromString('10.0.0.0/8'));
+		$before = [$this->repo->users((int)$v->id), $this->repo->ips((int)$v->id), $this->service->load('tx.example')->protect];
+
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen';
+		$attempts = [
+			fn() => $this->service->addUser($v, Username::fromString('bob'), 'geheim-geheim'),
+			fn() => $this->service->removeUser($v, Username::fromString('alice')),
+			fn() => $this->service->setUserPath($v, Username::fromString('alice'), ProtectPath::fromString('/b')),
+			fn() => $this->service->addIp($v, Cidr::fromString('192.0.2.0/24')),
+			fn() => $this->service->removeIp($v, Cidr::fromString('10.0.0.0/8')),
+			fn() => $this->service->setProtection($this->service->load('tx.example'), false),
+		];
+		foreach ($attempts as $i => $attempt) {
+			try {
+				$attempt();
+				self::fail("Versuch $i hätte scheitern müssen");
+			} catch (\RuntimeException $e) {
+				self::assertStringContainsString('nginx -t', $e->getMessage(), "Versuch $i");
+			}
+			self::assertSame(
+				$before,
+				[$this->repo->users((int)$v->id), $this->repo->ips((int)$v->id), $this->service->load('tx.example')->protect],
+				"Versuch $i hat die Datenbank verändert"
+			);
+		}
+		// Und danach geht es normal weiter – keine hängende Transaktion.
+		$this->reloader->failWith = null;
+		$this->service->addUser($v, Username::fromString('bob'), 'geheim-geheim');
+		self::assertCount(2, $this->repo->users((int)$v->id));
+	}
 }

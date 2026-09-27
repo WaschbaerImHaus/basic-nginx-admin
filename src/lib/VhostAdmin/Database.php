@@ -28,8 +28,10 @@ final class Database
 	{
 		if ($this->pdo === null) {
 			$dir = dirname($this->config->dbPath);
-			if (!is_dir($dir)) {
-				mkdir($dir, 0770, true);
+			// Mit Prüfung: Sonst scheiterte erst PDO mit „unable to open database file",
+			// ohne dass der eigentliche Grund (Rechte, Pfad) zu sehen wäre.
+			if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) {
+				throw new \RuntimeException("Kann das Datenbankverzeichnis nicht anlegen: $dir");
 			}
 			$this->pdo = new \PDO('sqlite:' . $this->config->dbPath);
 			$this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);

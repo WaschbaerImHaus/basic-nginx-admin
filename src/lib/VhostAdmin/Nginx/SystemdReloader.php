@@ -19,8 +19,13 @@ declare(strict_types=1);
  * Antwort an den Browser ist ohnehin eine Weiterleitung, und die nächste
  * Anfrage trifft bereits den neuen Worker.
  *
+ * Seit 2026-09-27 wird jeder Reload zusätzlich bestätigt (ReloadConfirmation): Erst
+ * wenn eine neue Worker-Generation läuft, gilt er als übernommen; sonst wird er
+ * wiederholt. Das gilt auch für Aufrufe aus der Oberfläche – neue Worker erscheinen
+ * sofort, nur das Verschwinden der alten dauert.
+ *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 20:10
+ * @version Letzte Änderung: 2026-09-27 14:20
  */
 
 namespace VhostAdmin\Nginx;
@@ -33,6 +38,7 @@ final class SystemdReloader implements ReloaderInterface
 	 * Worker-Prozesse beendet sind.
 	 *
 	 * @throws \RuntimeException wenn die Konfiguration fehlerhaft ist oder der Reload scheitert
+	 * @throws ReloadNotConfirmedException wenn nginx den Reload auch wiederholt nicht übernimmt
 	 */
 	public function reload(): void
 	{
@@ -41,10 +47,18 @@ final class SystemdReloader implements ReloaderInterface
 			throw new \RuntimeException("nginx -t fehlgeschlagen:\n" . implode("\n", $testOutput));
 		}
 		$oldWorkers = $this->workerPids();
-		exec('systemctl reload-or-restart nginx 2>&1', $reloadOutput, $reloadCode);
-		if ($reloadCode !== 0) {
-			throw new \RuntimeException("nginx-Reload fehlgeschlagen:\n" . implode("\n", $reloadOutput));
-		}
+		(new ReloadConfirmation(
+			static function (): void {
+				exec('systemctl reload-or-restart nginx 2>&1', $reloadOutput, $reloadCode);
+				if ($reloadCode !== 0) {
+					throw new \RuntimeException("nginx-Reload fehlgeschlagen:\n" . implode("\n", $reloadOutput));
+				}
+			},
+			fn(): array => $this->workerPids(),
+			static function (float $seconds): void {
+				usleep((int)($seconds * 1000000));
+			},
+		))->run();
 		if (getenv('SUDO_USER') === 'www-data') {
 			// Selbstblockade vermeiden: Dieser Aufruf steckt in einer Anfrage, die der
 			// alte Worker gerade noch bedient (siehe Klassenkommentar). Der wartet hier

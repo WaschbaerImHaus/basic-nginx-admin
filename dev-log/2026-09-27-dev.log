@@ -26,3 +26,11 @@ Geprueft: / 200, /admin und /admin/ 401, /phpinfo.php und /.env Koeder 200, Koed
 Anmeldung erscheint im error.log. LoginAttempts ignoriert jetzt Versuche von 127.0.0.1/::1
 (wie LogParser). Grenze dokumentiert: /admin/phpinfo.php (Koeder) und /admin/x.php (404)
 laufen in der Rewrite-Phase vor der Anmeldung.
+2026-09-27 13:21 Offene Todos abgearbeitet (Nutzer: "mach weiter mit offenen todos")
+Scheduler neu angelegt (Cron 17 */4, Job 0970a0bc, nur diese Sitzung, 7 Tage).
+Reload-Bug: 5/5 Doppel-Reloads ueber www-data->sudo nicht nachstellbar; abgesichert mit
+ReloadConfirmation (neue Worker-Generation, 3 Versuche). Setter in Transaktion mit render()
+(DB/Dateien laufen nicht mehr auseinander). Oberflaeche: defekte DB-Zeilen/Pfade melden
+statt HTTP 500. CommandRunner: stream_select, Haenger vorher per Test nachgewiesen.
+Honigtopf: Selbsttest-Zeilen zaehlen beim "behalten"-Vergleich mit, Tage 19.-23.09. werden
+neu gerechnet. Kleinkram: mkdir-Pruefung in Database, toter Import. 699 Tests gruen.

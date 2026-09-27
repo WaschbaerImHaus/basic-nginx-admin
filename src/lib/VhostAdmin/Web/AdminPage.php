@@ -22,6 +22,9 @@ use VhostAdmin\VhostRepository;
 
 final class AdminPage
 {
+	/** @var list<string> Meldungen über ungültige Datenbankeinträge (siehe problems()) */
+	private array $problems = [];
+
 	/** @var array<string, mixed> */
 	private array $session;
 
@@ -284,15 +287,44 @@ final class AdminPage
 	 */
 	public function vhosts(): array
 	{
-		return $this->repository->all();
+		$result = $this->repository->allReadable();
+		foreach ($result['broken'] as $problem) {
+			$this->problem('Ungültiger Eintrag in der Datenbank – ' . $problem);
+		}
+		return $result['vhosts'];
 	}
 
 	/**
-	 * Einzelner vHost nach Name, oder null, wenn unbekannt.
+	 * Einzelner vHost nach Name, oder null, wenn unbekannt oder ungültig (dann mit
+	 * Meldung in problems()).
 	 */
 	public function vhost(string $name): ?Vhost
 	{
-		return $this->repository->byName($name);
+		try {
+			return $this->repository->byName($name);
+		} catch (\RuntimeException $e) {
+			$this->problem($name . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Was beim Lesen nicht stimmte (ungültige Datenbankeinträge). Die Oberfläche zeigt
+	 * es an, statt mit HTTP 500 abzubrechen.
+	 *
+	 * @return list<string>
+	 */
+	public function problems(): array
+	{
+		return $this->problems;
+	}
+
+	/** Meldung merken, jede nur einmal. */
+	private function problem(string $message): void
+	{
+		if (!in_array($message, $this->problems, true)) {
+			$this->problems[] = $message;
+		}
 	}
 
 	/**
@@ -302,7 +334,14 @@ final class AdminPage
 	 */
 	public function users(Vhost $vhost): array
 	{
-		return $this->repository->users($vhost->id);
+		try {
+			return $this->repository->users($vhost->id);
+		} catch (\RuntimeException $e) {
+			// Ein manipulierter Schutzpfad: melden, nicht abbrechen. In die nginx-
+			// Konfiguration kommt er nie – das CLI bricht beim Rendern ab.
+			$this->problem($vhost->name . ': ' . $e->getMessage());
+			return [];
+		}
 	}
 
 	/**

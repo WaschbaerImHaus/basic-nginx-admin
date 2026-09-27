@@ -69,7 +69,10 @@ final class Analyzer
 				$result['skipped'][] = $date;
 				continue;
 			}
-			if ($stored !== null && $stored['requests'] > count($entries)) {
+			// Mehr gespeichert, als die Logs noch hergeben: Ein Teil ist schon rotiert.
+			// Übersprungene Selbsttests zählen dabei mit – sie fehlen nicht, sie zählen
+			// nur nicht mehr (ein alter Stand enthielt sie noch).
+			if ($stored !== null && $stored['requests'] > count($entries) + ($parsed->local[$date] ?? 0)) {
 				$result['kept'][] = $date;
 				continue;
 			}

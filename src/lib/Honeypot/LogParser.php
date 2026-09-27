@@ -22,6 +22,7 @@ final class LogParser
 	public function parse(array $lines): ParsedLog
 	{
 		$days = [];
+		$local = [];
 		$unreadable = 0;
 		foreach ($lines as $line) {
 			if (trim($line) === '') {
@@ -34,6 +35,7 @@ final class LogParser
 			}
 			// Aufrufe vom Rechner selbst sind Prüfungen, kein Angriff.
 			if (self::isLocal($entry->ip)) {
+				$local[$entry->date] = ($local[$entry->date] ?? 0) + 1;
 				continue;
 			}
 			$days[$entry->date][] = $entry;
@@ -47,7 +49,7 @@ final class LogParser
 			usort($entries, static fn(LogEntry $a, LogEntry $b): int => $a->timestamp <=> $b->timestamp);
 			$days[$date] = $entries;
 		}
-		return new ParsedLog($days, $unreadable);
+		return new ParsedLog($days, $unreadable, $local);
 	}
 
 	/**
