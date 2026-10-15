@@ -79,6 +79,26 @@ Server-Ebene. So lässt sich ein eigenes `location /` einsetzen, ohne dass nginx
 `duplicate location "/"` abbricht – genau der Fall, der beim Kopieren einer fremden
 Konfiguration auftritt.
 
+**Reverse-Proxy: `location ^~ /` statt `location /`.** Der Generator legt für Dateiendungen
+eigene Blöcke an (`location ~* \.(?:css|js|mjs)$` für die Cache-Zeiten, ebenso für Bilder,
+Schriften und `.html`). nginx bevorzugt solche Regex-Blöcke vor einem einfachen
+`location /` – bei einem Proxy werden `.css`, `.js` und Bilder dann im lokalen Docroot
+gesucht und enden mit 404 (im `error.log`: `open() "…/web/src/www/static/…" failed`).
+Mit `^~` hört nginx nach diesem Präfix auf, Regex-Blöcke zu prüfen; alles geht an den
+Zielserver:
+
+```nginx
+location ^~ / {
+    proxy_pass http://192.168.x.y:80;
+    proxy_set_header Host $host;
+    # …
+}
+```
+
+Der Verzeichnisschutz gilt weiter (er steht auf Server-Ebene). Die lokalen Regeln „versteckte
+Dateien sperren“ und „`.php` → 404“ greifen für diesen Host dann nicht mehr – solche Anfragen
+beantwortet der Zielserver.
+
 ## Eigene nginx-Direktiven
 
 Auf der Detailseite eines vHosts gibt es unter „Eigene nginx-Direktiven“ ein Textfeld.
