@@ -46,6 +46,7 @@ umsetzbaren Vorschlags. Bleibt kein Pfad übrig, ist der Vorschlag nicht umsetzb
   - `angenommen`: „angenommen – wird am TT.MM. umgesetzt“ + Knopf **zurücknehmen**
   - `in Arbeit`: „wird gerade umgesetzt“
   - `pausiert`: „pausiert (Nutzungslimit), geht um HH:MM weiter“
+  - `gebaut`: „gebaut, wird installiert“
   - `umgesetzt`: „umgesetzt in Build N“
   - `gescheitert`: „gescheitert: <Grund>“ + Knopf **erneut annehmen**
   - `verschoben`: „verschoben auf TT.MM.: <Grund>“
@@ -75,7 +76,7 @@ umsetzbaren Vorschlags. Bleibt kein Pfad übrig, ist der Vorschlag nicht umsetzb
 | `text` | Anzeigetext zum Zeitpunkt der Annahme (nur Anzeige, nie Arbeitsanweisung) |
 | `accepted_at` | Zeitpunkt der Annahme |
 | `due` | Tag der Umsetzung (Annahmetag + 1, Europe/Berlin) |
-| `status` | `angenommen`, `in Arbeit`, `pausiert`, `umgesetzt`, `gescheitert`, `verschoben`, `zurückgenommen` |
+| `status` | `angenommen`, `in Arbeit`, `pausiert`, `gebaut`, `umgesetzt`, `gescheitert`, `verschoben`, `zurückgenommen` |
 | `session_id` | Claude-Sitzung zum Fortsetzen |
 | `base` | Commit, auf dem die Umsetzung begann |
 | `resume_at` | frühester Zeitpunkt der Fortsetzung |
@@ -93,11 +94,24 @@ durch Limits unterbrochen werden und müssen dann 5 h später fortgesetzt werden
 angefangene Arbeit bleibt erhalten, wird in **derselben Claude-Sitzung** fortgesetzt, und es läuft
 immer nur **eine** Umsetzung.
 
-**Zeitplan:** `vhost-admin-accepted.timer` stündlich um `:17`, `Persistent=true`; Dienst als Benutzer
-`user` (Besitzer des Repos und der Claude-Anmeldung), Sperre per `flock` (nie zwei Läufe zugleich).
-Umgebung aus `/etc/default/vhost-admin-accepted`: `REPO=/home/user/vhost-admin`,
-`WORKTREE=/home/user/vhost-admin-auto`, `CLAUDE=/home/user/.local/bin/claude`, Ansichtshost,
-`START_HOUR=9` (neue Umsetzungen beginnen frühestens um diese Stunde). Skript `honeypot/apply-accepted.php`.
+**Zeitplan und Rechte (zwei Dienste):** `vhost-admin-accepted.timer` stündlich um `:17`,
+`Persistent=true`, startet `vhost-admin-accepted.service` (root). Dieser verlangt vorher
+`vhost-admin-accepted-work.service` (`Requires=`/`After=`):
+
+- **Arbeitsdienst** (`…-work.service`): Benutzer `user` (Besitzer von Repo und Claude-Anmeldung),
+  `NoNewPrivileges=yes` – `sudo` ist darin **technisch** wirkungslos, nicht nur verboten. Wer
+  `phpunit` oder `php` ausführen darf, kann beliebigen Code ausführen; ohne diese Sperre wäre das
+  über das passwortlose `sudo` des Benutzers root. `ProtectSystem=strict`, Schreibrecht nur auf
+  Worktree, `.git` des Repos, `~/.claude`, `private/honeypot-accepted/`, Protokoll.
+  Aufgabe: Schritte 1–8 und `./build.sh --no-push` (Status `gebaut`).
+- **Installationsdienst** (`vhost-admin-accepted.service`, root): übernimmt Einträge mit Status
+  `gebaut` – Installation, Smoke-Test, Push (git-Befehle per `runuser -u <besitzer>`), bzw. Fehlerweg.
+
+Sperre per `flock`, nie zwei Läufe zugleich. Umgebung aus `/etc/default/vhost-admin-accepted`:
+`REPO=/home/user/vhost-admin`, `WORKTREE=/home/user/vhost-admin-auto`,
+`CLAUDE=/home/user/.local/bin/claude`, `RUN_AS=user`, `START_HOUR=9` (neue Umsetzungen beginnen
+frühestens um diese Stunde); der Ansichtshost kommt aus `/etc/default/vhost-admin-honeypot`.
+Skript `honeypot/apply-accepted.php work|install`.
 
 **Je Lauf genau eine Aktion:**
 
@@ -130,10 +144,15 @@ Umgebung aus `/etc/default/vhost-admin-accepted`: `REPO=/home/user/vhost-admin`,
 **Abschließen** (Claude meldet Erfolg, kein Limit):
 
 8. Prüfen ohne Vertrauen in die Antwort: mindestens ein neuer Commit seit `base`, Arbeitsbaum sauber,
-   `src/build.txt` unverändert. Hat sich `origin/main` inzwischen bewegt: `git rebase origin/main`
+   `src/build.txt` unverändert, und **jede geänderte Datei liegt in der Freigabeliste der Art**
+   (`decoy`: `src/lib/Honeypot/`, `src/public/honeypot/`, `honeypot/` ohne `*.sh`, `tests/`,
+   `docs/`, `dev-log/`, `research/`, `README.md`, `FEATURES.md`, `BUGS.md`, `OPTIMIZE.md`,
+   `MEMORY.md`, `.claude/CLAUDE.md`). Installer, Smoke-Test, `build.sh`, `src/etc/`, die Verwaltung
+   (`src/lib/VhostAdmin/`) und `phpunit.xml` sind damit ausgeschlossen. Hat sich `origin/main` inzwischen bewegt: `git rebase origin/main`
    (Konflikt → Fehler).
-9. Im Worktree: `./build.sh --no-push` (Tests, Buildnummer, Paket, Commit „Build N“), dann
-   `sudo ./install.sh` und `sudo ./debugging/smoke-test.sh` **aus dem Worktree**. Erfolg →
+9. Im Worktree (Arbeitsdienst): `./build.sh --no-push` (Tests, Buildnummer, Paket, Commit „Build N“)
+   → Status `gebaut`. Danach (Installationsdienst, root): `./install.sh` und
+   `./debugging/smoke-test.sh` **aus dem Worktree**. Erfolg →
    `git push origin HEAD:main`, Status `umgesetzt`, `result = N`; Arbeitskopie des Nutzers per
    `git pull --ff-only` nachziehen, wenn sie sauber auf `main` steht (sonst stehen lassen);
    Worktree und Branch entfernen.
@@ -157,7 +176,13 @@ Umsetzung ab 09:17 verbraucht daher Kontingent aus dem Fenster, in dem der Nutze
 
 - Pfade stammen von Scannern (Fremde). Sie erreichen den Auftrag nur geprüft (3.) und als Daten (6.5).
   Der Anzeigetext erreicht den Lauf nie.
-- Claude im Lauf hat weder `sudo` noch Push noch `build.sh`; das macht das Skript nach eigener Prüfung.
+- Claude im Lauf hat weder Push noch `build.sh`; `sudo` ist durch `NoNewPrivileges` im Arbeitsdienst
+  technisch gesperrt. Installation und Push macht ein getrennter Dienst nach eigener Prüfung.
+- Geänderte Dateien müssen in der Freigabeliste der Art liegen (6.8).
+- **Restrisiko** (kommt nach `SECURITY_RISKS.md`): Code unter `src/lib/Honeypot/` und `honeypot/`
+  läuft nach der Installation als root (stündliche Auswertung). Eine eingeschleuste Anweisung, die
+  Claude befolgt, könnte dort landen. Gegenmittel: strenge Pfadprüfung, Daten nur im markierten Block,
+  jeder Vorschlag muss vom Nutzer angenommen werden.
 - POST nur gleiche Herkunft + HMAC-Token; nur angezeigte Schlüssel; Verzeichnisschutz davor.
 - Die Ansicht bekommt Schreibrecht nur auf `private/honeypot-accepted/`.
 - Immer nur eine Umsetzung zugleich; Grenzen siehe 6.
