@@ -1,4 +1,4 @@
-# Honigtopf: Vorschläge annehmen – Entwurf
+# Honigtopf: Vorschläge annehmen und Langzeit-Vorschläge – Entwurf
 
 Stand: 2026-10-15 · Autor: Kurt Ingwer · Status: im Gespräch freigegeben („passt so“), schriftliche Durchsicht ausstehend
 
@@ -65,8 +65,9 @@ umsetzbaren Vorschlags. Bleibt kein Pfad übrig, ist der Vorschlag nicht umsetzb
   `accepted.sqlite` (`660`) und `secret` (32 Zufallsbytes, `640`, legt der Installer an).
   Nicht unter `private/honeypot/`: `install-dashboard.sh` setzt dort alles auf `640`.
 - Die Auswertungs-Datenbank `private/honeypot/honeypot.sqlite` bleibt **nur lesbar** für die Ansicht.
-- Die Ansicht setzt vor dem Schreiben `umask(0007)`, damit Journaldateien für den Lauf (Benutzer
-  `user`) lesbar und schreibbar bleiben. Journalmodus `DELETE`, nicht WAL.
+- Die Ansicht und der Lauf setzen vor dem Öffnen `umask(0007)`. Journalmodus `PERSIST`: Die
+  Journaldatei legt der Installer einmal an (`<owner>:<poolgruppe> 0660`) und bleibt danach stehen –
+  sonst gehörte ein vom Pool angelegtes Journal dem Pool-Benutzer und wäre für den Lauf unlesbar.
 - Tabelle `accepted`:
 
 | Spalte | Inhalt |
@@ -165,8 +166,7 @@ Skript `honeypot/apply-accepted.php work|install`.
     Worktree und Branch entfernen. Status `gescheitert`, `result` = Grund (höchstens 300 Zeichen).
 
 **Grenzen:** je Claude-Aufruf 2 h; höchstens 6 Fortsetzungen; ist eine Umsetzung nach 3 Tagen nicht
-fertig → Fehler „nicht fertig geworden“. Protokoll je Lauf nach `/var/log/vhost-admin/accepted.log`
-(rotiert, 14 Tage).
+fertig → Fehler „nicht fertig geworden“. Protokoll im Journal (`journalctl -u 'vhost-admin-accepted*'`).
 
 **Hinweis Kontingent:** Lauf und Sitzungen des Nutzers teilen sich dasselbe Nutzungslimit. Eine
 Umsetzung ab 09:17 verbraucht daher Kontingent aus dem Fenster, in dem der Nutzer selbst arbeitet;
@@ -205,4 +205,50 @@ Umsetzung ab 09:17 verbraucht daher Kontingent aus dem Fenster, in dem der Nutze
 
 ## 9. Nicht Teil dieses Entwurfs
 
-Weitere Vorschlagsarten (je neue Vorlage nötig), Benachrichtigung per Mail, Ablehnen-Knopf.
+Weitere Vorschlagsarten über die in Teil 2 genannten hinaus, Benachrichtigung per Mail, Ablehnen-Knopf,
+Wochentags-Vergleiche (solange die Laufzeit des Rechners unbekannt ist, siehe 11.4).
+
+---
+
+# Teil 2: Langzeit-Vorschläge
+
+Nutzerwunsch (2026-10-15): „verbessere ‚was sich als nächstes lohnt‘ damit, dass du den abgelaufenen
+Monat / Quartal / Jahr in Summe nochmal ansiehst.“ Gewählt wurden alle vier vorgeschlagenen Regeln.
+
+## 10. Zeiträume
+
+`Honeypot\Horizons::completed($today, $bounds)` liefert den letzten **abgeschlossenen** Monat,
+das letzte Quartal und das letzte Jahr vor `$today` – nur solche, die mit den vorhandenen Daten
+(`bounds`) überlappen. Bezeichnung: „im September 2026“, „im 3. Quartal 2026“, „im Jahr 2026“,
+dazu die Abdeckung „(Daten an N von M Tagen)“.
+
+## 11. Regeln (`Honeypot\LongTermSuggestions`)
+
+Je Zeitraum, in der Reihenfolge Monat → Quartal → Jahr; ein Vorschlag mit gleichem Schlüssel
+erscheint nur einmal (der kürzeste Zeitraum gewinnt). Die Tagesregel aus Teil 1 bleibt und kommt zuerst.
+
+1. **Köder aus der Zeitraumsumme** (`decoy`, annehmbar): dieselbe Regel wie für den gewählten Tag –
+   gesuchte Zugangsdaten ohne Köder, Summe ≥ 5 –, aber über den ganzen Zeitraum summiert.
+2. **Wiederkehrende Familie** (`decoy`, annehmbar): eine Scannerfamilie (`ScanFamilies::group` über
+   die Sitzungen des Zeitraums) mit ≥ 4 Sitzungen an ≥ 3 Tagen. Text: Sitzungen, Tage, Zeitmuster,
+   Zahl der Kennungen, Anfragen je Sitzung. Parameter: bis zu 3 ihrer gemeinsamen Pfade, die
+   Zugangsdaten suchen und noch keinen Köder haben. Hat sie keine solchen Pfade, kein Vorschlag.
+3. **Köder ohne Rückkanal** (`canary`, annehmbar): ≥ 50 Kennungen im Zeitraum ausgegeben, keine
+   einzige benutzt. Vorschlag: erfundene Zugangsdaten enthalten Hostnamen `<art>-<kennung>.<honigtopf-host>`;
+   die Auswertung erkennt eine Kennung künftig auch im `Host`-Kopf einer Anfrage. Der Text sagt
+   ausdrücklich, dass dafür ein Wildcard-DNS-Eintrag und ein Catch-all-vHost nötig sind, die **der
+   Nutzer** setzt – der Lauf ändert keine nginx- oder DNS-Einstellungen.
+4. **Beobachtungslücke** (`info`, nicht annehmbar; nur für den Monat): mindestens 300 Anfragen im
+   Zeitraum und mindestens 3 Stunden des Tages ohne eine einzige Anfrage. Text nennt die Stunden
+   („00–07 Uhr“) und den Anteil und weist darauf hin, dass Vergleiche nach Uhrzeit oder Wochentag
+   dadurch verzerrt sind (der Rechner ist nachts aus).
+
+Annehmbar sind damit die Arten `decoy` und `canary`; je Art gibt es eine Vorlage
+(`honeypot/templates/<art>.md`). Die Freigabeliste der Pfade (6.8) gilt für beide.
+
+## 12. Tests (zusätzlich zu 8.)
+
+- `Horizons`: Monat/Quartal/Jahr am Monatsanfang, Jahreswechsel, ohne Daten → leer, Abdeckung.
+- `LongTermSuggestions` gegen eine Test-Datenbank: Summe über Tage löst aus, wo kein Einzeltag es tut;
+  Familie mit 4 Sitzungen an 3 Tagen löst aus, mit 3 an 2 nicht; Rückkanal bei 50/0 ja, bei 50/1 und
+  49/0 nein; Lücke mit 300 Anfragen und 3 leeren Stunden ja, mit 299 nein; gleicher Schlüssel nur einmal.
