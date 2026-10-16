@@ -9,12 +9,13 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-27 15:10
+ * @version Letzte Änderung: 2026-10-16 16:15
  */
 
 namespace VhostAdmin;
 
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\Nginx\ProxyProtocol;
 use VhostAdmin\Nginx\ReloaderInterface;
 use VhostAdmin\Ssl\CertbotInterface;
 use VhostAdmin\Ssl\ReachabilityChecker;
@@ -84,6 +85,11 @@ final class VhostService
 	 */
 	public function createLocal(Port $port, ?SubDirectory $subdir, bool $protect = true): Vhost
 	{
+		// Die Tunnelports lauschen öffentlich; ein localhost-Host auf demselben Port
+		// ließe nginx nicht mehr laden.
+		if ($this->proxyProtocol()->usesPort($port->value)) {
+			throw new \InvalidArgumentException("Port {$port->value} ist für das PROXY-Protokoll belegt");
+		}
 		return $this->create('localhost:' . $port->value, VhostKind::Localhost, $port->value, $subdir, $protect);
 	}
 
@@ -463,6 +469,106 @@ final class VhostService
 		$this->renderAll();
 	}
 
+	/**
+	 * Einstellung PROXY-Protokoll (Standard: aus), siehe Nginx\ProxyProtocol.
+	 */
+	public function proxyProtocol(): ProxyProtocol
+	{
+		return ProxyProtocol::fromSettings(
+			$this->repository->setting('proxy_protocol'),
+			$this->repository->setting('proxy_from'),
+			$this->repository->setting('proxy_ports')
+		);
+	}
+
+	/**
+	 * PROXY-Protokoll setzen: speichern, realip.conf und alle Hosts neu schreiben, neu laden.
+	 *
+	 * Scheitert der Reload (z. B. ein Tunnelport ist schon belegt), kommen Einstellung,
+	 * Server-Konfigurationen und realip.conf (byte-genau, auch eine von Hand
+	 * geschriebene) auf den vorherigen Stand zurück.
+	 *
+	 * @throws \InvalidArgumentException wenn ein localhost-Host einen Tunnelport belegt
+	 * @throws \RuntimeException wenn der Reload scheitert (nach Rücknahme)
+	 */
+	public function setProxyProtocol(ProxyProtocol $proxy): void
+	{
+		if ($proxy->enabled) {
+			foreach ($this->repository->all() as $vhost) {
+				if ($vhost->isLocal() && $vhost->port !== null && $proxy->usesPort($vhost->port)) {
+					throw new \InvalidArgumentException("Port {$vhost->port} gehört schon dem Host {$vhost->name}");
+				}
+			}
+		}
+		$beforeSettings = [
+			'proxy_protocol' => $this->repository->setting('proxy_protocol'),
+			'proxy_from' => $this->repository->setting('proxy_from'),
+			'proxy_ports' => $this->repository->setting('proxy_ports'),
+		];
+		$previousRealIp = $this->readIfExists($this->config->realIpConf);
+		$this->storeSettings($proxy->settings());
+		try {
+			$this->renderAll();
+		} catch (\Throwable $e) {
+			$this->storeSettings($beforeSettings);
+			try {
+				// Hosts wieder auf den alten Stand schreiben; den Reload-Fehler davon
+				// ignorieren – die ursprüngliche Meldung ist die wichtigere.
+				foreach ($this->repository->all() as $vhost) {
+					$this->render($vhost, false);
+				}
+			} finally {
+				$this->restoreFile($this->config->realIpConf, $previousRealIp);
+			}
+			// Wurde der Reload nur nicht bestätigt, liest nginx womöglich doch die neue
+			// Fassung – ein weiterer Reload bringt es auf den wiederhergestellten Stand.
+			try {
+				$this->reloader->reload();
+			} catch (\Throwable) {
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Mehrere Einstellungen schreiben (null löscht).
+	 *
+	 * @param array<string, ?string> $values
+	 */
+	private function storeSettings(array $values): void
+	{
+		foreach ($values as $key => $value) {
+			$this->repository->setSetting($key, $value);
+		}
+	}
+
+	/**
+	 * realip.conf auf den Stand der Einstellung bringen. Ausgeschaltet wird nur eine
+	 * Datei entfernt, die vhost-admin selbst erzeugt hat – eine von Hand geschriebene
+	 * bleibt stehen. Eingeschaltet wird sie übernommen (ersetzt), denn zwei
+	 * real_ip_header auf http-Ebene ließen nginx nicht laden.
+	 */
+	private function writeRealIpConf(ProxyProtocol $proxy): void
+	{
+		$file = $this->config->realIpConf;
+		$current = $this->readIfExists($file);
+		$wanted = $proxy->httpConfig();
+		if ($wanted === null) {
+			if ($current !== null && ProxyProtocol::isGenerated($current)) {
+				unlink($file);
+			}
+			return;
+		}
+		if ($current === $wanted) {
+			return;
+		}
+		if (!is_dir(dirname($file))) {
+			mkdir(dirname($file), 0755, true);
+		}
+		file_put_contents($file, $wanted);
+		@chmod($file, 0644);
+	}
+
 	public function letsEncryptEmail(): ?string
 	{
 		return $this->repository->setting(self::SETTING_EMAIL);
@@ -521,12 +627,16 @@ final class VhostService
 
 		file_put_contents($authSnippet, $this->renderer->authSnippet($vhost));
 
+		// Die PHP-Zeile des PROXY-Protokolls braucht $vhostadmin_public_port aus realip.conf.
+		$proxy = $this->proxyProtocol();
+		$this->writeRealIpConf($proxy);
 		// Die IP-Freigaben stehen seit 2026-09-25 im geo-Block der Server-Konfiguration.
 		file_put_contents($available, $this->renderer->serverConfig(
 			$vhost,
 			$this->hstsEnabled(),
 			$this->repository->ips((int)$vhost->id),
-			$users
+			$users,
+			$proxy
 		));
 		// Ein zum Entfernen vorgemerkter vHost darf durch ein Neuschreiben (z.B. aus
 		// install.sh oder renderAll()) nicht wieder aktiv werden.
@@ -1163,6 +1273,8 @@ final class VhostService
 	 */
 	public function renderAll(): void
 	{
+		// Zuerst die http-Ebene: Die Server-Blöcke benutzen $vhostadmin_public_port aus ihr.
+		$this->writeRealIpConf($this->proxyProtocol());
 		foreach ($this->repository->all() as $vhost) {
 			$this->render($vhost, false);
 		}

@@ -8,7 +8,7 @@ declare(strict_types=1);
  * erzeugen per fromArray() eine Konfiguration mit temporären Verzeichnissen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 20:35
+ * @version Letzte Änderung: 2026-10-16 16:10
  */
 
 namespace VhostAdmin;
@@ -36,6 +36,8 @@ final class Config
 	 * @param string $fpmBinary       php-fpm-Programm für "php-fpm -t" (heißt php-fpm<version>)
 	 * @param int    $removalGraceMinutes Minuten, die ein entfernter vHost gesperrt liegen
 	 *                                    bleibt, bevor er endgültig verschwindet
+	 * @param string $realIpConf      http-Datei für das PROXY-Protokoll (set_real_ip_from,
+	 *                                real_ip_header); Standard: conf.d neben sites-available
 	 */
 	public function __construct(
 		public readonly string $dbPath,
@@ -57,6 +59,7 @@ final class Config
 		public readonly string $fastcgiParams,
 		public readonly string $fpmBinary,
 		public readonly int $removalGraceMinutes,
+		public readonly string $realIpConf,
 	) {
 	}
 
@@ -101,12 +104,20 @@ final class Config
 			// – die beiden Namen sind nicht dieselbe Reihenfolge, deshalb zwei Schlüssel.
 			'fpmBinary' => '/usr/sbin/php-fpm' . self::phpFpmVersion(),
 			'removalGraceMinutes' => 60,
+			// Leer = aus sitesAvailable abgeleitet (siehe unten).
+			'realIpConf' => '',
 		];
 		$unknown = array_diff_key($values, $defaults);
 		if ($unknown !== []) {
 			throw new \InvalidArgumentException('Unbekannte Konfigurationsschlüssel: ' . implode(', ', array_keys($unknown)));
 		}
-		return new self(...array_merge($defaults, $values));
+		$merged = array_merge($defaults, $values);
+		// Neben sites-available statt fest /etc/nginx: Tests mit eigenem sites-available
+		// schreiben so nie ins echte conf.d.
+		if ($merged['realIpConf'] === '') {
+			$merged['realIpConf'] = dirname((string)$merged['sitesAvailable']) . '/conf.d/realip.conf';
+		}
+		return new self(...$merged);
 	}
 
 	/**

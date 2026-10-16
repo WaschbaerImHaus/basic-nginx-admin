@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Erzeugung der nginx-Konfiguration.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-19 14:12
+ * @version Letzte Änderung: 2026-10-16 16:00
  */
 
 namespace Tests\Nginx;
@@ -14,6 +14,8 @@ use PHPUnit\Framework\TestCase;
 use VhostAdmin\Auth\AccessAreas;
 use VhostAdmin\Config;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\Nginx\ProxyProtocol;
+use VhostAdmin\Value\Cidr;
 use VhostAdmin\Vhost;
 use VhostAdmin\VhostKind;
 use VhostAdmin\VhostLayout;
@@ -568,5 +570,85 @@ final class ConfigRendererTest extends TestCase
 		$out = $this->renderer()->serverConfig($v);
 		self::assertStringNotContainsString('www.', $out);
 		self::assertSame(1, substr_count($out, 'server {'));
+	}
+
+	private static function proxyOn(): ProxyProtocol
+	{
+		return ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString('10.200.0.1')]);
+	}
+
+	/**
+	 * PROXY-Protokoll aus (Standard): Die Konfiguration ist dieselbe wie ohne Angabe.
+	 */
+	public function testProxyProtocolOffChangesNothing(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true, true);
+		$off = ProxyProtocol::fromSettings('off', '10.200.0.1', '8081,8444');
+		self::assertSame($this->renderer()->serverConfig($v), $this->renderer()->serverConfig($v, true, [], [], $off));
+	}
+
+	/**
+	 * Ohne Zertifikat: Der :80-Block lauscht zusätzlich auf 8081 mit PROXY-Protokoll;
+	 * 80 bleibt unverändert, damit lokale Aufrufe und der Smoke-Test weiter gehen.
+	 */
+	public function testProxyProtocolAddsHttpPortToPlainHost(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, false);
+		$out = $this->renderer()->serverConfig($v, true, [], [], self::proxyOn());
+		self::assertStringContainsString("    listen 80;
+    listen [::]:80;
+    listen 8081 proxy_protocol;
+    port_in_redirect off;
+", $out);
+		self::assertStringNotContainsString('8444', $out);
+	}
+
+	/**
+	 * Mit Zertifikat und Nebenname: Umleitungsblock auf 8081, beide 443-Blöcke auf 8444
+	 * (TLS endet hier, nicht auf dem Tunnelserver). QUIC bleibt ohne PROXY-Protokoll.
+	 */
+	public function testProxyProtocolAddsBothPortsToSslHost(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true, false, Vhost::WWW_DEFAULT);
+		$out = $this->renderer()->serverConfig($v, true, [], [], self::proxyOn());
+		self::assertSame(1, substr_count($out, "listen 8081 proxy_protocol;
+"));
+		$servers = substr_count($out, "server {
+");
+		// Jeder 443-Block (Haupt- und ggf. Nebenname) bekommt 8444.
+		self::assertSame($servers - 1, substr_count($out, "    listen 8444 ssl proxy_protocol;
+"));
+		self::assertStringContainsString("    listen [::]:443 ssl;
+    listen 8444 ssl proxy_protocol;
+    port_in_redirect off;
+", $out);
+		self::assertStringNotContainsString('quic proxy_protocol', $out);
+		self::assertSame($servers, substr_count($out, "port_in_redirect off;
+"));
+	}
+
+	/**
+	 * PHP bekommt den öffentlichen Port, nicht 8081/8444 – sonst bauen Anwendungen
+	 * Adressen mit ":8444" zusammen. Die Zeile muss NACH fastcgi_params stehen.
+	 */
+	public function testProxyProtocolGivesPhpThePublicPort(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true, true);
+		$out = $this->renderer()->serverConfig($v, true, [], [], self::proxyOn());
+		$include = strpos($out, 'include /etc/nginx/fastcgi_params;');
+		$param = strpos($out, 'fastcgi_param SERVER_PORT $vhostadmin_public_port;');
+		self::assertNotFalse($include);
+		self::assertNotFalse($param);
+		self::assertGreaterThan($include, $param);
+	}
+
+	/**
+	 * localhost-Hosts lauschen nur auf 127.0.0.1 – das PROXY-Protokoll betrifft sie nicht.
+	 */
+	public function testProxyProtocolLeavesLocalHostsAlone(): void
+	{
+		$v = new Vhost(1, 'localhost:3000', VhostKind::Localhost, 3000, null, true, false, true);
+		$plain = $this->renderer()->serverConfig($v);
+		self::assertSame($plain, $this->renderer()->serverConfig($v, true, [], [], self::proxyOn()));
 	}
 }

@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 15:21
+ * @version Letzte Änderung: 2026-10-16 16:25
  */
 
 namespace VhostAdmin\Cli;
@@ -50,6 +50,9 @@ vhost – nginx-vHosts verwalten
   vhost cert-extend <name>              (www.<domain> in ein bestehendes Zertifikat nachtragen)
   vhost set le_email <adresse>
   vhost set hsts on|off                 (HSTS wirkt im Browser monatelang nach)
+  vhost set proxy_protocol on <ip[,ip]> [http-port https-port] | off
+                                        (Tunnel mit PROXY-Protokoll; Standardports 8081/8444,
+                                         80/443 bleiben; "on" ohne Adresse = gespeicherte)
   vhost check-acme [name]
   vhost www <name> bare|www             (wohin umgeleitet wird; nur Hauptdomains)
   vhost subdir <name> [unterordner]     (leer = Docroot ist web/; Inhalt zieht mit)
@@ -321,8 +324,12 @@ TXT;
 						. " (alle Hosts neu geschrieben).\n");
 					return 0;
 				}
+				if ($key === 'proxy_protocol') {
+					$this->setProxyProtocol($onOff($arg(1, 'on|off')), array_slice($positional, 2));
+					return 0;
+				}
 				if ($key !== 'le_email') {
-					throw new \RuntimeException("Unbekannte Einstellung: $key (bekannt: le_email, hsts)");
+					throw new \RuntimeException("Unbekannte Einstellung: $key (bekannt: le_email, hsts, proxy_protocol)");
 				}
 				$this->service->setLetsEncryptEmail($positional[1] ?? '');
 				$this->out("Gespeichert.\n");
@@ -448,6 +455,42 @@ TXT;
 				$this->err(self::USAGE);
 				return 2;
 		}
+	}
+
+	/**
+	 * "vhost set proxy_protocol on <ip[,ip]> [http-port https-port]" bzw. "off".
+	 *
+	 * @param list<string> $rest Argumente nach on|off
+	 * @throws \InvalidArgumentException bei ungültigen Adressen oder Ports
+	 */
+	private function setProxyProtocol(bool $on, array $rest): void
+	{
+		$current = $this->service->proxyProtocol();
+		if (!$on) {
+			$this->service->setProxyProtocol($current->disable());
+			$this->out("PROXY-Protokoll deaktiviert (alle Hosts neu geschrieben).\n");
+			return;
+		}
+		if (count($rest) !== 0 && count($rest) !== 1 && count($rest) !== 3) {
+			throw new \InvalidArgumentException('Erwartet: vhost set proxy_protocol on <ip[,ip]> [http-port https-port]');
+		}
+		$trusted = null;
+		if (isset($rest[0])) {
+			$trusted = array_map(static fn (string $raw): Cidr => Cidr::fromString($raw), explode(',', $rest[0]));
+		}
+		$ports = [null, null];
+		if (count($rest) === 3) {
+			foreach ([1, 2] as $i) {
+				if (!ctype_digit($rest[$i])) {
+					throw new \InvalidArgumentException("Ungültiger Port: {$rest[$i]}");
+				}
+				$ports[$i - 1] = (int)$rest[$i];
+			}
+		}
+		$this->service->setProxyProtocol($current->enable($trusted, $ports[0], $ports[1], $this->config->adminPort));
+		$p = $this->service->proxyProtocol();
+		$this->out("PROXY-Protokoll aktiviert: zusätzlich Port {$p->httpPort} (HTTP) und {$p->httpsPort} (HTTPS), vertraut "
+			. implode(', ', array_map('strval', $p->trusted)) . " (alle Hosts neu geschrieben).\n");
 	}
 
 	/**

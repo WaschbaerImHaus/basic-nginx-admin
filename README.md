@@ -328,6 +328,69 @@ printf 'meins\n' | sudo vhost user-add <name> <benutzer>
 
 HTTP wird danach auf HTTPS umgeleitet; die Verlängerung übernimmt der certbot-Timer, nginx wird per Deploy-Hook neu geladen.
 
+## Echte Client-Adressen über einen Tunnel (PROXY-Protokoll)
+
+Kommt der öffentliche Verkehr über einen Tunnelserver mit Adressumsetzung (z. B. WireGuard
+mit MASQUERADE), steht in jedem Log die Tunneladresse. Ein `X-Forwarded-For` kann der
+Tunnelserver nicht setzen – er sieht bei HTTPS nur verschlüsselte Daten. Das PROXY-Protokoll
+reicht die Verbindung unverändert durch (TLS endet weiter hier, die Zertifikate bleiben hier)
+und stellt ihr eine Zeile mit der echten Adresse voran.
+
+```
+sudo vhost set proxy_protocol on 10.200.0.1               # Tunneladresse(n), durch Komma getrennt
+sudo vhost set proxy_protocol on 10.200.0.1 9081 9444     # andere Ports statt 8081/8444
+sudo vhost set proxy_protocol off
+```
+
+Eingeschaltet (Standard: aus) passiert Folgendes:
+
+- **Jeder öffentliche Host lauscht zusätzlich** auf `8081` (HTTP) und `8444` (HTTPS, gleiches
+  Zertifikat) mit `proxy_protocol`. **80 und 443 bleiben unverändert**: Ein Port mit
+  `proxy_protocol` weist jede Verbindung ohne PROXY-Zeile ab – direkte Aufrufe aus dem
+  lokalen Netz, `curl` auf dem Rechner und der Smoke-Test gingen sonst nicht mehr.
+- **`/etc/nginx/conf.d/realip.conf`** wird erzeugt: `set_real_ip_from` mit den Tunneladressen
+  (nur ihnen wird die Zeile geglaubt – sonst könnte jeder im lokalen Netz eine beliebige Adresse
+  vortäuschen) und `real_ip_header proxy_protocol`. Danach ist `$remote_addr` überall die echte
+  Adresse: in den Logs, bei IP-Freigaben des Verzeichnisschutzes und für PHP (`REMOTE_ADDR`).
+  Eine von Hand geschriebene `realip.conf` wird dabei übernommen (zwei `real_ip_header` auf
+  http-Ebene ließen nginx nicht laden). Beim Ausschalten wird die Datei nur entfernt, wenn sie
+  von vhost-admin stammt.
+- **Ports in Adressen bleiben die öffentlichen:** `port_in_redirect off` (sonst nennte z. B. die
+  Umleitung `/ordner` → `/ordner/` den Port 8081), und PHP bekommt als `SERVER_PORT` 80/443
+  statt 8081/8444 – Anwendungen bauen sonst Adressen mit `:8444`.
+- Die Tunnelports lauschen nur auf IPv4 (der Tunnel kommt über IPv4). Ein localhost-Host kann
+  sie nicht belegen und umgekehrt. Scheitert der Reload (z. B. Port schon belegt), wird alles
+  zurückgenommen, auch eine vorher vorhandene `realip.conf`.
+
+**Auf dem Tunnelserver** ersetzt ein nginx-`stream`-Block die Portweiterleitung für TCP 80 und
+443 (die DNAT-Regeln für diese beiden TCP-Ports dort entfernen, sonst kommt der Verkehr am
+Proxy vorbei):
+
+```nginx
+# /etc/nginx/nginx.conf auf dem Tunnelserver, auf oberster Ebene (nicht in http {})
+stream {
+    server {
+        listen 80;
+        proxy_pass <LXC-Adresse>:8081;
+        proxy_protocol on;
+    }
+    server {
+        listen 443;
+        proxy_pass <LXC-Adresse>:8444;
+        proxy_protocol on;
+    }
+}
+```
+
+`<LXC-Adresse>` ist die Adresse, auf die heute die DNAT-Regel zeigt; die Verbindung muss von
+der in `set_real_ip_from` eingetragenen Adresse kommen. HTTP/3 (UDP 443) kann kein
+PROXY-Protokoll: Bleibt dafür die alte Weiterleitung, kommen QUIC-Anfragen weiter mit der
+Tunneladresse an (der `Alt-Svc`-Kopf kündigt HTTP/3 auf 443 an).
+
+Prüfen auf dem Rechner: `curl --haproxy-protocol -H 'Host: <domain>' http://127.0.0.1:8081/`
+(ohne `--haproxy-protocol` bricht die Verbindung ab – so soll es sein). Der Smoke-Test prüft
+den Abschnitt, wenn die Einstellung an ist.
+
 ## Kommandozeile
 
 ```
@@ -351,6 +414,7 @@ sudo vhost ssl <name> on|off
 sudo vhost cert-extend <name>                                 # www.<domain> ins bestehende Zertifikat nachtragen
 sudo vhost set le_email <adresse>
 sudo vhost set hsts on|off                                   # HSTS wirkt im Browser nach
+sudo vhost set proxy_protocol on <ip[,ip]> [http https] | off # Tunnel mit PROXY-Protokoll (8081/8444)
 sudo vhost render [name]                                     # nginx-Dateien neu schreiben
 sudo vhost conf <name>                                        # nginx-Snippet per stdin (leer = entfernen)
 sudo vhost conf-show <name>                                   # aktuelles Snippet ausgeben
@@ -401,7 +465,7 @@ aktiv ist. Läuft ein alter Dienst beim Abräumen gerade, wartet der Installer b
 
 ## Entwicklung
 
-- Tests: `phpunit` (516 Tests, Stand 2026-10-16)
+- Tests: `phpunit` (545 Tests, Stand 2026-10-16)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`

@@ -20,6 +20,7 @@ use Tests\Support\TempDir;
 use VhostAdmin\Config;
 use VhostAdmin\Database;
 use VhostAdmin\Nginx\ConfigRenderer;
+use VhostAdmin\Nginx\ProxyProtocol;
 use VhostAdmin\Php\PoolRenderer;
 use VhostAdmin\Value\Cidr;
 use VhostAdmin\Ssl\ReachabilityStatus;
@@ -1451,5 +1452,133 @@ final class VhostServiceTest extends TestCase
 		$this->reloader->failWith = null;
 		$this->service->addUser($v, Username::fromString('bob'), 'geheim-geheim');
 		self::assertCount(2, $this->repo->users((int)$v->id));
+	}
+
+	private function proxyOn(int $http = 8081, int $https = 8444): ProxyProtocol
+	{
+		return $this->service->proxyProtocol()->enable([Cidr::fromString('10.200.0.1')], $http, $https);
+	}
+
+	private function realIp(): string
+	{
+		return $this->dir . '/conf.d/realip.conf';
+	}
+
+	public function testProxyProtocolIsOffByDefault(): void
+	{
+		self::assertFalse($this->service->proxyProtocol()->enabled);
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		self::assertStringNotContainsString('proxy_protocol', (string)file_get_contents($this->dir . '/avail/example.com.conf'));
+		self::assertFileDoesNotExist($this->realIp());
+	}
+
+	/**
+	 * Einschalten: Einstellung gespeichert, alle öffentlichen Hosts neu geschrieben,
+	 * realip.conf angelegt, nginx neu geladen.
+	 */
+	public function testEnablingProxyProtocolRewritesHostsAndWritesRealIp(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		$calls = $this->reloader->calls;
+
+		$this->service->setProxyProtocol($this->proxyOn());
+
+		self::assertTrue($this->service->proxyProtocol()->enabled);
+		self::assertSame('on', $this->repo->setting('proxy_protocol'));
+		self::assertSame('10.200.0.1', $this->repo->setting('proxy_from'));
+		self::assertStringContainsString('listen 8081 proxy_protocol;', (string)file_get_contents($this->dir . '/avail/example.com.conf'));
+		self::assertSame($this->service->proxyProtocol()->httpConfig(), file_get_contents($this->realIp()));
+		self::assertGreaterThan($calls, $this->reloader->calls);
+	}
+
+	/**
+	 * Später angelegte Hosts bekommen die Ports ebenfalls (render() liest die Einstellung).
+	 */
+	public function testNewHostsGetTheProxyPorts(): void
+	{
+		$this->service->setProxyProtocol($this->proxyOn());
+		$this->service->createDomain(DomainName::fromString('neu.example'), null);
+		self::assertStringContainsString('listen 8081 proxy_protocol;', (string)file_get_contents($this->dir . '/avail/neu.example.conf'));
+	}
+
+	/**
+	 * Eine von Hand geschriebene realip.conf wird beim Einschalten übernommen (sonst
+	 * stünde real_ip_header zweimal auf http-Ebene, und nginx lädt nicht). Beim
+	 * Ausschalten verschwindet nur die erzeugte Datei.
+	 */
+	public function testHandWrittenRealIpIsTakenOverAndRemovedOnlyWhenGenerated(): void
+	{
+		mkdir($this->dir . '/conf.d');
+		file_put_contents($this->realIp(), "set_real_ip_from 10.200.0.1;\nreal_ip_header proxy_protocol;\n");
+
+		// Aus: Die Datei des Nutzers bleibt unangetastet.
+		$this->service->setProxyProtocol($this->service->proxyProtocol()->disable());
+		self::assertSame("set_real_ip_from 10.200.0.1;\nreal_ip_header proxy_protocol;\n", file_get_contents($this->realIp()));
+
+		$this->service->setProxyProtocol($this->proxyOn());
+		self::assertTrue(ProxyProtocol::isGenerated((string)file_get_contents($this->realIp())));
+		self::assertSame(1, substr_count((string)file_get_contents($this->realIp()), 'real_ip_header'));
+
+		$this->service->setProxyProtocol($this->service->proxyProtocol()->disable());
+		self::assertFileDoesNotExist($this->realIp());
+		// Adressen bleiben für ein späteres "on" gespeichert.
+		self::assertSame('10.200.0.1', $this->repo->setting('proxy_from'));
+		self::assertSame('off', $this->repo->setting('proxy_protocol'));
+	}
+
+	/**
+	 * Scheitert der Reload (z. B. Port belegt), kommt alles zurück: Einstellung,
+	 * Server-Konfigurationen und die realip.conf des Nutzers – byte-genau.
+	 */
+	public function testFailedReloadRestoresEverything(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		mkdir($this->dir . '/conf.d');
+		file_put_contents($this->realIp(), "# meine\n");
+		$before = file_get_contents($this->dir . '/avail/example.com.conf');
+
+		$this->reloader->failWith = 'bind() to 0.0.0.0:8081 failed';
+		try {
+			$this->service->setProxyProtocol($this->proxyOn());
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertStringContainsString('8081', $e->getMessage());
+		}
+		self::assertFalse($this->service->proxyProtocol()->enabled);
+		self::assertNull($this->repo->setting('proxy_protocol'));
+		self::assertSame($before, file_get_contents($this->dir . '/avail/example.com.conf'));
+		self::assertSame("# meine\n", file_get_contents($this->realIp()));
+	}
+
+	/**
+	 * Ein Tunnelport darf nicht zugleich Port eines localhost-Hosts sein – in beide Richtungen.
+	 */
+	public function testProxyPortsAndLocalPortsExcludeEachOther(): void
+	{
+		$this->service->createLocal(Port::fromString('9081'), null);
+		try {
+			$this->service->setProxyProtocol($this->proxyOn(9081, 9444));
+			self::fail('Ausnahme erwartet');
+		} catch (\InvalidArgumentException $e) {
+			self::assertStringContainsString('9081', $e->getMessage());
+		}
+		self::assertFalse($this->service->proxyProtocol()->enabled);
+
+		$this->service->setProxyProtocol($this->proxyOn());
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('PROXY');
+		$this->service->createLocal(Port::fromString('8444'), null);
+	}
+
+	/**
+	 * renderAll() (install.sh, "vhost render") hält realip.conf in Einklang mit der
+	 * Einstellung – auch wenn jemand sie zwischendurch gelöscht hat.
+	 */
+	public function testRenderAllRestoresGeneratedRealIp(): void
+	{
+		$this->service->setProxyProtocol($this->proxyOn());
+		unlink($this->realIp());
+		$this->service->renderAll();
+		self::assertFileExists($this->realIp());
 	}
 }

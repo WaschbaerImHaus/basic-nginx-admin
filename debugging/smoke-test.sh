@@ -243,6 +243,31 @@ expect 200 "PHP ausserhalb des Pfads" -H 'Host: smoke-php.example' http://127.0.
 vhost user-del smoke-php.example pat >/dev/null
 vhost protect smoke-php.example off >/dev/null
 
+echo "== PROXY-Protokoll"
+# Nur prüfen, wenn es eingeschaltet ist (vhost set proxy_protocol on …): Ein Umschalten
+# hier würde alle echten Hosts neu schreiben. Die Ports stehen in der erzeugten realip.conf.
+REALIP=/etc/nginx/conf.d/realip.conf
+if [ -f "$REALIP" ] && head -1 "$REALIP" | grep -q '^# generiert von vhost' && grep -q '^real_ip_header proxy_protocol;' "$REALIP"; then
+	PP_HTTP=$(awk '/^map \$server_port/ {m=1; next} m && $2 == "80;" {print $1; exit}' "$REALIP")
+	[ -n "$PP_HTTP" ] || fail "HTTP-Tunnelport nicht in $REALIP gefunden"
+	expect 200 "PROXY-Port $PP_HTTP mit PROXY-Zeile" --haproxy-protocol -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/t.php"
+	# Ohne PROXY-Zeile weist nginx die Verbindung ab (deshalb bleiben 80/443 unverändert).
+	expect 000 "PROXY-Port $PP_HTTP ohne PROXY-Zeile" -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/t.php"
+	printf '<?php echo "PORT=", $_SERVER["SERVER_PORT"], " ADDR=", $_SERVER["REMOTE_ADDR"], "\\n"; ?>\n' > /var/www/smoke-php.example/web/pp.php
+	OUT=$(curl -s --haproxy-protocol --haproxy-clientip 203.0.113.9 -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/pp.php")
+	# PHP soll den öffentlichen Port sehen, sonst bauen Anwendungen Adressen mit ":8081".
+	grep -q '^PORT=80 ' <<<"$OUT" && echo "ok   PHP sieht den öffentlichen Port ($OUT)" || fail "SERVER_PORT falsch: $OUT"
+	# 127.0.0.1 ist kein Tunnel: Die mitgeschickte Adresse darf nicht geglaubt werden.
+	if ! grep -q '^set_real_ip_from 127\.0\.0\.1' "$REALIP"; then
+		grep -q 'ADDR=127.0.0.1$' <<<"$OUT" && echo "ok   fremde PROXY-Zeile nicht geglaubt" || fail "PROXY-Zeile von 127.0.0.1 geglaubt: $OUT"
+	fi
+	# nginx' eigene Umleitung (/intern → /intern/) darf den Tunnelport nicht nennen.
+	LOC=$(curl -s -o /dev/null -w '%{redirect_url}' --haproxy-protocol -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/intern")
+	[ -n "$LOC" ] && ! grep -q ":$PP_HTTP" <<<"$LOC" && echo "ok   Umleitung ohne Tunnelport ($LOC)" || fail "Umleitung nennt den Tunnelport: $LOC"
+else
+	echo "--   übersprungen (PROXY-Protokoll aus)"
+fi
+
 vhost php smoke-php.example off >/dev/null
 ls /etc/php/*/fpm/pool.d/vhost-smoke-php.example.conf >/dev/null 2>&1 && fail "Pool-Datei blieb liegen" || echo "ok   Pool entfernt"
 

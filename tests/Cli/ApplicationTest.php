@@ -423,4 +423,43 @@ final class ApplicationTest extends TestCase
 		self::assertStringContainsString('Nichts fällig', $out);
 		self::assertNotNull($this->repo->byName('weg.example'));
 	}
+
+	/**
+	 * vhost set proxy_protocol on <ip[,ip]> [http https] | off – Standardports 8081/8444,
+	 * "on" ohne Adresse nimmt die gespeicherte.
+	 */
+	public function testSetProxyProtocol(): void
+	{
+		$this->runCli(['add', 'a.example']);
+
+		[$code, , $err] = $this->runCli(['set', 'proxy_protocol', 'on']);
+		self::assertSame(1, $code);
+		self::assertStringContainsString('Tunneladresse', $err);
+
+		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'on', '10.200.0.1']);
+		self::assertSame(0, $code, $out);
+		self::assertSame("PROXY-Protokoll aktiviert: zusätzlich Port 8081 (HTTP) und 8444 (HTTPS), vertraut 10.200.0.1 (alle Hosts neu geschrieben).\n", $out);
+		self::assertStringContainsString('listen 8081 proxy_protocol;', (string)file_get_contents($this->dir . '/avail/a.example.conf'));
+
+		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'off']);
+		self::assertSame(0, $code);
+		self::assertSame("PROXY-Protokoll deaktiviert (alle Hosts neu geschrieben).\n", $out);
+		self::assertStringNotContainsString('proxy_protocol', (string)file_get_contents($this->dir . '/avail/a.example.conf'));
+
+		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'on']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('vertraut 10.200.0.1', $out);
+
+		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'on', '10.200.0.1,10.9.0.0/16', '9081', '9444']);
+		self::assertSame(0, $code);
+		self::assertStringContainsString('Port 9081 (HTTP) und 9444 (HTTPS), vertraut 10.200.0.1, 10.9.0.0/16', $out);
+
+		foreach ([['on', 'kein-netz'], ['on', '10.200.0.1', '9081'], ['on', '10.200.0.1', 'x', '9444'], ['vielleicht']] as $bad) {
+			[$code] = $this->runCli(['set', 'proxy_protocol', ...$bad]);
+			self::assertSame(1, $code, implode(' ', $bad));
+		}
+
+		[$code, , $err] = $this->runCli(['set', 'unbekannt', 'x']);
+		self::assertStringContainsString('proxy_protocol', $err);
+	}
 }

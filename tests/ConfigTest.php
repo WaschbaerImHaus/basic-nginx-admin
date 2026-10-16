@@ -29,6 +29,17 @@ final class ConfigTest extends TestCase
 		self::assertSame(8080, $c->adminPort);
 		self::assertStringEndsWith('/templates/index.html', $c->templatePath);
 		self::assertSame('/var/backups', $c->backupDir);
+		self::assertSame('/etc/nginx/conf.d/realip.conf', $c->realIpConf);
+	}
+
+	/**
+	 * Die realip-Datei liegt neben sites-available in conf.d – so landen Tests mit
+	 * eigenem sites-available nie im echten /etc/nginx.
+	 */
+	public function testRealIpConfFollowsSitesAvailable(): void
+	{
+		self::assertSame('/tmp/x/conf.d/realip.conf', Config::fromArray(['sitesAvailable' => '/tmp/x/avail'])->realIpConf);
+		self::assertSame('/a/b.conf', Config::fromArray(['sitesAvailable' => '/tmp/x/avail', 'realIpConf' => '/a/b.conf'])->realIpConf);
 	}
 
 	public function testFromArrayOverridesOnlyGivenKeys(): void

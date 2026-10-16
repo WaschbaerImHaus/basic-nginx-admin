@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-27 15:00
+ * @version Letzte Änderung: 2026-10-16 16:05
  */
 
 namespace VhostAdmin\Nginx;
@@ -208,12 +208,13 @@ final class ConfigRenderer
 	 *                   monatelang nachwirkt
 	 * @param list<array{username: string, hash: string, path: ?string}> $users Benutzer
 	 *                   des Verzeichnisschutzes – ihre Pfade ergeben die Schutzbereiche
+	 * @param ?ProxyProtocol $proxy zusätzliche Ports für den Tunnel (null = aus)
 	 */
-	public function serverConfig(Vhost $v, bool $hsts = true, array $ips = [], array $users = []): string
+	public function serverConfig(Vhost $v, bool $hsts = true, array $ips = [], array $users = [], ?ProxyProtocol $proxy = null): string
 	{
 		// geo/map des Verzeichnisschutzes gehören auf die http-Ebene. Diese Datei wird
 		// dort eingebunden, also stehen sie hier vor dem ersten server-Block.
-		$servers = $this->servers($v, $hsts);
+		$servers = $this->servers($v, $hsts, $proxy ?? ProxyProtocol::fromSettings(null, null, null));
 		$maps = $this->accessMaps($v, $ips, AccessAreas::fromUsers($users));
 		if ($maps === '') {
 			return $servers;
@@ -225,7 +226,7 @@ final class ConfigRenderer
 	/**
 	 * Die server-Blöcke des vHosts (ohne geo/map).
 	 */
-	private function servers(Vhost $v, bool $hsts): string
+	private function servers(Vhost $v, bool $hsts, ProxyProtocol $proxy): string
 	{
 		if ($v->isLocal()) {
 			$listen = "    listen 127.0.0.1:{$v->port};\n"
@@ -238,7 +239,9 @@ final class ConfigRenderer
 		$canonical = $v->canonicalName();
 		$alias = $v->aliasName();
 
-		$listen80 = "    listen 80;\n" . ($this->config->ipv6 ? "    listen [::]:80;\n" : '');
+		// Mit PROXY-Protokoll lauscht jeder öffentliche Block ZUSÄTZLICH auf dem Tunnelport;
+		// 80/443 bleiben, sonst ginge kein direkter Aufruf mehr (siehe ProxyProtocol).
+		$listen80 = "    listen 80;\n" . ($this->config->ipv6 ? "    listen [::]:80;\n" : '') . $proxy->listenHttp();
 		if (!$v->ssl) {
 			$out = self::HEADER;
 			if ($alias !== null) {
@@ -250,7 +253,7 @@ final class ConfigRenderer
 					. "    location / {\n        return 301 http://$canonical\$request_uri;\n    }\n}\n\n";
 			}
 			return $out . "server {\n" . $listen80 . "    server_name $canonical;\n\n"
-				. $this->acme($v) . "\n" . $this->body($v) . "}\n";
+				. $this->acme($v) . "\n" . $this->body($v, true, $proxy) . "}\n";
 		}
 
 		// Mit Zertifikat nimmt der :80-Block beide Namen und leitet unmittelbar auf den
@@ -266,6 +269,7 @@ final class ConfigRenderer
 			. "    location / {\n        return 301 https://$target80\$request_uri;\n    }\n}\n\n";
 
 		$listen443 = "    listen 443 ssl;\n" . ($this->config->ipv6 ? "    listen [::]:443 ssl;\n" : '')
+			. $proxy->listenHttps()
 			. "    http2 on;\n"
 			// HTTP/3 braucht QUIC auf demselben Port; dieses nginx ist mit
 			// --with-http_v3_module gebaut. Der Alt-Svc-Header sagt dem Browser, dass er
@@ -300,7 +304,7 @@ final class ConfigRenderer
 		// dort hat "location ^~" Vorrang vor der Weiterleitung.
 		return $redirect . $aliasBlock
 			. "server {\n" . $listen443 . "\n    server_name $canonical;\n\n" . $ssl . "\n"
-			. $this->body($v, $hsts) . "}\n";
+			. $this->body($v, $hsts, $proxy) . "}\n";
 	}
 
 	/**
@@ -320,7 +324,7 @@ final class ConfigRenderer
 	 * Gemeinsamer Teil jedes server-Blocks: Docroot, Logs, Schutz, Standardblöcke,
 	 * PHP und zum Schluss der eigene Bereich des Nutzers.
 	 */
-	private function body(Vhost $v, bool $hsts = true): string
+	private function body(Vhost $v, bool $hsts = true, ?ProxyProtocol $proxy = null): string
 	{
 		$root = $this->layout->docroot($v);
 		// index.php nur anbieten, wenn PHP auch ausgeliefert wird – sonst würde die
@@ -336,7 +340,7 @@ final class ConfigRenderer
 			. '    include ' . $this->authSnippetPath($v) . ";\n\n"
 			. $this->standardBlocks()
 			. "\n" . $this->cacheBlocks() . "\n"
-			. $this->phpBlock($v) . "\n";
+			. $this->phpBlock($v, $proxy) . "\n";
 
 		// Alles in conf/ gehört dem Nutzer: das Feld "Eigene Direktiven" der Oberfläche
 		// schreibt custom.conf, weitere Dateien (z.B. rewrites.conf) werden mit
@@ -476,7 +480,7 @@ final class ConfigRenderer
 	 * ohne diese Sperre lieferte nginx die Datei als Text aus, samt allem, was an
 	 * Zugangsdaten darin steht.
 	 */
-	private function phpBlock(Vhost $v): string
+	private function phpBlock(Vhost $v, ?ProxyProtocol $proxy = null): string
 	{
 		if (!$v->php) {
 			return "    location ~ \\.php\$ {\n        return 404;\n    }\n";
@@ -488,6 +492,8 @@ final class ConfigRenderer
 			. "        fastcgi_pass unix:$socket;\n"
 			. "        fastcgi_index index.php;\n"
 			. "        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;\n"
+			// Über den Tunnelport gekommen: PHP soll den öffentlichen Port sehen.
+			. ($proxy?->fastcgiPort() ?? '')
 			. "        fastcgi_intercept_errors on;\n"
 			. "        fastcgi_read_timeout 300;\n"
 			. "    }\n";
