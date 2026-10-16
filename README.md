@@ -337,7 +337,7 @@ reicht die Verbindung unverändert durch (TLS endet weiter hier, die Zertifikate
 und stellt ihr eine Zeile mit der echten Adresse voran.
 
 ```
-sudo vhost set proxy_protocol on 10.200.0.1               # Tunneladresse(n), durch Komma getrennt
+sudo vhost set proxy_protocol on 10.200.0.1               # Tunneladresse(n), IPv4, durch Komma getrennt
 sudo vhost set proxy_protocol on 10.200.0.1 9081 9444     # andere Ports statt 8081/8444
 sudo vhost set proxy_protocol off
 ```
@@ -353,8 +353,12 @@ Eingeschaltet (Standard: aus) passiert Folgendes:
   vortäuschen) und `real_ip_header proxy_protocol`. Danach ist `$remote_addr` überall die echte
   Adresse: in den Logs, bei IP-Freigaben des Verzeichnisschutzes und für PHP (`REMOTE_ADDR`).
   Eine von Hand geschriebene `realip.conf` wird dabei übernommen (zwei `real_ip_header` auf
-  http-Ebene ließen nginx nicht laden). Beim Ausschalten wird die Datei nur entfernt, wenn sie
-  von vhost-admin stammt.
+  http-Ebene ließen nginx nicht laden); eine Kopie landet vorher unter `/var/backups/realip.conf.<zeit>`.
+  Beim Ausschalten wird die Datei nur entfernt, wenn sie von vhost-admin stammt. Tunneladressen
+  müssen IPv4 sein und dürfen höchstens ein `/24` umfassen – jeder in einem weiteren Bereich könnte
+  eine beliebige Client-Adresse vortäuschen und damit IP-Freigaben umgehen.
+- **Catch-all auch auf dem Tunnelport:** In `realip.conf` steht ein `default_server` für 8081 mit
+  `return 444` – wie auf Port 80 bekommen unbekannte Hostnamen keine Antwort.
 - **Ports in Adressen bleiben die öffentlichen:** `port_in_redirect off` (sonst nennte z. B. die
   Umleitung `/ordner` → `/ordner/` den Port 8081), und PHP bekommt als `SERVER_PORT` 80/443
   statt 8081/8444 – Anwendungen bauen sonst Adressen mit `:8444`.
@@ -385,7 +389,10 @@ stream {
 `<LXC-Adresse>` ist die Adresse, auf die heute die DNAT-Regel zeigt; die Verbindung muss von
 der in `set_real_ip_from` eingetragenen Adresse kommen. HTTP/3 (UDP 443) kann kein
 PROXY-Protokoll: Bleibt dafür die alte Weiterleitung, kommen QUIC-Anfragen weiter mit der
-Tunneladresse an (der `Alt-Svc`-Kopf kündigt HTTP/3 auf 443 an).
+Tunneladresse an – und weil der `Alt-Svc`-Kopf HTTP/3 auf 443 ankündigt, wechseln moderne Browser
+nach dem ersten Aufruf genau dorthin. **Empfehlung:** die UDP-443-Weiterleitung auf dem
+Tunnelserver entfernen (die Browser bleiben dann bei HTTP/2 über den Tunnel) und die Tunneladresse
+nie als IP-Freigabe eintragen – sonst wäre jede QUIC-Anfrage freigegeben.
 
 Prüfen auf dem Rechner: `curl --haproxy-protocol -H 'Host: <domain>' http://127.0.0.1:8081/`
 (ohne `--haproxy-protocol` bricht die Verbindung ab – so soll es sein). Der Smoke-Test prüft
@@ -465,7 +472,7 @@ aktiv ist. Läuft ein alter Dienst beim Abräumen gerade, wartet der Installer b
 
 ## Entwicklung
 
-- Tests: `phpunit` (545 Tests, Stand 2026-10-16)
+- Tests: `phpunit` (555 Tests, Stand 2026-10-16)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`

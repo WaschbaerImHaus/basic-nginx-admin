@@ -15,10 +15,11 @@ declare(strict_types=1);
  * Tunneladressen wird die Client-Adresse geglaubt, und eine map übersetzt den
  * internen Port zurück in den öffentlichen (für PHP: SERVER_PORT).
  *
- * Nur IPv4/IPv6 des Tunnels; QUIC (UDP) kann kein PROXY-Protokoll und bleibt außen vor.
+ * Die Tunnelports lauschen nur auf IPv4, Tunneladressen sind deshalb IPv4 (höchstens ein /24).
+ * QUIC (UDP) kann kein PROXY-Protokoll und bleibt außen vor.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 15:50
+ * @version Letzte Änderung: 2026-10-16 17:30
  */
 
 namespace VhostAdmin\Nginx;
@@ -32,6 +33,9 @@ final class ProxyProtocol
 
 	public const DEFAULT_HTTP_PORT = 8081;
 	public const DEFAULT_HTTPS_PORT = 8444;
+
+	/** Weitester erlaubter Bereich: Jeder darin könnte eine Client-Adresse vortäuschen. */
+	public const MIN_PREFIX = 24;
 
 	/**
 	 * @param bool       $enabled   ob die zusätzlichen Ports geschrieben werden
@@ -95,6 +99,16 @@ final class ProxyProtocol
 		$httpsPort ??= $this->httpsPort;
 		if ($trusted === []) {
 			throw new \InvalidArgumentException('Tunneladresse fehlt: vhost set proxy_protocol on <ip[,ip]> [http-port https-port]');
+		}
+		foreach ($trusted as $cidr) {
+			[$ip, $bits] = array_pad(explode('/', (string)$cidr), 2, '32');
+			if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+				throw new \InvalidArgumentException("Tunneladresse $cidr: nur IPv4 (die Tunnelports lauschen nur auf IPv4)");
+			}
+			if ((int)$bits < self::MIN_PREFIX) {
+				throw new \InvalidArgumentException("Tunneladresse $cidr ist zu weit (höchstens /" . self::MIN_PREFIX
+					. '): Jeder darin könnte eine Client-Adresse vortäuschen');
+			}
 		}
 		foreach ([$httpPort, $httpsPort] as $port) {
 			if ($port < 1 || $port > 65535) {
@@ -190,6 +204,15 @@ final class ProxyProtocol
 			. "    {$this->httpPort} 80;\n"
 			. "    {$this->httpsPort} 443;\n"
 			. "    default \$server_port;\n"
+			. "}\n"
+			. "\n"
+			// Ohne eigenen default_server nähme nginx auf dem Tunnelport den ersten Host-Block –
+			// unbekannte Hostnamen bekämen eine Umleitung statt keiner Antwort (Port 80: 444).
+			. "# Catch-all für den Tunnel wie für Port 80: unbekannte Hostnamen bekommen keine Antwort.\n"
+			. "server {\n"
+			. "    listen {$this->httpPort} proxy_protocol default_server;\n"
+			. "    server_name _;\n"
+			. "    return 444;\n"
 			. "}\n";
 	}
 

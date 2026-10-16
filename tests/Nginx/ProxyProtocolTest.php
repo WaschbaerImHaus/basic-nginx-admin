@@ -51,12 +51,12 @@ final class ProxyProtocolTest extends TestCase
 	public function testHttpConfig(): void
 	{
 		$p = ProxyProtocol::fromSettings(null, null, null)
-			->enable([Cidr::fromString('10.200.0.1'), Cidr::fromString('2001:db8::/32')]);
+			->enable([Cidr::fromString('10.200.0.1'), Cidr::fromString('192.168.7.0/24')]);
 		$expected = ProxyProtocol::HEADER
 			. "# PROXY-Protokoll (vhost set proxy_protocol): Nur diesen Absendern wird die\n"
 			. "# mitgeschickte Client-Adresse geglaubt; \$remote_addr ist danach die echte Adresse.\n"
 			. "set_real_ip_from 10.200.0.1;\n"
-			. "set_real_ip_from 2001:db8::/32;\n"
+			. "set_real_ip_from 192.168.7.0/24;\n"
 			. "real_ip_header proxy_protocol;\n"
 			. "\n"
 			. "# Öffentlicher Port für PHP (SERVER_PORT): Wer über 8081/8444 kommt, hat 80/443 aufgerufen.\n"
@@ -64,6 +64,13 @@ final class ProxyProtocolTest extends TestCase
 			. "    8081 80;\n"
 			. "    8444 443;\n"
 			. "    default \$server_port;\n"
+			. "}\n"
+			. "\n"
+			. "# Catch-all für den Tunnel wie für Port 80: unbekannte Hostnamen bekommen keine Antwort.\n"
+			. "server {\n"
+			. "    listen 8081 proxy_protocol default_server;\n"
+			. "    server_name _;\n"
+			. "    return 444;\n"
 			. "}\n";
 		self::assertSame($expected, $p->httpConfig());
 	}
@@ -71,9 +78,9 @@ final class ProxyProtocolTest extends TestCase
 	public function testSettingsRoundTrip(): void
 	{
 		$p = ProxyProtocol::fromSettings(null, null, null)
-			->enable([Cidr::fromString('10.200.0.1'), Cidr::fromString('10.9.0.0/16')], 9081, 9444);
+			->enable([Cidr::fromString('10.200.0.1'), Cidr::fromString('10.9.0.0/24')], 9081, 9444);
 		$s = $p->settings();
-		self::assertSame(['proxy_protocol' => 'on', 'proxy_from' => '10.200.0.1,10.9.0.0/16', 'proxy_ports' => '9081,9444'], $s);
+		self::assertSame(['proxy_protocol' => 'on', 'proxy_from' => '10.200.0.1,10.9.0.0/24', 'proxy_ports' => '9081,9444'], $s);
 		$back = ProxyProtocol::fromSettings($s['proxy_protocol'], $s['proxy_from'], $s['proxy_ports']);
 		self::assertEquals($p, $back);
 	}
@@ -151,5 +158,43 @@ final class ProxyProtocolTest extends TestCase
 		self::assertTrue(ProxyProtocol::isGenerated(ProxyProtocol::HEADER . "set_real_ip_from 1.2.3.4;\n"));
 		self::assertFalse(ProxyProtocol::isGenerated("# Nur dem vServer glauben\nset_real_ip_from 10.200.0.1;\n"));
 		self::assertFalse(ProxyProtocol::isGenerated(''));
+	}
+
+	/**
+	 * Eigene Ports landen auch in map und Catch-all.
+	 */
+	public function testHttpConfigWithOwnPorts(): void
+	{
+		$out = (string)ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString('10.200.0.1')], 9081, 9444)->httpConfig();
+		self::assertStringContainsString("    9081 80;\n    9444 443;\n", $out);
+		self::assertStringContainsString("listen 9081 proxy_protocol default_server;", $out);
+		self::assertStringNotContainsString('8081', $out);
+	}
+
+	/**
+	 * Die Tunnelports lauschen nur auf IPv4 – eine IPv6-Tunneladresse käme nie an.
+	 */
+	public function testIpv6TunnelIsRejected(): void
+	{
+		$this->expectException(\InvalidArgumentException::class);
+		$this->expectExceptionMessage('IPv4');
+		ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString('2001:db8::1')]);
+	}
+
+	/**
+	 * Ein zu weiter Bereich ließe jeden darin eine Client-Adresse vortäuschen (und damit
+	 * IP-Freigaben des Verzeichnisschutzes umgehen).
+	 */
+	public function testTooWideRangeIsRejected(): void
+	{
+		foreach (['0.0.0.0/0', '10.0.0.0/8', '192.168.0.0/23'] as $range) {
+			try {
+				ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString($range)]);
+				self::fail("$range angenommen");
+			} catch (\InvalidArgumentException $e) {
+				self::assertStringContainsString('/24', $e->getMessage());
+			}
+		}
+		self::assertTrue(ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString('192.168.7.0/24')])->enabled);
 	}
 }

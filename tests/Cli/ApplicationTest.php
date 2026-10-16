@@ -450,9 +450,9 @@ final class ApplicationTest extends TestCase
 		self::assertSame(0, $code);
 		self::assertStringContainsString('vertraut 10.200.0.1', $out);
 
-		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'on', '10.200.0.1,10.9.0.0/16', '9081', '9444']);
+		[$code, $out] = $this->runCli(['set', 'proxy_protocol', 'on', '10.200.0.1,10.9.0.0/24', '9081', '9444']);
 		self::assertSame(0, $code);
-		self::assertStringContainsString('Port 9081 (HTTP) und 9444 (HTTPS), vertraut 10.200.0.1, 10.9.0.0/16', $out);
+		self::assertStringContainsString('Port 9081 (HTTP) und 9444 (HTTPS), vertraut 10.200.0.1, 10.9.0.0/24', $out);
 
 		foreach ([['on', 'kein-netz'], ['on', '10.200.0.1', '9081'], ['on', '10.200.0.1', 'x', '9444'], ['vielleicht']] as $bad) {
 			[$code] = $this->runCli(['set', 'proxy_protocol', ...$bad]);

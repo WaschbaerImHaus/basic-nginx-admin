@@ -651,4 +651,15 @@ final class ConfigRendererTest extends TestCase
 		$plain = $this->renderer()->serverConfig($v);
 		self::assertSame($plain, $this->renderer()->serverConfig($v, true, [], [], self::proxyOn()));
 	}
+
+	/**
+	 * Ohne IPv6 bleiben die Tunnelzeilen gleich (sie lauschen ohnehin nur auf IPv4).
+	 */
+	public function testProxyProtocolWithoutIpv6(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true);
+		$out = $this->renderer(false)->serverConfig($v, true, [], [], self::proxyOn());
+		self::assertStringContainsString("    listen 80;\n    listen 8081 proxy_protocol;\n    port_in_redirect off;\n", $out);
+		self::assertStringContainsString("    listen 443 ssl;\n    listen 8444 ssl proxy_protocol;\n    port_in_redirect off;\n", $out);
+	}
 }

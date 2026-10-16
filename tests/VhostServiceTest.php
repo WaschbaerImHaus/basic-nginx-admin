@@ -1581,4 +1581,102 @@ final class VhostServiceTest extends TestCase
 		$this->service->renderAll();
 		self::assertFileExists($this->realIp());
 	}
+
+	/**
+	 * Rücknahme ohne vorherige realip.conf: Danach gibt es auch keine.
+	 */
+	public function testFailedReloadWithoutRealIpLeavesNone(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->reloader->failWith = 'kaputt';
+		try {
+			$this->service->setProxyProtocol($this->proxyOn());
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException) {
+		}
+		self::assertFileDoesNotExist($this->realIp());
+	}
+
+	/**
+	 * Rücknahme beim Portwechsel: Hosts und realip.conf wieder mit den alten Ports.
+	 */
+	public function testFailedPortChangeRestoresOldPorts(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->setProxyProtocol($this->proxyOn());
+		$conf = file_get_contents($this->dir . '/avail/example.com.conf');
+		$realIp = file_get_contents($this->realIp());
+		$this->reloader->failWith = 'Port belegt';
+		try {
+			$this->service->setProxyProtocol($this->proxyOn(9081, 9444));
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertSame('Port belegt', $e->getMessage());
+		}
+		self::assertSame($conf, file_get_contents($this->dir . '/avail/example.com.conf'));
+		self::assertSame($realIp, file_get_contents($this->realIp()));
+		self::assertSame(8081, $this->service->proxyProtocol()->httpPort);
+	}
+
+	/**
+	 * Rücknahme beim Ausschalten: Die erzeugte Datei kommt zurück.
+	 */
+	public function testFailedDisableRestoresGeneratedRealIp(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->setProxyProtocol($this->proxyOn());
+		$realIp = file_get_contents($this->realIp());
+		$this->reloader->failWith = 'kaputt';
+		try {
+			$this->service->setProxyProtocol($this->service->proxyProtocol()->disable());
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException) {
+		}
+		self::assertSame($realIp, file_get_contents($this->realIp()));
+		self::assertTrue($this->service->proxyProtocol()->enabled);
+	}
+
+	/**
+	 * Bei der Rücknahme bleibt die ursprüngliche Meldung erhalten, und nach dem
+	 * Wiederherstellen wird noch einmal neu geladen (falls nginx die neue Fassung doch las).
+	 */
+	public function testRollbackReloadsAgainAndKeepsOriginalError(): void
+	{
+		$this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->reloader->failWith = 'ursprünglich';
+		$calls = $this->reloader->calls;
+		try {
+			$this->service->setProxyProtocol($this->proxyOn());
+			self::fail('Ausnahme erwartet');
+		} catch (\RuntimeException $e) {
+			self::assertSame('ursprünglich', $e->getMessage());
+		}
+		self::assertSame($calls + 2, $this->reloader->calls, 'Reload der Änderung und Reload nach der Rücknahme');
+	}
+
+	/**
+	 * Eine von Hand geschriebene realip.conf wird vor der Übernahme gesichert.
+	 */
+	public function testHandWrittenRealIpIsBackedUp(): void
+	{
+		mkdir($this->dir . '/conf.d');
+		file_put_contents($this->realIp(), "# meine\n");
+		$this->service->setProxyProtocol($this->proxyOn());
+		$backups = glob($this->dir . '/backups/realip.conf.*') ?: [];
+		self::assertCount(1, $backups);
+		self::assertSame("# meine\n", file_get_contents($backups[0]));
+	}
+
+	/**
+	 * Auch render() für einen einzelnen Host stellt eine fehlende realip.conf wieder her
+	 * (die PHP-Zeile braucht ihre map).
+	 */
+	public function testSingleRenderRestoresRealIp(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('example.com'), null);
+		$this->service->setProxyProtocol($this->proxyOn());
+		unlink($this->realIp());
+		$this->service->render($v);
+		self::assertFileExists($this->realIp());
+	}
 }

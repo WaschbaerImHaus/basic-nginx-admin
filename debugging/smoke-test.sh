@@ -253,6 +253,8 @@ if [ -f "$REALIP" ] && head -1 "$REALIP" | grep -q '^# generiert von vhost' && g
 	expect 200 "PROXY-Port $PP_HTTP mit PROXY-Zeile" --haproxy-protocol -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/t.php"
 	# Ohne PROXY-Zeile weist nginx die Verbindung ab (deshalb bleiben 80/443 unverändert).
 	expect 000 "PROXY-Port $PP_HTTP ohne PROXY-Zeile" -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/t.php"
+	# Catch-all wie auf Port 80: unbekannte Hostnamen bekommen keine Antwort (444).
+	expect 000 "PROXY-Port $PP_HTTP, unbekannter Host" --haproxy-protocol -H 'Host: unbekannt.invalid' "http://127.0.0.1:$PP_HTTP/"
 	printf '<?php echo "PORT=", $_SERVER["SERVER_PORT"], " ADDR=", $_SERVER["REMOTE_ADDR"], "\\n"; ?>\n' > /var/www/smoke-php.example/web/pp.php
 	OUT=$(curl -s --haproxy-protocol --haproxy-clientip 203.0.113.9 -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/pp.php")
 	# PHP soll den öffentlichen Port sehen, sonst bauen Anwendungen Adressen mit ":8081".

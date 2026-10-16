@@ -511,15 +511,15 @@ final class VhostService
 			$this->renderAll();
 		} catch (\Throwable $e) {
 			$this->storeSettings($beforeSettings);
-			try {
-				// Hosts wieder auf den alten Stand schreiben; den Reload-Fehler davon
-				// ignorieren – die ursprüngliche Meldung ist die wichtigere.
-				foreach ($this->repository->all() as $vhost) {
+			// Hosts wieder auf den alten Stand schreiben. Scheitert dabei einer, geht es mit
+			// den übrigen weiter – die ursprüngliche Meldung ist die wichtigere.
+			foreach ($this->repository->all() as $vhost) {
+				try {
 					$this->render($vhost, false);
+				} catch (\Throwable) {
 				}
-			} finally {
-				$this->restoreFile($this->config->realIpConf, $previousRealIp);
 			}
+			$this->restoreFile($this->config->realIpConf, $previousRealIp);
 			// Wurde der Reload nur nicht bestätigt, liest nginx womöglich doch die neue
 			// Fassung – ein weiterer Reload bringt es auf den wiederhergestellten Stand.
 			try {
@@ -561,6 +561,13 @@ final class VhostService
 		}
 		if ($current === $wanted) {
 			return;
+		}
+		// Eine von Hand geschriebene Datei wird übernommen – vorher eine Kopie sichern.
+		if ($current !== null && !ProxyProtocol::isGenerated($current)) {
+			if (!is_dir($this->config->backupDir)) {
+				mkdir($this->config->backupDir, 0750, true);
+			}
+			file_put_contents($this->config->backupDir . '/realip.conf.' . date('Ymd-His'), $current);
 		}
 		if (!is_dir(dirname($file))) {
 			mkdir(dirname($file), 0755, true);
