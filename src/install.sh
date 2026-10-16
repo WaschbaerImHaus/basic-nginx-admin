@@ -6,6 +6,8 @@
 # --owner: Besitzer der Ordner unter /var/www (Standard: der aufrufende sudo-Benutzer).
 # Mehrfach ausführbar (Update). Für einen Umzug zusätzlich /var/lib/vhost-admin,
 # /var/www und /etc/letsencrypt mitnehmen – die nginx-Configs erzeugt das Script neu.
+# Autor: Kurt Ingwer
+# Letzte Änderung: 2026-10-16 09:25
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,13 +24,26 @@ done
 [ "$(id -u)" -eq 0 ] || { echo "Bitte als root bzw. mit sudo ausführen." >&2; exit 1; }
 id "$OWNER" >/dev/null 2>&1 || { echo "Benutzer '$OWNER' existiert nicht." >&2; exit 1; }
 
-# Reihenfolge erzwingen: erst das Projekt honeypot installieren, dann vhost-admin. Der alte
-# Timer startet die Auswertung unter /opt/vhost-admin/honeypot, die die Honigtopf-Klassen aus
-# $APP/lib braucht. Die ersetzt dieser Installer weiter unten durch eine Fassung ohne
-# Honigtopf – liefe er jetzt durch, bräche die Auswertung danach stündlich lautlos ab.
-# VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 übergeht die Prüfung, wenn das bewusst so gewollt ist.
-if systemctl is-enabled --quiet vhost-admin-honeypot.timer 2>/dev/null && [ ! -f /etc/default/honeypot ] && [ "${VHOST_ADMIN_SKIP_HONEYPOT_CHECK:-}" != 1 ]; then
-	echo "Der alte Honigtopf-Timer läuft noch, /etc/default/honeypot fehlt: erst ~/honeypot installieren, dann vhost-admin." >&2; exit 1
+# Reihenfolge erzwingen: erst das Projekt honeypot VOLLSTÄNDIG installieren, dann vhost-admin.
+# Abbruch in zwei Fällen:
+#  1. Der alte Timer ist noch aktiv. Er startet die Auswertung unter /opt/vhost-admin/honeypot,
+#     die die Honigtopf-Klassen aus $APP/lib braucht. Die ersetzt dieser Installer weiter unten
+#     durch eine Fassung ohne Honigtopf – die Auswertung bräche danach stündlich lautlos ab.
+#  2. /etc/default/honeypot existiert, honeypot-analyse.timer ist aber nicht aktiv. Der
+#     honeypot-Installer legt die Datei an, BEVOR er die Tagesnotizen kopiert und seine Timer
+#     einschaltet; die alten Timer sind dann schon aus. Brach er dazwischen ab, ist die
+#     Übernahme unvollständig – erst der aktive neue Timer zeigt, dass er durchgelaufen ist.
+# VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 übergeht die Prüfung, wenn das bewusst so gewollt ist. Die
+# Variable muss hinter sudo stehen (sudo VAR=1 ./install.sh): sudo setzt die Umgebung zurück.
+if [ "${VHOST_ADMIN_SKIP_HONEYPOT_CHECK:-}" != 1 ] && {
+	systemctl is-enabled --quiet vhost-admin-honeypot.timer 2>/dev/null ||
+	{ [ -f /etc/default/honeypot ] && ! systemctl is-enabled --quiet honeypot-analyse.timer 2>/dev/null; }
+}; then
+	echo "Die Übernahme durch das Projekt honeypot ist nicht abgeschlossen (alter Timer vhost-admin-honeypot.timer" >&2
+	echo "noch aktiv oder honeypot-analyse.timer nicht aktiv): erst honeypot vollständig installieren" >&2
+	echo "(im Projekt honeypot: sudo ./src/install.sh), dann vhost-admin." >&2
+	echo "Bewusst übergehen: sudo VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 ./install.sh" >&2
+	exit 1
 fi
 
 echo "== Pakete installieren"
@@ -115,12 +130,32 @@ install -m 644 "$SRC/etc/vhost-admin-purge.timer" /etc/systemd/system/vhost-admi
 systemctl daemon-reload
 systemctl enable --now vhost-admin-purge.timer >/dev/null
 
+# Wartet, bis ein Dienst nicht mehr läuft – höchstens 120 Sekunden, dann Hinweis und weiter.
+# Abgefragt wird ActiveState, nicht "systemctl is-active": Ein Type=oneshot-Dienst steht
+# während seines Laufs auf "activating", und dafür meldet is-active "nicht aktiv".
+wait_until_finished() {
+	local unit="$1" waited=0
+	while [ "$waited" -lt 120 ]; do
+		case "$(systemctl show -p ActiveState --value "$unit" 2>/dev/null || true)" in
+			active|activating|deactivating|reloading) sleep 1; waited=$((waited + 1)) ;;
+			*) return 0 ;;
+		esac
+	done
+	echo "Hinweis: $unit läuft nach 120 s noch und wird jetzt abgebrochen." >&2
+}
+
 # Der Honigtopf ist seit 2026-10-15 ein eigenes Projekt (/opt/honeypot). Seine alten
-# Reste hier werden erst abgeräumt, wenn er übernommen hat (/etc/default/honeypot gibt
-# es dann) – sonst stünde die Auswertung still. Daten unter /var/www bleiben unberührt.
-if [ -f /etc/default/honeypot ]; then
+# Reste hier werden erst abgeräumt, wenn er VOLLSTÄNDIG übernommen hat: /etc/default/honeypot
+# existiert UND honeypot-analyse.timer ist aktiv. Die Datei allein reicht nicht – sie entsteht
+# vor dem Kopieren der Tagesnotizen (siehe Abbruchprüfung oben). Daten unter /var/www bleiben
+# unberührt.
+if [ -f /etc/default/honeypot ] && systemctl is-enabled --quiet honeypot-analyse.timer 2>/dev/null; then
 	for old in vhost-admin-honeypot vhost-admin-networks; do
+		# Erst den Timer aus, damit kein neuer Lauf startet. Ein gerade laufender Dienst endet
+		# damit nicht; stop bräche ihn (Type=oneshot) per SIGTERM mitten im Schreiben ab.
+		# Deshalb warten, bis er fertig ist – stop greift nur noch nach Ablauf der Obergrenze.
 		systemctl disable --now "$old.timer" >/dev/null 2>&1 || true
+		wait_until_finished "$old.service"
 		systemctl stop "$old.service" >/dev/null 2>&1 || true
 		rm -f "/etc/systemd/system/$old.timer" "/etc/systemd/system/$old.service"
 	done

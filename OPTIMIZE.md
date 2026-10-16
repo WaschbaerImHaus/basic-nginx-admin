@@ -24,3 +24,14 @@
 - `Config::phpFpmVersion()` durchsucht bei jedem `fromArray()` das Dateisystem; das Ergebnis ließe sich statisch merken.
 - Die Pool-Kennwerte (`pm = ondemand`, `pm.max_children = 10`) stehen fest im `PoolRenderer`; sinnvoller wären Standardwerte aus `Config`.
 - `NginxSnippet` ist mit Tokenizer und Sperrliste über 500 Zeilen lang. Der Tokenizer und die Regelprüfung sind zwei getrennte Aufgaben und könnten es auch im Code sein.
+
+## Kleinbefunde aus dem Abschlussreview „Honigtopf auslagern“ (2026-10-16, zurückgestellt)
+
+- `InstallerTest::testNeverTouchesHoneypotData()` erkennt Löschen unter `/var/www` nur in der Form
+  `rm -<…r…> … /var/www` auf einer Zeile. Nicht erfasst: getrennte Schalter (`rm -f -r`), `--recursive`,
+  `find … -delete`, Pfade über Variablen (`rm -rf "$DIR"` mit `DIR=/var/www/…`) oder Zeilenfortsetzungen.
+  Robuster: alle `rm`/`find -delete`-Aufrufe des Installers auflisten und gegen eine Positivliste prüfen.
+- Toter Code im Abräumblock von `src/install.sh`: `rm -rf "$APP/public/honeypot"` – `$APP/public` löscht
+  der Installer schon weiter oben vollständig (`rm -rf "$APP/lib" "$APP/public"`). Beim nächsten Anfassen
+  des Blocks entfernen (InstallerTest prüft die Zeile derzeit wörtlich).
+

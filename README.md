@@ -366,6 +366,31 @@ localhost-Hosts lassen sich nur über die Kommandozeile anlegen; die Oberfläche
 Der Honigtopf ist ein eigenes Projekt `git@bitbucket.org:von-null/honeypot.git` (seit
 2026-10-15); er benutzt vhost-admin über das CLI `vhost`.
 
+**Reihenfolge auf einem Rechner, auf dem der Honigtopf noch aus vhost-admin läuft:** erst das Projekt
+honeypot vollständig installieren (dort `sudo ./src/install.sh`), dann vhost-admin (`sudo ./install.sh`).
+Der honeypot-Installer übernimmt Einstellungen, Netztabelle und Tagesnotizen und schaltet die alten
+Timer ab; erst danach räumt `install.sh` von vhost-admin die alten Reste ab (Units
+`vhost-admin-honeypot.*`/`vhost-admin-networks.*`, `/opt/vhost-admin/honeypot`,
+`/opt/vhost-admin/research/honeypot`, `/etc/default/vhost-admin-honeypot`). Daten unter `/var/www` bleiben.
+
+`install.sh` bricht ganz am Anfang ab, bevor er etwas ändert, wenn
+
+- `vhost-admin-honeypot.timer` noch aktiv ist (honeypot noch nicht installiert – die alte Auswertung
+  braucht die Klassen unter `/opt/vhost-admin/lib`, die der Installer ersetzt), oder
+- `/etc/default/honeypot` existiert, `honeypot-analyse.timer` aber nicht aktiv ist (der honeypot-Installer
+  ist mittendrin abgebrochen – die Übernahme ist unvollständig).
+
+Ausweg: honeypot-Installer erneut laufen lassen, bis er durchläuft. Wer bewusst ohne Honigtopf weitermachen
+will, übergeht die Prüfung mit
+
+```bash
+sudo VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 ./install.sh
+```
+
+Die Variable muss **hinter** `sudo` stehen: sudo setzt die Umgebung zurück, `VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 sudo ./install.sh`
+wirkt nicht. Abgeräumt wird auch dann nur, wenn `/etc/default/honeypot` existiert und `honeypot-analyse.timer`
+aktiv ist. Läuft ein alter Dienst beim Abräumen gerade, wartet der Installer bis zu 120 s auf sein Ende.
+
 ## Umzug auf einen anderen Server
 
 `/var/lib/vhost-admin`, `/var/www` und `/etc/letsencrypt` mitnehmen, dann `sudo ./install.sh` – die nginx-Konfigurationen werden aus der Datenbank neu erzeugt. `install.sh` sichert vorhandene Hosts zuvor automatisch nach `/var/backups/` und ruft danach `vhost migrate-layout` auf, das jeden noch nicht umgestellten vHost auf die aktuelle Struktur (`web/conf/cert/private/logs`) bringt – auch ein frisch mitgenommener alter Stand landet also automatisch in der neuen Struktur.
@@ -376,7 +401,7 @@ Der Honigtopf ist ein eigenes Projekt `git@bitbucket.org:von-null/honeypot.git` 
 
 ## Entwicklung
 
-- Tests: `phpunit` (261 Tests, Stand nach dem Abschlussreview vom 2026-09-20)
+- Tests: `phpunit` (516 Tests, Stand 2026-10-16)
 - Build (Tests, Buildnummer, `build/vhost-admin.tar.gz`, Commit, Push): `./build.sh`
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - Projektwissen für die Weiterentwicklung: `.claude/CLAUDE.md`, offene Punkte in `FEATURES.md`/`OPTIMIZE.md`/`BUGS.md`
