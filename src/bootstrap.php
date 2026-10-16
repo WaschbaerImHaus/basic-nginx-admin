@@ -2,15 +2,13 @@
 declare(strict_types=1);
 
 /**
- * Autoloader für die Namespaces des Projekts.
+ * Autoloader für `VhostAdmin\`. Der Honigtopf ist seit 2026-10-15 ein eigenes Projekt
+ * (Bitbucket von-null/honeypot) und benutzt die Verwaltung nur über das CLI `vhost`.
  *
- * Eine Klasse VhostAdmin\Foo\Bar liegt in lib/VhostAdmin/Foo/Bar.php, eine Klasse
- * Honeypot\Bar in lib/Honeypot/Bar.php. Honigtopf-Auswertung und Verwaltung teilen
- * sich nichts ausser dem Autoloader – die Auswertung läuft als eigener Dienst und darf
- * nicht von der Datenbank der Verwaltung abhängen.
+ * Eine Klasse VhostAdmin\Foo\Bar liegt in lib/VhostAdmin/Foo/Bar.php.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-22 17:30
+ * @version Letzte Änderung: 2026-10-16 09:03
  */
 
 spl_autoload_register(static function (string $class): void {
@@ -19,17 +17,6 @@ spl_autoload_register(static function (string $class): void {
 		return;
 	}
 	$file = __DIR__ . '/lib/VhostAdmin/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-	if (is_file($file)) {
-		require $file;
-	}
-});
-
-spl_autoload_register(static function (string $class): void {
-	$prefix = 'Honeypot\\';
-	if (!str_starts_with($class, $prefix)) {
-		return;
-	}
-	$file = __DIR__ . '/lib/Honeypot/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
 	if (is_file($file)) {
 		require $file;
 	}

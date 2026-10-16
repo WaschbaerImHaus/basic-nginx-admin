@@ -2,6 +2,10 @@ Stand: 2026-09-27 (zuvor 2026-09-25)
 
 # Verbleibende Risiken
 
+Der Honigtopf ist seit 2026-10-15 ein eigenes Projekt (`git@bitbucket.org:von-null/honeypot.git`,
+lokal `~/honeypot`); seine Risiken stehen dort in `SECURITY_RISKS.md`. Hier bleiben nur Risiken der
+Verwaltung – auch solche, die sich auf den Honigtopf auswirken (Port 443 ohne `default_server`).
+
 Reihenfolge nach Schwere. Belege sind Datei:Zeile aus dem geprüften Stand; die Rechte stammen aus dem
 installierten System (`ls -l`/`stat`), soweit ohne Eingriff in `mfsrv.de`/`mfsvr.de` lesbar.
 Alle drei kritischen/hohen Befunde des vorigen Stands (Datenbank für `www-data` beschreibbar,

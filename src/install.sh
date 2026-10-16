@@ -37,12 +37,6 @@ rm -rf "$APP/lib" "$APP/public"
 cp -r "$SRC/lib" "$APP/lib"
 find "$APP/lib" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m 644 "$SRC/bootstrap.php" "$APP/bootstrap.php"
-# Die Honigtopf-Ansicht wird nicht hier ausgeliefert, sondern von
-# honeypot/install-dashboard.sh in den Docroot ihres vHosts kopiert. Hier liegt nur
-# die Vorlage.
-install -d -m 755 "$APP/public"
-cp -r "$SRC/public/honeypot" "$APP/public/honeypot"
-find "$APP/public" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m 644 "$SRC"/templates/index.html "$APP/templates/"
 install -m 755 "$SRC"/bin/vhost.php "$APP/bin/"
 install -m 755 "$SRC"/bin/vhost /usr/local/sbin/vhost
@@ -105,37 +99,27 @@ echo "== Datenbank und nginx-Configs"
 # aufruft; hier nur, damit "vhost init" gleich in ein passendes Verzeichnis schreibt.
 install -d -m 750 -o root -g www-data /var/lib/vhost-admin
 /usr/local/sbin/vhost init
-# Taegliche Auswertung der Honigtopf-Logs. Die Liste der Hosts steht in
-# /etc/default/vhost-admin-honeypot und wird bei einem Update nicht ueberschrieben.
-install -m 644 "$SRC/etc/vhost-admin-honeypot.service" /etc/systemd/system/vhost-admin-honeypot.service
-install -m 644 "$SRC/etc/vhost-admin-honeypot.timer" /etc/systemd/system/vhost-admin-honeypot.timer
-[ -f /etc/default/vhost-admin-honeypot ] || printf 'HONEYPOT_HOSTS=""\n' > /etc/default/vhost-admin-honeypot
-if [ -f "$SRC/../honeypot/analyse.php" ]; then
-	install -d -m 755 "$APP/honeypot" "$APP/research/honeypot"
-	install -m 755 "$SRC/../honeypot/analyse.php" "$APP/honeypot/analyse.php"
-	install -m 755 "$SRC/../honeypot/update-networks.php" "$APP/honeypot/update-networks.php"
-	for script in install-site.sh install-dashboard.sh; do
-		[ -f "$SRC/../honeypot/$script" ] && install -m 755 "$SRC/../honeypot/$script" "$APP/honeypot/$script"
-	done
-	[ -d "$SRC/../honeypot/site" ] && cp -r "$SRC/../honeypot/site" "$APP/honeypot/"
-else
-	echo "Hinweis: honeypot/analyse.php fehlt im Paket - die stuendliche Auswertung bleibt leer." >&2
-fi
-
 # Zeitgeber, der abgelaufene Loeschvormerkungen endgueltig entfernt. Ohne ihn bliebe
 # ein entfernter vHost unbegrenzt gesperrt liegen, statt nach der Frist zu verschwinden.
 install -m 644 "$SRC/etc/vhost-admin-purge.service" /etc/systemd/system/vhost-admin-purge.service
 install -m 644 "$SRC/etc/vhost-admin-purge.timer" /etc/systemd/system/vhost-admin-purge.timer
-# Netz- und Laendertabelle der Registries. Eigener Timer, weil das der einzige Teil ist,
-# der Dateien aus dem Netz holt - abschaltbar, ohne die Auswertung zu verlieren.
-install -m 644 "$SRC/etc/vhost-admin-networks.service" /etc/systemd/system/vhost-admin-networks.service
-install -m 644 "$SRC/etc/vhost-admin-networks.timer" /etc/systemd/system/vhost-admin-networks.timer
 systemctl daemon-reload
 systemctl enable --now vhost-admin-purge.timer >/dev/null
-systemctl enable --now vhost-admin-honeypot.timer >/dev/null
-# Ein geaenderter Zeitplan (OnCalendar) gilt erst nach einem Neustart des Timers.
-systemctl restart vhost-admin-honeypot.timer
-systemctl enable --now vhost-admin-networks.timer >/dev/null
+
+# Der Honigtopf ist seit 2026-10-15 ein eigenes Projekt (/opt/honeypot). Seine alten
+# Reste hier werden erst abgeräumt, wenn er übernommen hat (/etc/default/honeypot gibt
+# es dann) – sonst stünde die Auswertung still. Daten unter /var/www bleiben unberührt.
+if [ -f /etc/default/honeypot ]; then
+	for old in vhost-admin-honeypot vhost-admin-networks; do
+		systemctl disable --now "$old.timer" >/dev/null 2>&1 || true
+	done
+	# Pfade ausgeschrieben, damit sie sich per grep finden lassen (tests/InstallerTest.php).
+	rm -f /etc/systemd/system/vhost-admin-honeypot.timer /etc/systemd/system/vhost-admin-honeypot.service \
+		/etc/systemd/system/vhost-admin-networks.timer /etc/systemd/system/vhost-admin-networks.service
+	rm -rf "$APP/honeypot" "$APP/public/honeypot" "$APP/research/honeypot"
+	rm -f /etc/default/vhost-admin-honeypot
+	systemctl daemon-reload
+fi
 
 /usr/local/sbin/vhost migrate-layout
 # Rechte bestehender vHosts auf den aktuellen Stand bringen. Nötig, weil sich die
@@ -144,18 +128,6 @@ systemctl enable --now vhost-admin-networks.timer >/dev/null
 # schreibt). Ohne diesen Schritt bliebe ein Bestandshost auf den alten Rechten.
 /usr/local/sbin/vhost fix-permissions
 /usr/local/sbin/vhost render
-
-# Honigtopf-Ansicht auffrischen, falls eine eingerichtet ist. Sie traegt eine Kopie der
-# Auswertungsklassen in ihrem privaten Bereich (open_basedir laesst sie nicht an
-# /opt/vhost-admin); ohne diesen Schritt bliebe die Kopie nach einem Update alt.
-# shellcheck disable=SC1091
-[ -f /etc/default/vhost-admin-honeypot ] && . /etc/default/vhost-admin-honeypot
-if [ -n "${HONEYPOT_DASHBOARD:-}" ] && [ -n "${HONEYPOT_HOSTS:-}" ] && [ -x "$APP/honeypot/install-dashboard.sh" ]; then
-	# shellcheck disable=SC2086
-	"$APP/honeypot/install-dashboard.sh" "$HONEYPOT_DASHBOARD" $HONEYPOT_HOSTS >/dev/null \
-		&& echo "Honigtopf-Ansicht aufgefrischt: $HONEYPOT_DASHBOARD" \
-		|| echo "Hinweis: Honigtopf-Ansicht konnte nicht aufgefrischt werden." >&2
-fi
 
 echo
 echo "Fertig."
