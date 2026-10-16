@@ -22,6 +22,15 @@ done
 [ "$(id -u)" -eq 0 ] || { echo "Bitte als root bzw. mit sudo ausführen." >&2; exit 1; }
 id "$OWNER" >/dev/null 2>&1 || { echo "Benutzer '$OWNER' existiert nicht." >&2; exit 1; }
 
+# Reihenfolge erzwingen: erst das Projekt honeypot installieren, dann vhost-admin. Der alte
+# Timer startet die Auswertung unter /opt/vhost-admin/honeypot, die die Honigtopf-Klassen aus
+# $APP/lib braucht. Die ersetzt dieser Installer weiter unten durch eine Fassung ohne
+# Honigtopf – liefe er jetzt durch, bräche die Auswertung danach stündlich lautlos ab.
+# VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1 übergeht die Prüfung, wenn das bewusst so gewollt ist.
+if systemctl is-enabled --quiet vhost-admin-honeypot.timer 2>/dev/null && [ ! -f /etc/default/honeypot ] && [ "${VHOST_ADMIN_SKIP_HONEYPOT_CHECK:-}" != 1 ]; then
+	echo "Der alte Honigtopf-Timer läuft noch, /etc/default/honeypot fehlt: erst ~/honeypot installieren, dann vhost-admin." >&2; exit 1
+fi
+
 echo "== Pakete installieren"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
@@ -112,10 +121,9 @@ systemctl enable --now vhost-admin-purge.timer >/dev/null
 if [ -f /etc/default/honeypot ]; then
 	for old in vhost-admin-honeypot vhost-admin-networks; do
 		systemctl disable --now "$old.timer" >/dev/null 2>&1 || true
+		systemctl stop "$old.service" >/dev/null 2>&1 || true
+		rm -f "/etc/systemd/system/$old.timer" "/etc/systemd/system/$old.service"
 	done
-	# Pfade ausgeschrieben, damit sie sich per grep finden lassen (tests/InstallerTest.php).
-	rm -f /etc/systemd/system/vhost-admin-honeypot.timer /etc/systemd/system/vhost-admin-honeypot.service \
-		/etc/systemd/system/vhost-admin-networks.timer /etc/systemd/system/vhost-admin-networks.service
 	rm -rf "$APP/honeypot" "$APP/public/honeypot" "$APP/research/honeypot"
 	rm -f /etc/default/vhost-admin-honeypot
 	systemctl daemon-reload

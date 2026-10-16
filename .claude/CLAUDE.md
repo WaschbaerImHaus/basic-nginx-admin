@@ -30,12 +30,12 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (496 Tests, Stand 2026-10-16); `tests/Support/` – TempDir, FakeReloader, FakeCertbot u. a.; `tests/InstallerTest.php` prüft, dass der Installer den Honigtopf weder installiert noch seine Daten anfasst
+- `tests/` – PHPUnit (497 Tests, Stand 2026-10-16); `tests/Support/` – TempDir, FakeReloader, FakeCertbot u. a.; `tests/InstallerTest.php` prüft, dass der Installer den Honigtopf weder installiert noch seine Daten anfasst
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)
 - **Verwaltung: keine neuen Features ohne ausdrücklichen Wunsch.** Am Verwaltungsteil nur Bugs und Sicherheit; FEATURES.md „Zurückgestellt“ ist ein Merkzettel.
-- **Der Honigtopf ist ein eigenes Projekt (~/honeypot, Bitbucket `von-null/honeypot`); hier keine Sonderregeln für ihn.** Er benutzt vhost-admin nur über das CLI `vhost`. `src/install.sh` räumt seine alten Reste unter `/opt/vhost-admin` und die Units `vhost-admin-honeypot.*`/`vhost-admin-networks.*` erst ab, wenn `/etc/default/honeypot` existiert; Daten unter `/var/www` fasst er nie an.
+- **Der Honigtopf ist ein eigenes Projekt (~/honeypot, Bitbucket `von-null/honeypot`); hier keine Sonderregeln für ihn.** Er benutzt vhost-admin nur über das CLI `vhost`. `src/install.sh` räumt seine alten Reste unter `/opt/vhost-admin` und die Units `vhost-admin-honeypot.*`/`vhost-admin-networks.*` erst ab, wenn `/etc/default/honeypot` existiert; Daten unter `/var/www` fasst er nie an. Läuft der alte Timer noch ohne `/etc/default/honeypot`, bricht er ganz am Anfang ab (Reihenfolge: erst honeypot, dann vhost-admin; Übergehen mit `VHOST_ADMIN_SKIP_HONEYPOT_CHECK=1`).
 - Tests laufen ohne root: Pfade über `Config::fromArray`, Reload/certbot über Fakes.
 - nginx-Blöcke in `ConfigRenderer` sind mit 4 Leerzeichen eingerückt (nginx-Konvention); PHP-Code mit Tabs.
 - Schreibende Aktionen nur über das CLI; `www-data` darf per sudoers ausschließlich `/usr/local/sbin/vhost`.
