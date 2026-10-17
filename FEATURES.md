@@ -38,7 +38,7 @@ lokal `~/honeypot`); seine Features – implementierte wie offene – stehen dor
 - localhost-Hosts binden ausschließlich an 127.0.0.1/[::1]
 - Web-Oberfläche auf 127.0.0.1:8080 mit CSRF-Schutz; schreibt nur über das CLI (sudoers)
 - CLI `vhost` mit allen Funktionen; Passwörter per stdin
-- Catch-all-Server, der unbekannte Hostnamen mit 444 abweist
+- Catch-all-Server, der unbekannte Hostnamen mit 444 abweist; seit 2026-10-17 (Nutzerwunsch) auch auf 443/QUIC und 8444 per `ssl_reject_handshake` – kein fremdes Zertifikat für unbekannte Namen
 - Installer `install.sh` (idempotent), Build-Paket `build/vhost-admin.tar.gz`
 - Verzeichnisstruktur je vHost: `web/` (Docroot, mit Unterordner `web/<subdir>`), `conf/` (Snippet über die Oberfläche mit Positivliste geprüft), `cert/` (Symlinks auf `/etc/letsencrypt/live/<domain>/`), `private/` (nicht ausgeliefert), `logs/` (`access.log`/`error.log` je vHost, Rotation täglich/14 Tage); `VhostLayout` als einzige Quelle für Pfade und Soll-Rechte
 - `vhost migrate-layout` bringt bestehende vHosts auf die neue Struktur (Zwischenordner `.web-migrating`, bricht bei Kollisionen ab, keine Datenverluste bei Abbruch); `vhost fix-permissions [name]` setzt die Soll-Rechte laut `VhostLayout` erneut

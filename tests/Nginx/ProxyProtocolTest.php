@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Einstellung PROXY-Protokoll (Wertobjekt ProxyProtocol).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 15:45
+ * @version Letzte Änderung: 2026-10-18 00:00
  */
 
 namespace Tests\Nginx;
@@ -66,10 +66,13 @@ final class ProxyProtocolTest extends TestCase
 			. "    default \$server_port;\n"
 			. "}\n"
 			. "\n"
-			. "# Catch-all für den Tunnel wie für Port 80: unbekannte Hostnamen bekommen keine Antwort.\n"
+			. "# Catch-all für den Tunnel wie für 80/443: unbekannte Hostnamen bekommen keine Antwort,\n"
+			. "# über HTTPS bricht schon der TLS-Handshake ab.\n"
 			. "server {\n"
 			. "    listen 8081 proxy_protocol default_server;\n"
+			. "    listen 8444 ssl proxy_protocol default_server;\n"
 			. "    server_name _;\n"
+			. "    ssl_reject_handshake on;\n"
 			. "    return 444;\n"
 			. "}\n";
 		self::assertSame($expected, $p->httpConfig());
@@ -168,6 +171,7 @@ final class ProxyProtocolTest extends TestCase
 		$out = (string)ProxyProtocol::fromSettings(null, null, null)->enable([Cidr::fromString('10.200.0.1')], 9081, 9444)->httpConfig();
 		self::assertStringContainsString("    9081 80;\n    9444 443;\n", $out);
 		self::assertStringContainsString("listen 9081 proxy_protocol default_server;", $out);
+		self::assertStringContainsString("listen 9444 ssl proxy_protocol default_server;", $out);
 		self::assertStringNotContainsString('8081', $out);
 	}
 

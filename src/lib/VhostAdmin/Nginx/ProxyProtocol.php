@@ -19,7 +19,7 @@ declare(strict_types=1);
  * QUIC (UDP) kann kein PROXY-Protokoll und bleibt außen vor.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 17:30
+ * @version Letzte Änderung: 2026-10-18 00:00
  */
 
 namespace VhostAdmin\Nginx;
@@ -206,12 +206,16 @@ final class ProxyProtocol
 			. "    default \$server_port;\n"
 			. "}\n"
 			. "\n"
-			// Ohne eigenen default_server nähme nginx auf dem Tunnelport den ersten Host-Block –
-			// unbekannte Hostnamen bekämen eine Umleitung statt keiner Antwort (Port 80: 444).
-			. "# Catch-all für den Tunnel wie für Port 80: unbekannte Hostnamen bekommen keine Antwort.\n"
+			// Ohne eigenen default_server nähme nginx auf den Tunnelports den ersten Host-Block –
+			// unbekannte Hostnamen bekämen eine Umleitung bzw. dessen Zertifikat statt keiner
+			// Antwort (wie 00-default.conf auf 80/443).
+			. "# Catch-all für den Tunnel wie für 80/443: unbekannte Hostnamen bekommen keine Antwort,\n"
+			. "# über HTTPS bricht schon der TLS-Handshake ab.\n"
 			. "server {\n"
 			. "    listen {$this->httpPort} proxy_protocol default_server;\n"
+			. "    listen {$this->httpsPort} ssl proxy_protocol default_server;\n"
 			. "    server_name _;\n"
+			. "    ssl_reject_handshake on;\n"
 			. "    return 444;\n"
 			. "}\n";
 	}

@@ -11,7 +11,7 @@ sudo ./install.sh              # Besitzer der Web-Ordner = aufrufender Benutzer
 sudo ./install.sh --owner max  # oder ein anderer Benutzer
 ```
 
-Der Installer richtet nginx, PHP-FPM, certbot und PHPUnit ein, legt die Oberfläche unter `/var/www/localhost-8080` ab, erlaubt `www-data` per sudoers genau den Befehl `/usr/local/sbin/vhost` und ersetzt die nginx-Standardseite durch einen Catch-all, der unbekannte Hostnamen abweist. Das Skript ist mehrfach ausführbar (Update).
+Der Installer richtet nginx, PHP-FPM, certbot und PHPUnit ein, legt die Oberfläche unter `/var/www/localhost-8080` ab, erlaubt `www-data` per sudoers genau den Befehl `/usr/local/sbin/vhost` und ersetzt die nginx-Standardseite durch einen Catch-all, der unbekannte Hostnamen abweist: auf Port 80 ohne Antwort (444), auf 443 (HTTPS und HTTP/3) schon im TLS-Handshake (`ssl_reject_handshake`) – ein unbekannter Name bekommt nie das Zertifikat eines anderen Hosts zu sehen. Das Skript ist mehrfach ausführbar (Update).
 
 Alternativ aus dem Build-Paket: `tar xzf vhost-admin.tar.gz && sudo vhost-admin/install.sh`.
 
@@ -357,8 +357,9 @@ Eingeschaltet (Standard: aus) passiert Folgendes:
   Beim Ausschalten wird die Datei nur entfernt, wenn sie von vhost-admin stammt. Tunneladressen
   müssen IPv4 sein und dürfen höchstens ein `/24` umfassen – jeder in einem weiteren Bereich könnte
   eine beliebige Client-Adresse vortäuschen und damit IP-Freigaben umgehen.
-- **Catch-all auch auf dem Tunnelport:** In `realip.conf` steht ein `default_server` für 8081 mit
-  `return 444` – wie auf Port 80 bekommen unbekannte Hostnamen keine Antwort.
+- **Catch-all auch auf den Tunnelports:** In `realip.conf` steht ein `default_server` für 8081 und
+  8444 – wie auf 80/443 bekommen unbekannte Hostnamen keine Antwort (444), über HTTPS scheitert
+  schon der Handshake (`ssl_reject_handshake`).
 - **Ports in Adressen bleiben die öffentlichen:** `port_in_redirect off` (sonst nennte z. B. die
   Umleitung `/ordner` → `/ordner/` den Port 8081), und PHP bekommt als `SERVER_PORT` 80/443
   statt 8081/8444 – Anwendungen bauen sonst Adressen mit `:8444`.

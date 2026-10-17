@@ -84,6 +84,17 @@ expect 200 "Schutz aus" -H 'Host: smoke-test.example' http://127.0.0.1/
 # pipefail das Ergebnis fälschlich als Fehler meldet, obwohl grep fündig wurde.
 grep -q '<h1>200</h1>' <<<"$(curl -s -H 'Host: smoke-test.example' http://127.0.0.1/)" && echo "ok   Startseite" || fail "Startseite fehlt"
 expect 000 "unbekannter Host (444)" -H 'Host: nix.example' http://127.0.0.1/
+# HTTPS-Catch-all: Ein unbekannter Name (SNI) bekommt kein fremdes Zertifikat, schon der
+# Handshake scheitert (curl: Exit 35). Ein echter Host mit Zertifikat antwortet weiter.
+rc=0; curl -sk -o /dev/null --resolve unbekannt.invalid:443:127.0.0.1 https://unbekannt.invalid/ || rc=$?
+[ "$rc" = 35 ] && echo "ok   unbekannter Name auf 443: Handshake abgelehnt" || fail "unbekannter Name auf 443: curl-Exit $rc statt 35"
+for cert in /etc/letsencrypt/live/*/fullchain.pem; do
+	TLS_HOST=$(basename "$(dirname "$cert")")
+	[ -e "/etc/nginx/sites-enabled/$TLS_HOST.conf" ] || continue
+	got=$(curl -s -o /dev/null -w '%{http_code}' --resolve "$TLS_HOST:443:127.0.0.1" "https://$TLS_HOST/") || true
+	[ "$got" != 000 ] && echo "ok   $TLS_HOST auf 443 weiter erreichbar -> $got" || fail "$TLS_HOST auf 443 nicht erreichbar"
+	break
+done
 # ACME-Marker: Grundlage des Erreichbarkeitstests. Muss auch bei aktivem
 # Verzeichnisschutz ohne Anmeldung ausgeliefert werden, sonst kaeme Let's Encrypt nicht durch.
 vhost protect smoke-test.example on >/dev/null
@@ -255,6 +266,9 @@ if [ -f "$REALIP" ] && head -1 "$REALIP" | grep -q '^# generiert von vhost' && g
 	expect 000 "PROXY-Port $PP_HTTP ohne PROXY-Zeile" -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/t.php"
 	# Catch-all wie auf Port 80: unbekannte Hostnamen bekommen keine Antwort (444).
 	expect 000 "PROXY-Port $PP_HTTP, unbekannter Host" --haproxy-protocol -H 'Host: unbekannt.invalid' "http://127.0.0.1:$PP_HTTP/"
+	PP_HTTPS=$(awk '/^map \$server_port/ {m=1; next} m && $2 == "443;" {print $1; exit}' "$REALIP")
+	rc=0; curl -sk -o /dev/null --haproxy-protocol --resolve "unbekannt.invalid:$PP_HTTPS:127.0.0.1" "https://unbekannt.invalid:$PP_HTTPS/" || rc=$?
+	[ "$rc" = 35 ] && echo "ok   PROXY-Port $PP_HTTPS, unbekannter Name: Handshake abgelehnt" || fail "PROXY-Port $PP_HTTPS, unbekannter Name: curl-Exit $rc statt 35"
 	printf '<?php echo "PORT=", $_SERVER["SERVER_PORT"], " ADDR=", $_SERVER["REMOTE_ADDR"], "\\n"; ?>\n' > /var/www/smoke-php.example/web/pp.php
 	OUT=$(curl -s --haproxy-protocol --haproxy-clientip 203.0.113.9 -H 'Host: smoke-php.example' "http://127.0.0.1:$PP_HTTP/pp.php")
 	# PHP soll den öffentlichen Port sehen, sonst bauen Anwendungen Adressen mit ":8081".
