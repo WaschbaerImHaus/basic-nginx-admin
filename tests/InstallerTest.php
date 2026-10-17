@@ -11,7 +11,7 @@ declare(strict_types=1);
  * in bash ausgeführt – so wird echtes Verhalten geprüft, ohne etwas am System zu ändern.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 09:21
+ * @version Letzte Änderung: 2026-10-18 00:40
  */
 
 namespace Tests;
@@ -114,6 +114,18 @@ final class InstallerTest extends TestCase
 			. 'if ' . $condition . '; then echo ja; else echo nein; fi' . "\n";
 		[$out] = self::bash($script, $skip ? ['VHOST_ADMIN_SKIP_HONEYPOT_CHECK' => '1'] : []);
 		return trim($out) === 'ja';
+	}
+
+	/**
+	 * Dateien unter /proc melden die Größe 0 – "[ -s /proc/net/if_inet6 ]" war deshalb immer
+	 * falsch, und der Installer löschte bei jedem Lauf alle IPv6-Zeilen aus dem Catch-all
+	 * (gefunden 2026-10-18). Geprüft wird der Inhalt, wie in Config::systemHasIpv6().
+	 */
+	public function testIpv6CheckReadsTheContentNotTheSize(): void
+	{
+		$text = self::installer();
+		self::assertStringNotContainsString('-s /proc/net/if_inet6', $text);
+		self::assertStringContainsString('if ! grep -q . /proc/net/if_inet6 2>/dev/null; then', $text);
 	}
 
 	public function testNoLongerInstallsTheHoneypot(): void

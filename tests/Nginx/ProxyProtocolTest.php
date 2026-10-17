@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für die Einstellung PROXY-Protokoll (Wertobjekt ProxyProtocol).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-18 00:00
+ * @version Letzte Änderung: 2026-10-18 00:40
  */
 
 namespace Tests\Nginx;
@@ -73,6 +73,8 @@ final class ProxyProtocolTest extends TestCase
 			. "    listen 8444 ssl proxy_protocol default_server;\n"
 			. "    server_name _;\n"
 			. "    ssl_reject_handshake on;\n"
+			. "    ssl_session_cache shared:SSL:10m;\n"
+			. "    ssl_session_timeout 1d;\n"
 			. "    return 444;\n"
 			. "}\n";
 		self::assertSame($expected, $p->httpConfig());

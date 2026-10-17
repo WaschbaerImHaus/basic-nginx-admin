@@ -7,7 +7,7 @@
 # Mehrfach ausführbar (Update). Für einen Umzug zusätzlich /var/lib/vhost-admin,
 # /var/www und /etc/letsencrypt mitnehmen – die nginx-Configs erzeugt das Script neu.
 # Autor: Kurt Ingwer
-# Letzte Änderung: 2026-10-16 09:25
+# Letzte Änderung: 2026-10-18 00:40
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,7 +94,8 @@ echo "== nginx"
 install -d -m 750 -g www-data /etc/nginx/auth
 install -m 644 "$SRC/etc/nginx-admin.conf"   /etc/nginx/sites-available/vhost-admin.conf
 install -m 644 "$SRC/etc/nginx-default.conf" /etc/nginx/sites-available/00-default.conf
-if [ ! -s /proc/net/if_inet6 ]; then
+# Inhalt prüfen, nicht die Größe: Dateien unter /proc melden immer 0 Byte ("-s" war stets falsch).
+if ! grep -q . /proc/net/if_inet6 2>/dev/null; then
 	sed -i '/listen \[::/d' /etc/nginx/sites-available/vhost-admin.conf /etc/nginx/sites-available/00-default.conf
 fi
 ln -sfn /etc/nginx/sites-available/vhost-admin.conf /etc/nginx/sites-enabled/vhost-admin.conf

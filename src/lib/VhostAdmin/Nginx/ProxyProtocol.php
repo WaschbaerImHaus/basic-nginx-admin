@@ -19,7 +19,7 @@ declare(strict_types=1);
  * QUIC (UDP) kann kein PROXY-Protokoll und bleibt außen vor.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-18 00:00
+ * @version Letzte Änderung: 2026-10-18 00:40
  */
 
 namespace VhostAdmin\Nginx;
@@ -216,6 +216,10 @@ final class ProxyProtocol
 			. "    listen {$this->httpsPort} ssl proxy_protocol default_server;\n"
 			. "    server_name _;\n"
 			. "    ssl_reject_handshake on;\n"
+			// Sitzungs-Cache und -Dauer gelten vom default_server des Sockets für alle Hosts
+			// darauf; ohne sie fiele die TLS-Wiederaufnahme über den Tunnel weg.
+			. "    ssl_session_cache shared:SSL:10m;\n"
+			. "    ssl_session_timeout 1d;\n"
 			. "    return 444;\n"
 			. "}\n";
 	}

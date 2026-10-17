@@ -1,0 +1,1 @@
+2026-10-18 00:29 – Review (Fable) TLS-Catch-all: Sitzungs-Cache/-Dauer in beide Catch-alls (gelten vom default_server); Bug behoben: install.sh löschte IPv6-Zeilen immer ([ -s /proc/... ] ist stets falsch). 567 grün.

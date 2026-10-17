@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Tests für den Catch-all (src/etc/nginx-default.conf, installiert als 00-default.conf).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-18 00:00
+ * @version Letzte Änderung: 2026-10-18 00:40
  */
 
 namespace Tests\Nginx;
@@ -45,5 +45,17 @@ final class DefaultServerTest extends TestCase
 			self::assertStringContainsString("    $line\n", $text);
 		}
 		self::assertStringNotContainsString('ssl_certificate', $text, 'der Catch-all braucht und zeigt kein Zertifikat');
+	}
+
+	/**
+	 * Sitzungs-Cache und -Dauer nimmt OpenSSL vom default_server eines Sockets, nicht vom
+	 * per SNI gewählten Host (Review 2026-10-18, nachgemessen). Ohne diese Zeilen fiele die
+	 * Wiederaufnahme von TLS-Sitzungen für alle Hosts weg – Werte wie im ConfigRenderer.
+	 */
+	public function testCarriesTheSessionSettingsOfTheHosts(): void
+	{
+		$text = self::config();
+		self::assertStringContainsString("    ssl_session_cache shared:SSL:10m;\n", $text);
+		self::assertStringContainsString("    ssl_session_timeout 1d;\n", $text);
 	}
 }
