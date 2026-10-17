@@ -377,7 +377,7 @@ TXT;
 				$vhost = $this->service->load($arg(0, 'Name'));
 				$this->service->setHttp3($vhost, $on);
 				$this->out($on ? "HTTP/3 für {$vhost->name} an (wirkt mit HTTPS).\n"
-					: "HTTP/3 für {$vhost->name} aus (kein QUIC, kein Alt-Svc).\n");
+					: "HTTP/3 für {$vhost->name} aus (kein QUIC; gespeicherte h3-Hinweise der Browser werden gelöscht).\n");
 				return 0;
 
 			case 'subdir':

@@ -432,7 +432,7 @@ final class ApplicationTest extends TestCase
 		$this->runCli(['add', 'a.example']);
 		[$code, $out] = $this->runCli(['http3', 'a.example', 'off']);
 		self::assertSame(0, $code, $out);
-		self::assertSame("HTTP/3 für a.example aus (kein QUIC, kein Alt-Svc).\n", $out);
+		self::assertSame("HTTP/3 für a.example aus (kein QUIC; gespeicherte h3-Hinweise der Browser werden gelöscht).\n", $out);
 		self::assertFalse($this->repo->byName('a.example')->http3);
 
 		[$code, $out] = $this->runCli(['http3', 'a.example', 'on']);
