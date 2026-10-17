@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Passwörter kommen über stdin, nie als Argument (wären in "ps" sichtbar).
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 16:25
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin\Cli;
@@ -55,6 +55,7 @@ vhost – nginx-vHosts verwalten
                                          80/443 bleiben; "on" ohne Adresse = gespeicherte)
   vhost check-acme [name]
   vhost www <name> bare|www             (wohin umgeleitet wird; nur Hauptdomains)
+  vhost http3 <name> on|off             (HTTP/3 anbieten, Standard an; aus = nur HTTP/1.1 und 2)
   vhost subdir <name> [unterordner]     (leer = Docroot ist web/; Inhalt zieht mit)
   vhost show <name>                     (fertige Konfiguration als ein Text)
   vhost conf-show <name>
@@ -369,6 +370,14 @@ TXT;
 							? "Achtung: Das Zertifikat deckt \"$alias\" noch nicht ab. "
 								. "Einmal \"vhost ssl {$updated->name} on\" holt eines für beide Namen.\n"
 							: ''));
+				return 0;
+
+			case 'http3':
+				$on = $onOff($arg(1, 'on|off'));
+				$vhost = $this->service->load($arg(0, 'Name'));
+				$this->service->setHttp3($vhost, $on);
+				$this->out($on ? "HTTP/3 für {$vhost->name} an (wirkt mit HTTPS).\n"
+					: "HTTP/3 für {$vhost->name} aus (kein QUIC, kein Alt-Svc).\n");
 				return 0;
 
 			case 'subdir':

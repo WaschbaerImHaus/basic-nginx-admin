@@ -1,1 +1,2 @@
 2026-10-17 23:38 – mfsvr.de wieder erreichbar: ufw verwarf die Tunnelports 8081/8444 (Tunnelserver schon auf PROXY umgestellt). Freigabe nur für 10.200.0.1 gesetzt; README, BUGS.md, CLAUDE.md ergänzt.
+2026-10-17 23:44 – HTTP/3 je Host abschaltbar (vhost http3 <name> on|off, Spalte vhosts.http3, Standard an). Nutzerwunsch: nur mfsvr.de (Honigtopf) ohne HTTP/3, damit jede Anfrage über das PROXY-Protokoll mit echter Adresse ankommt. 7 neue Tests, 562 grün.

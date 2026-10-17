@@ -9,6 +9,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
 - Ende-zu-Ende-Prüfung der Installation: `sudo ./debugging/smoke-test.sh`
 - localhost-Host anlegen: `sudo vhost add-local <port> [--subdir DIR]` (die Oberfläche kann das absichtlich nicht)
 - Snippet setzen, Rechte reparieren, alte vHosts nachziehen: `sudo vhost conf <name>` (stdin), `sudo vhost fix-permissions [name]`, `sudo vhost migrate-layout`
+- HTTP/3 je Host: `sudo vhost http3 <name> on|off` (Standard an, Spalte `vhosts.http3`; aus für mfsvr.de seit 2026-10-17, damit der Honigtopf jede Anfrage mit echter Adresse über das PROXY-Protokoll bekommt – QUIC kann es nicht)
 - www-Umleitung: `sudo vhost www <name> bare|www`, voreingestellt `bare`. Kein „aus“, und **nur für Hauptdomains** (`DomainName::isMainDomain()`). Es gibt **nie** ein Verzeichnis `www.<domain>`.
 - Der Nebenname kommt nur ins Zertifikat, **wenn er erreichbar ist**: certbot prüft jeden Namen einzeln, und einer ohne DNS-Eintrag lässt den ganzen Antrag scheitern – auch für den Hauptnamen. Diese Prüfung nie weglassen, sie hängt direkt an der Voreinstellung.
 - Docroot-Unterordner ändern: `sudo vhost subdir <name> [unterordner]` – der Inhalt zieht mit, `.well-known/` bleibt unter `web/` (der ACME-Pfad hängt an `web/`, nicht am Docroot).
@@ -30,7 +31,7 @@ nginx-vHost-Verwaltung für Ubuntu-LXCs: PHP 8.5/SQLite-Oberfläche auf 127.0.0.
   - `Cli\Application` CLI (u. a. `conf`, `fix-permissions`, `migrate-layout`) · `Web\AdminPage` Oberfläche · `Web\CommandRunner` ruft das CLI per `proc_open`/sudo aus der Oberfläche auf
 - `src/public/index.php` – Template der Oberfläche (Docroot `/var/www/localhost-8080/web`)
 - `src/etc/` – nginx-, sudoers-, certbot-, logrotate-Dateien; `src/install.sh` – eigentlicher Installer (`install.sh` im Wurzelverzeichnis ist nur ein Wrapper darauf)
-- `tests/` – PHPUnit (555 Tests, Stand 2026-10-16); `tests/Support/` – TempDir, FakeReloader, FakeCertbot u. a.; `tests/InstallerTest.php` prüft, dass der Installer den Honigtopf weder installiert noch seine Daten anfasst
+- `tests/` – PHPUnit (562 Tests, Stand 2026-10-17); `tests/Support/` – TempDir, FakeReloader, FakeCertbot u. a.; `tests/InstallerTest.php` prüft, dass der Installer den Honigtopf weder installiert noch seine Daten anfasst
 - Installationsziel: `/opt/vhost-admin` (Code), `/usr/local/sbin/vhost`, `/var/lib/vhost-admin/vhosts.sqlite`, `/etc/nginx/auth`
 
 ## Regeln (zusätzlich zur globalen CLAUDE.md)

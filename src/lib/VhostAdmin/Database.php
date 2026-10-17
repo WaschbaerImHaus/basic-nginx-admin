@@ -8,7 +8,7 @@ declare(strict_types=1);
  * aktiv, damit Benutzer und IPs beim Löschen eines vHosts mitgelöscht werden.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-27 15:00
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin;
@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS vhosts (
 	php        INTEGER NOT NULL DEFAULT 0,
 	health_token TEXT,
 	www_mode   TEXT NOT NULL DEFAULT 'bare',
+	http3      INTEGER NOT NULL DEFAULT 1,
 	deleted_at TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -108,6 +109,10 @@ SQL);
 			// Eine frühere Fassung kannte "none" (keine Umleitung). Das ist keine
 			// Einstellung mehr: Einer der beiden Namen liefert aus, der andere leitet dorthin.
 			$this->pdo()->exec("UPDATE vhosts SET www_mode = 'bare' WHERE www_mode NOT IN ('bare', 'www')");
+		}
+		if (!in_array('http3', $columns, true)) {
+			// HTTP/3 je Host abschaltbar (seit 2026-10-17); bestehende Hosts behalten es an.
+			$this->pdo()->exec('ALTER TABLE vhosts ADD COLUMN http3 INTEGER NOT NULL DEFAULT 1');
 		}
 		if (!in_array('deleted_at', $columns, true)) {
 			// Zeitpunkt, zu dem das Entfernen angestossen wurde; bis zum Ablauf der

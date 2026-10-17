@@ -399,9 +399,17 @@ sudo ufw allow proto tcp from 10.200.0.1 to any port 8444 comment 'PROXY-Tunnel 
 der in `set_real_ip_from` eingetragenen Adresse kommen. HTTP/3 (UDP 443) kann kein
 PROXY-Protokoll: Bleibt dafür die alte Weiterleitung, kommen QUIC-Anfragen weiter mit der
 Tunneladresse an – und weil der `Alt-Svc`-Kopf HTTP/3 auf 443 ankündigt, wechseln moderne Browser
-nach dem ersten Aufruf genau dorthin. **Empfehlung:** die UDP-443-Weiterleitung auf dem
-Tunnelserver entfernen (die Browser bleiben dann bei HTTP/2 über den Tunnel) und die Tunneladresse
-nie als IP-Freigabe eintragen – sonst wäre jede QUIC-Anfrage freigegeben.
+nach dem ersten Aufruf genau dorthin. **Zwei Wege:** die UDP-443-Weiterleitung auf dem
+Tunnelserver entfernen (die Browser bleiben dann überall bei HTTP/2 über den Tunnel) oder HTTP/3 nur
+für die Hosts abschalten, die die echte Adresse brauchen:
+
+```
+sudo vhost http3 <name> off     # kein QUIC, kein Alt-Svc für diesen Host; wieder an mit "on"
+```
+
+Ohne `Alt-Svc` versucht ein Browser HTTP/3 gar nicht erst; ein noch gespeicherter Hinweis läuft
+nach höchstens einem Tag (`ma=86400`) ab, bis dahin fällt der Browser selbst auf HTTP/2 zurück.
+Die Tunneladresse nie als IP-Freigabe eintragen – sonst wäre jede QUIC-Anfrage freigegeben.
 
 Prüfen auf dem Rechner: `curl --haproxy-protocol -H 'Host: <domain>' http://127.0.0.1:8081/`
 (ohne `--haproxy-protocol` bricht die Verbindung ab – so soll es sein). Der Smoke-Test prüft

@@ -9,7 +9,7 @@ declare(strict_types=1);
  * certbot auch bei aktivem Verzeichnisschutz durchkommt.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 16:05
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin\Nginx;
@@ -270,15 +270,18 @@ final class ConfigRenderer
 
 		$listen443 = "    listen 443 ssl;\n" . ($this->config->ipv6 ? "    listen [::]:443 ssl;\n" : '')
 			. $proxy->listenHttps()
-			. "    http2 on;\n"
+			. "    http2 on;\n";
+		if ($v->http3) {
 			// HTTP/3 braucht QUIC auf demselben Port; dieses nginx ist mit
 			// --with-http_v3_module gebaut. Der Alt-Svc-Header sagt dem Browser, dass er
-			// die Folgeanfragen über h3 stellen darf.
-			. "    listen 443 quic;\n" . ($this->config->ipv6 ? "    listen [::]:443 quic;\n" : '')
-			. "    http3 on;\n"
-			// "always": ohne den Zusatz sendet nginx die Kopfzeile nur bei 2xx/3xx – auf
-			// einem Host mit Verzeichnisschutz (401) würde HTTP/3 also nie angekündigt.
-			. "    add_header Alt-Svc 'h3=\":443\"; ma=86400' always;\n";
+			// die Folgeanfragen über h3 stellen darf. Je Host abschaltbar (vhost http3):
+			// ohne Alt-Svc versucht kein Browser HTTP/3.
+			$listen443 .= "    listen 443 quic;\n" . ($this->config->ipv6 ? "    listen [::]:443 quic;\n" : '')
+				. "    http3 on;\n"
+				// "always": ohne den Zusatz sendet nginx die Kopfzeile nur bei 2xx/3xx – auf
+				// einem Host mit Verzeichnisschutz (401) würde HTTP/3 also nie angekündigt.
+				. "    add_header Alt-Svc 'h3=\":443\"; ma=86400' always;\n";
+		}
 		// Bewusst direkt nach /etc/letsencrypt/live und nicht über die Symlinks in cert/:
 		// eine defekte Symlink-Kette würde nginx am Start hindern (siehe
 		// VhostService::linkCertificates(), cert/ ist reine Sichtbarkeit).

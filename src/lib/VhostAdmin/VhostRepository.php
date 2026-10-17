@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Einziger Ort mit SQL. Liefert immer Vhost-Objekte, nie rohe Zeilen.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 20:20
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin;
@@ -125,6 +125,14 @@ final class VhostRepository
 	public function setPhp(int $id, bool $on): void
 	{
 		$this->db->pdo()->prepare('UPDATE vhosts SET php = ? WHERE id = ?')->execute([(int)$on, $id]);
+	}
+
+	/**
+	 * HTTP/3 für den Host an- oder abschalten.
+	 */
+	public function setHttp3(int $id, bool $on): void
+	{
+		$this->db->pdo()->prepare('UPDATE vhosts SET http3 = ? WHERE id = ?')->execute([(int)$on, $id]);
 	}
 
 	/**

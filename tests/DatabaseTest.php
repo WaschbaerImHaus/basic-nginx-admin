@@ -78,6 +78,27 @@ final class DatabaseTest extends TestCase
 	}
 
 	/**
+	 * Bestandsdatenbanken bekommen die Spalte "http3" nachgereicht; bestehende Hosts
+	 * behalten HTTP/3 an, so wie sie bisher erzeugt wurden.
+	 */
+	public function testInitSchemaAddsHttp3ColumnToOlderDatabase(): void
+	{
+		$db = new Database(Config::fromArray(['dbPath' => $this->dir . '/alt.sqlite']));
+		$db->pdo()->exec(
+			'CREATE TABLE vhosts (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, '
+			. "kind TEXT NOT NULL CHECK (kind IN ('domain', 'localhost')), port INTEGER, "
+			. 'subdir TEXT, protect INTEGER NOT NULL DEFAULT 1, ssl INTEGER NOT NULL DEFAULT 0, '
+			. "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+		);
+		$db->pdo()->exec("INSERT INTO vhosts (name, kind) VALUES ('alt.de', 'domain')");
+
+		$db->initSchema();
+
+		$row = $db->pdo()->query("SELECT http3 FROM vhosts WHERE name = 'alt.de'")->fetch();
+		self::assertSame(1, (int)$row['http3'], 'bestehende Hosts behalten HTTP/3');
+	}
+
+	/**
 	 * Bestandsdatenbanken bekommen die Spalte für den geschützten Pfad nachgereicht;
 	 * bestehende Hosts bleiben dabei ohne Pfad, also für die ganze Seite geschützt.
 	 */

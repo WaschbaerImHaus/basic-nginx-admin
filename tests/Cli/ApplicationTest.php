@@ -425,6 +425,27 @@ final class ApplicationTest extends TestCase
 	}
 
 	/**
+	 * vhost http3 <name> on|off – schaltet HTTP/3 für einen Host ab oder wieder an.
+	 */
+	public function testHttp3PerHost(): void
+	{
+		$this->runCli(['add', 'a.example']);
+		[$code, $out] = $this->runCli(['http3', 'a.example', 'off']);
+		self::assertSame(0, $code, $out);
+		self::assertSame("HTTP/3 für a.example aus (kein QUIC, kein Alt-Svc).\n", $out);
+		self::assertFalse($this->repo->byName('a.example')->http3);
+
+		[$code, $out] = $this->runCli(['http3', 'a.example', 'on']);
+		self::assertSame(0, $code);
+		self::assertSame("HTTP/3 für a.example an (wirkt mit HTTPS).\n", $out);
+		self::assertTrue($this->repo->byName('a.example')->http3);
+
+		[$code, , $err] = $this->runCli(['http3', 'a.example', 'vielleicht']);
+		self::assertSame(1, $code);
+		self::assertNotSame('', $err);
+	}
+
+	/**
 	 * vhost set proxy_protocol on <ip[,ip]> [http https] | off – Standardports 8081/8444,
 	 * "on" ohne Adresse nimmt die gespeicherte.
 	 */

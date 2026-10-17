@@ -16,7 +16,7 @@ declare(strict_types=1);
  * führen, egal wie sie entstanden ist.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-09-20 20:20
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin;
@@ -49,6 +49,9 @@ final class Vhost
 	 * @param ?string   $deletedAt Zeitpunkt (UTC), zu dem das Entfernen angestossen wurde;
 	 *                             bis zum Ablauf der Schonfrist ist der vHost nur gesperrt
 	 * @param ?string   $createdAt Zeitstempel aus der Datenbank (UTC)
+	 * @param bool      $http3     HTTP/3 (QUIC + Alt-Svc) anbieten, Standard an; wirkt nur mit HTTPS.
+	 *                             Aus z. B. für den Honigtopf: QUIC kann kein PROXY-Protokoll, über
+	 *                             HTTP/3 käme jede Anfrage nur mit der Tunneladresse an.
 	 */
 	public function __construct(
 		public readonly ?int $id,
@@ -63,6 +66,7 @@ final class Vhost
 		public readonly ?string $healthToken = null,
 		public readonly ?string $deletedAt = null,
 		public readonly ?string $createdAt = null,
+		public readonly bool $http3 = true,
 	) {
 		$this->assertConsistent();
 	}
@@ -149,6 +153,8 @@ final class Vhost
 			($row['health_token'] ?? null) === null || $row['health_token'] === '' ? null : (string)$row['health_token'],
 			($row['deleted_at'] ?? null) === null || $row['deleted_at'] === '' ? null : (string)$row['deleted_at'],
 			$row['created_at'] === null ? null : (string)$row['created_at'],
+			// Ältere Zeilen ohne Spalte: an, so wie bisher jeder HTTPS-Host erzeugt wurde.
+			(bool)($row['http3'] ?? true),
 		);
 	}
 

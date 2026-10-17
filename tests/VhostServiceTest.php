@@ -1149,6 +1149,55 @@ final class VhostServiceTest extends TestCase
 		$this->service->setWwwMode($v, 'bare');
 	}
 
+	// ------------------------------------------------------------------
+	// HTTP/3 je Host
+	// ------------------------------------------------------------------
+
+	public function testSetHttp3WritesTheConfigAndIsIdempotent(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->repo->setSsl((int)$v->id, true);
+		$conf = $this->config->sitesAvailable . '/um.example.conf';
+
+		$this->service->setHttp3($this->repo->byName('um.example'), false);
+		self::assertFalse($this->repo->byName('um.example')->http3);
+		self::assertStringNotContainsString('quic', (string)file_get_contents($conf));
+
+		$before = $this->reloader->calls;
+		$this->service->setHttp3($this->repo->byName('um.example'), false);
+		self::assertSame($before, $this->reloader->calls, 'unveränderte Einstellung darf nichts tun');
+
+		$this->service->setHttp3($this->repo->byName('um.example'), true);
+		self::assertTrue($this->repo->byName('um.example')->http3);
+		self::assertStringContainsString('listen 443 quic;', (string)file_get_contents($conf));
+	}
+
+	/**
+	 * Scheitert der Reload, bleibt die Einstellung, wie sie war.
+	 */
+	public function testSetHttp3IsRolledBackWhenTheReloadFails(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->repo->setSsl((int)$v->id, true);
+		$this->service->render($this->repo->byName('um.example'));
+		$this->reloader->failWith = 'nginx -t fehlgeschlagen';
+		try {
+			$this->service->setHttp3($this->repo->byName('um.example'), false);
+			self::fail('Reload-Fehler muss ankommen');
+		} catch (\RuntimeException) {
+		}
+		$this->reloader->failWith = null;
+		self::assertTrue($this->repo->byName('um.example')->http3);
+		self::assertStringContainsString('listen 443 quic;', (string)file_get_contents($this->config->sitesAvailable . '/um.example.conf'));
+	}
+
+	public function testSetHttp3RefusedForLocalhostHosts(): void
+	{
+		$v = $this->service->createLocal(Port::fromString('3011'), null);
+		$this->expectException(\RuntimeException::class);
+		$this->service->setHttp3($v, false);
+	}
+
 	/**
 	 * Wird umgeleitet, muss certbot den Nebennamen mitbeantragen – sonst gibt es einen
 	 * Zertifikatsfehler, bevor die Umleitung greift.

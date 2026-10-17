@@ -9,7 +9,7 @@ declare(strict_types=1);
  * Reload. Besitzerwechsel geschehen nur als root (im CLI), Tests laufen ohne.
  *
  * @author Kurt Ingwer
- * @version Letzte Änderung: 2026-10-16 16:15
+ * @version Letzte Änderung: 2026-10-17 23:45
  */
 
 namespace VhostAdmin;
@@ -793,6 +793,29 @@ final class VhostService
 	}
 
 	/**
+	 * HTTP/3 für einen Host an- oder abschalten (Standard: an).
+	 *
+	 * QUIC läuft über UDP und kann kein PROXY-Protokoll. Kommt der Verkehr über einen
+	 * Tunnel, sieht nginx bei HTTP/3 nur die Tunneladresse. Ohne quic-listen und ohne
+	 * Alt-Svc bleiben Browser bei HTTP/2 über TCP – dort kommt die echte Adresse an.
+	 *
+	 * @throws \RuntimeException bei localhost-Hosts (kein TLS, also kein QUIC)
+	 */
+	public function setHttp3(Vhost $vhost, bool $on): void
+	{
+		if ($vhost->isLocal()) {
+			throw new \RuntimeException("\"{$vhost->name}\" ist ein localhost-Host – dort gibt es kein HTTPS und damit kein HTTP/3.");
+		}
+		if ($on === $vhost->http3) {
+			return;
+		}
+		$this->repository->transaction(function () use ($vhost, $on): void {
+			$this->repository->setHttp3((int)$vhost->id, $on);
+			$this->render($this->repository->byId((int)$vhost->id));
+		});
+	}
+
+	/**
 	 * Deckt das vorhandene Zertifikat den Nebennamen ab?
 	 *
 	 * Prüft die Renewal-Konfiguration von certbot, nicht das Zertifikat selbst: dort
@@ -882,7 +905,7 @@ final class VhostService
 		$candidate = new Vhost(
 			$vhost->id, $vhost->name, $vhost->kind, $vhost->port, $new,
 			$vhost->protect, $vhost->ssl, $vhost->php, $vhost->wwwMode,
-			$vhost->healthToken, $vhost->deletedAt, $vhost->createdAt
+			$vhost->healthToken, $vhost->deletedAt, $vhost->createdAt, $vhost->http3
 		);
 		$newDocroot = $this->layout->docroot($candidate);
 

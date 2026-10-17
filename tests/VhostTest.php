@@ -16,6 +16,18 @@ use VhostAdmin\VhostKind;
 
 final class VhostTest extends TestCase
 {
+	/**
+	 * HTTP/3 ist ohne Angabe an; ältere Zeilen ohne Spalte "http3" bleiben dabei.
+	 */
+	public function testHttp3DefaultsToOnAndIsReadFromTheRow(): void
+	{
+		$row = ['id' => 1, 'name' => 'a.example', 'kind' => 'domain', 'port' => null, 'subdir' => null,
+			'protect' => 1, 'ssl' => 1, 'created_at' => null];
+		self::assertTrue(Vhost::fromRow($row)->http3);
+		self::assertFalse(Vhost::fromRow($row + ['http3' => 0])->http3);
+		self::assertTrue(Vhost::fromRow($row + ['http3' => 1])->http3);
+	}
+
 	public function testFromRowConvertsTypes(): void
 	{
 		$v = Vhost::fromRow([

@@ -42,6 +42,7 @@ lokal `~/honeypot`); seine Features – implementierte wie offene – stehen dor
 - Installer `install.sh` (idempotent), Build-Paket `build/vhost-admin.tar.gz`
 - Verzeichnisstruktur je vHost: `web/` (Docroot, mit Unterordner `web/<subdir>`), `conf/` (Snippet über die Oberfläche mit Positivliste geprüft), `cert/` (Symlinks auf `/etc/letsencrypt/live/<domain>/`), `private/` (nicht ausgeliefert), `logs/` (`access.log`/`error.log` je vHost, Rotation täglich/14 Tage); `VhostLayout` als einzige Quelle für Pfade und Soll-Rechte
 - `vhost migrate-layout` bringt bestehende vHosts auf die neue Struktur (Zwischenordner `.web-migrating`, bricht bei Kollisionen ab, keine Datenverluste bei Abbruch); `vhost fix-permissions [name]` setzt die Soll-Rechte laut `VhostLayout` erneut
+- **HTTP/3 je Host abschaltbar** (2026-10-17, Nutzerwunsch): `vhost http3 <name> on|off`, Standard an (Spalte `vhosts.http3`). Aus = kein `listen 443 quic`, kein `http3 on`, kein `Alt-Svc` – für den Honigtopf, der die echte Client-Adresse über das PROXY-Protokoll braucht (QUIC kann es nicht)
 
 ## Offen
 

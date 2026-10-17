@@ -341,6 +341,22 @@ final class ConfigRendererTest extends TestCase
 	}
 
 	/**
+	 * HTTP/3 je Host abschaltbar (Nutzerwunsch 2026-10-17): QUIC kann kein PROXY-Protokoll,
+	 * auf dem Honigtopf soll aber jede Anfrage mit echter Client-Adresse ankommen. Ohne
+	 * Alt-Svc wechselt kein Browser auf HTTP/3 – auch nicht über den www-Block.
+	 */
+	public function testHttp3CanBeSwitchedOffPerHost(): void
+	{
+		$v = new Vhost(1, 'example.com', VhostKind::Domain, null, null, true, true, false, 'bare', null, null, null, false);
+		$out = $this->renderer()->serverConfig($v);
+		self::assertStringNotContainsString('quic', $out);
+		self::assertStringNotContainsString('http3', $out);
+		self::assertStringNotContainsString('Alt-Svc', $out);
+		self::assertSame(2, substr_count($out, "    listen 443 ssl;\n"), 'Haupt- und www-Block bleiben auf HTTPS');
+		self::assertSame(2, substr_count($out, "    http2 on;\n"));
+	}
+
+	/**
 	 * Die Zertifikate kommen direkt aus /etc/letsencrypt/live, NICHT über die Symlinks
 	 * in cert/: eine defekte Symlink-Kette würde nginx am Start hindern. cert/ ist
 	 * reine Sichtbarkeit (siehe VhostService::linkCertificates()).
