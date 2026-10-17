@@ -1,0 +1,1 @@
+2026-10-17 23:38 – mfsvr.de wieder erreichbar: ufw verwarf die Tunnelports 8081/8444 (Tunnelserver schon auf PROXY umgestellt). Freigabe nur für 10.200.0.1 gesetzt; README, BUGS.md, CLAUDE.md ergänzt.

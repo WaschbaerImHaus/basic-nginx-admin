@@ -386,6 +386,15 @@ stream {
 }
 ```
 
+**Firewall auf dem Rechner:** Die Tunnelports müssen für die Tunneladresse offen sein, sonst
+verwirft z. B. ufw die Verbindungen stumm und die Seite ist von außen nicht erreichbar – vhost-admin
+ändert keine Firewall:
+
+```
+sudo ufw allow proto tcp from 10.200.0.1 to any port 8081 comment 'PROXY-Tunnel HTTP'
+sudo ufw allow proto tcp from 10.200.0.1 to any port 8444 comment 'PROXY-Tunnel HTTPS'
+```
+
 `<LXC-Adresse>` ist die Adresse, auf die heute die DNAT-Regel zeigt; die Verbindung muss von
 der in `set_real_ip_from` eingetragenen Adresse kommen. HTTP/3 (UDP 443) kann kein
 PROXY-Protokoll: Bleibt dafür die alte Weiterleitung, kommen QUIC-Anfragen weiter mit der
