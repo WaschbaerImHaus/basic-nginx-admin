@@ -1191,6 +1191,25 @@ final class VhostServiceTest extends TestCase
 		self::assertStringContainsString('listen 443 quic;', (string)file_get_contents($this->config->sitesAvailable . '/um.example.conf'));
 	}
 
+	/**
+	 * Andere Aktionen schreiben den Host neu – dabei darf HTTP/3 nicht wieder angehen.
+	 */
+	public function testOtherActionsKeepHttp3Off(): void
+	{
+		$v = $this->service->createDomain(DomainName::fromString('um.example'), null);
+		$this->repo->setSsl((int)$v->id, true);
+		$this->service->setHttp3($this->repo->byName('um.example'), false);
+		$conf = $this->config->sitesAvailable . '/um.example.conf';
+
+		$this->service->setWwwMode($this->repo->byName('um.example'), 'www');
+		self::assertStringNotContainsString('quic', (string)file_get_contents($conf));
+		$this->service->setSubdirectory($this->repo->byName('um.example'), SubDirectory::fromString('public'));
+		self::assertStringNotContainsString('quic', (string)file_get_contents($conf));
+		$this->service->renderAll();
+		self::assertStringNotContainsString('quic', (string)file_get_contents($conf));
+		self::assertFalse($this->repo->byName('um.example')->http3);
+	}
+
 	public function testSetHttp3RefusedForLocalhostHosts(): void
 	{
 		$v = $this->service->createLocal(Port::fromString('3011'), null);

@@ -407,8 +407,8 @@ für die Hosts abschalten, die die echte Adresse brauchen:
 sudo vhost http3 <name> off     # kein QUIC, kein Alt-Svc für diesen Host; wieder an mit "on"
 ```
 
-Ohne `Alt-Svc` versucht ein Browser HTTP/3 gar nicht erst; ein noch gespeicherter Hinweis läuft
-nach höchstens einem Tag (`ma=86400`) ab, bis dahin fällt der Browser selbst auf HTTP/2 zurück.
+Ohne h3-Ankündigung versucht ein Browser HTTP/3 gar nicht erst. Ein noch gespeicherter Hinweis
+wird mit der ersten Antwort über TCP gelöscht (`Alt-Svc: clear`).
 Die Tunneladresse nie als IP-Freigabe eintragen – sonst wäre jede QUIC-Anfrage freigegeben.
 
 Prüfen auf dem Rechner: `curl --haproxy-protocol -H 'Host: <domain>' http://127.0.0.1:8081/`
@@ -436,6 +436,7 @@ sudo vhost php <name> on|off                                  # eigener FPM-Pool
 sudo vhost check-acme [name]                                  # Erreichbarkeit pruefen
 sudo vhost ssl <name> on|off
 sudo vhost cert-extend <name>                                 # www.<domain> ins bestehende Zertifikat nachtragen
+sudo vhost http3 <name> on|off                                # HTTP/3 anbieten (Standard an)
 sudo vhost set le_email <adresse>
 sudo vhost set hsts on|off                                   # HSTS wirkt im Browser nach
 sudo vhost set proxy_protocol on <ip[,ip]> [http https] | off # Tunnel mit PROXY-Protokoll (8081/8444)

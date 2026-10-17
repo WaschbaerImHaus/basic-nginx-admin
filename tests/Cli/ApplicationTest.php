@@ -443,6 +443,10 @@ final class ApplicationTest extends TestCase
 		[$code, , $err] = $this->runCli(['http3', 'a.example', 'vielleicht']);
 		self::assertSame(1, $code);
 		self::assertNotSame('', $err);
+
+		[$code, , $err] = $this->runCli(['http3', 'gibtsnicht.example', 'off']);
+		self::assertSame(1, $code);
+		self::assertNotSame('', $err);
 	}
 
 	/**

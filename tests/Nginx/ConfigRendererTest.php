@@ -343,7 +343,7 @@ final class ConfigRendererTest extends TestCase
 	/**
 	 * HTTP/3 je Host abschaltbar (Nutzerwunsch 2026-10-17): QUIC kann kein PROXY-Protokoll,
 	 * auf dem Honigtopf soll aber jede Anfrage mit echter Client-Adresse ankommen. Ohne
-	 * Alt-Svc wechselt kein Browser auf HTTP/3 – auch nicht über den www-Block.
+	 * h3-Ankündigung wechselt kein Browser auf HTTP/3 – auch nicht über den www-Block.
 	 */
 	public function testHttp3CanBeSwitchedOffPerHost(): void
 	{
@@ -351,7 +351,9 @@ final class ConfigRendererTest extends TestCase
 		$out = $this->renderer()->serverConfig($v);
 		self::assertStringNotContainsString('quic', $out);
 		self::assertStringNotContainsString('http3', $out);
-		self::assertStringNotContainsString('Alt-Svc', $out);
+		self::assertStringNotContainsString('h3=', $out);
+		// Ein gespeicherter h3-Hinweis wird gelöscht – in beiden 443-Blöcken.
+		self::assertSame(2, substr_count($out, "    add_header Alt-Svc 'clear' always;\n"));
 		self::assertSame(2, substr_count($out, "    listen 443 ssl;\n"), 'Haupt- und www-Block bleiben auf HTTPS');
 		self::assertSame(2, substr_count($out, "    http2 on;\n"));
 	}

@@ -281,6 +281,11 @@ final class ConfigRenderer
 				// "always": ohne den Zusatz sendet nginx die Kopfzeile nur bei 2xx/3xx – auf
 				// einem Host mit Verzeichnisschutz (401) würde HTTP/3 also nie angekündigt.
 				. "    add_header Alt-Svc 'h3=\":443\"; ma=86400' always;\n";
+		} else {
+			// "clear" (RFC 7838 Abschnitt 3) löscht einen noch gespeicherten h3-Hinweis schon mit
+			// der ersten Antwort über TCP – sonst versucht der Browser bis zu einen Tag lang
+			// immer wieder QUIC und landet dabei beim Zertifikat eines anderen Hosts.
+			$listen443 .= "    add_header Alt-Svc 'clear' always;\n";
 		}
 		// Bewusst direkt nach /etc/letsencrypt/live und nicht über die Symlinks in cert/:
 		// eine defekte Symlink-Kette würde nginx am Start hindern (siehe
